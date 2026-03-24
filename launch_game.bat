@@ -1,0 +1,3 @@
+@echo off
+echo Running NewGame01...
+"%~dp0godot\Godot_v4.6.1-stable_win64.exe" --path "%~dp0"
