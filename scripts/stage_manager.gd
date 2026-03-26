@@ -77,11 +77,18 @@ var ideal_display_radius: float = 0.0   # 理想形描画用。GUIDE_USE_FIXED_S
 var ideal_display_radius_2: float = 0.0  # two_circles 用
 
 
-func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2]) -> void:
+func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
 	current_stage = idx
 	ideal_outline_points.clear()
-	var stages: Array = StageData.get_stages()
-	var cfg: Dictionary = stages[idx]
+	var cfg: Dictionary
+	if cfg_override.is_empty():
+		var stages: Array = StageDebugOverrides.get_effective_stages()
+		if idx < 0 or idx >= stages.size():
+			push_error("StageManager: 無効なステージ index %d" % idx)
+			return
+		cfg = stages[idx]
+	else:
+		cfg = cfg_override
 	stage_type = cfg.get("type", "circle")
 	min_radius = cfg["min_radius"]
 	max_radius = cfg["max_radius"]
@@ -125,6 +132,9 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 		"heptagram_silhouette":
 			_generate_heptagram_silhouette_polygon_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
+		_:
+			push_error("StageManager: 未対応の type '%s'" % stage_type)
+			return
 
 	group1_cleared = false
 	group2_cleared = false
@@ -640,6 +650,32 @@ func _build_cat_face_outline(verts: Array, arc_ctrls: Dictionary) -> Array:
 		else:
 			result.append(p2)
 	return result
+
+
+func get_normalized_outline_for_icon_debug(type_str: String) -> Array:
+	"""デバッグUIアイコン用。理想輪郭を start_stage 時と同じ正規化（周長重心＋max_d）で返す。"""
+	var verts: Array = []
+	var arc_ctrls: Dictionary = {}
+	match type_str:
+		"fish":
+			verts = get_fish_polygon_vertices()
+			arc_ctrls = get_fish_arc_controls()
+		"cat_face":
+			verts = get_cat_face_polygon_vertices()
+			arc_ctrls = get_cat_face_arc_controls()
+		_:
+			return []
+	if verts.is_empty():
+		return []
+	var outline: Array = _build_cat_face_outline(verts, arc_ctrls)
+	var c := _perimeter_centroid(outline)
+	var max_d: float = 0.001
+	for p in outline:
+		max_d = maxf(max_d, ((p as Vector2) - c).length())
+	var out: Array = []
+	for p in outline:
+		out.append(((p as Vector2) - c) / max_d)
+	return out
 
 
 func _build_circle_outline(samples: int = 32) -> Array:

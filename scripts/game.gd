@@ -138,6 +138,32 @@ var rules_demo_radius: float = 90.0
 var rules_confirm_kind: String = ""
 var rules_confirm_index: int = 0  # 0=はい 1=いいえ
 
+# --- Stage debug（editor / debug export のみ入口。F2）---
+const STAGE_DEBUG_ROW_H: float = 80.0
+const STAGE_DEBUG_HEADER_H: float = 64.0
+# タイトル・ガイド文言の下からリスト行を描画（重なり防止）
+const STAGE_DEBUG_LIST_TOP_Y: float = 172.0
+# 2カラム: 左リスト / 右エディタ。下端余白のみ（旧ボトムパネル廃止）
+const STAGE_DEBUG_CONTENT_BOTTOM_MARGIN: float = 16.0
+const STAGE_DEBUG_LEFT_COL_RATIO: float = 0.40
+const STAGE_DEBUG_TOP_BTN_Y: float = 32.0
+const STAGE_DEBUG_ACTION_BTN_H: float = 30.0
+const STAGE_DEBUG_ACTION_BTN_GAP: float = 8.0
+const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
+	"type", "num_points", "min_radius", "max_radius", "variance", "zigzag",
+	"display_rate_min_pct", "clear_pct", "group_sizes",
+]
+var stage_debug_scroll: float = 0.0
+var stage_debug_selected: int = 0
+var stage_debug_pending: Dictionary = {}  # idx -> partial Dictionary
+var stage_debug_field_buffers: Dictionary = {}  # field_key -> String（選択行の編集用）
+var stage_debug_field_focus_idx: int = -1  # STAGE_DEBUG_FIELD_KEYS のインデックス、-1=なし
+var stage_debug_edit_buffer: String = ""
+var stage_debug_last_error: String = ""
+var debug_stage_test_mode: bool = false
+var debug_stage_test_seed: int = 0
+var input_recorder: DebugInputRecorder
+
 # --- Pause Menu ---
 var pause_active: bool = false
 var pause_index: int = 0          # 0=閉じる, 1=やりなおし, 2=タイトルへ戻る
@@ -617,6 +643,8 @@ func _input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_K:
 			debug_mode = not debug_mode
 			queue_redraw()
+		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
+			_enter_stage_debug_screen()
 		elif is_confirm:
 			ui_renderer.set_btn_press_with_callback(tr("TITLE_START"), func():
 				game_state = "menu"
@@ -633,6 +661,10 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "config":
 		_input_config(event, is_confirm_key, is_confirm_pad, is_confirm_click)
+		return
+
+	if game_state == "stage_debug":
+		_input_stage_debug(event)
 		return
 
 	if game_state == "rules_confirm":
@@ -659,26 +691,36 @@ func _input(event: InputEvent) -> void:
 		if is_confirm_key or is_confirm_pad:
 			ui_renderer.set_btn_press_with_callback(tr("BTN_TO_TITLE"), func():
 				_stop_bgm(bgm_result)
-				game_state = "title"
-				preferred_input_method = ""
-				title_start_time = Time.get_ticks_msec() / 1000.0
-				_play_bgm(bgm_title)
+				_return_to_title_or_stage_debug_from_test()
 				queue_redraw()
 			)
 			queue_redraw()
 		elif is_confirm_click and _hit_results_button(event.position):
 			ui_renderer.set_btn_press_with_callback(tr("BTN_TO_TITLE"), func():
 				_stop_bgm(bgm_result)
-				game_state = "title"
-				preferred_input_method = ""
-				title_start_time = Time.get_ticks_msec() / 1000.0
-				_play_bgm(bgm_title)
+				_return_to_title_or_stage_debug_from_test()
 				queue_redraw()
 			)
 			queue_redraw()
 		return
 
 	if game_state == "cleared":
+		if debug_stage_test_mode:
+			if is_confirm_key or is_confirm_pad:
+				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
+					_stop_bgm(bgm_game)
+					_return_to_title_or_stage_debug_from_test()
+					queue_redraw()
+				, false)
+				queue_redraw()
+			elif is_confirm_click and _hit_cleared_button(event.position):
+				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
+					_stop_bgm(bgm_game)
+					_return_to_title_or_stage_debug_from_test()
+					queue_redraw()
+				, false)
+				queue_redraw()
+			return
 		if is_confirm_key or is_confirm_pad:
 			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
 				_advance_stage()
@@ -723,6 +765,10 @@ func _input(event: InputEvent) -> void:
 	# イントロ演出中は入力を受け付けない（ポーズ除く）
 	if not ui_renderer.is_stage_intro_done():
 		return
+	if debug_stage_test_mode and input_recorder and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if _hit_debug_log_button(event.position):
+			_flush_debug_input_log()
+			return
 	var allow_mouse: bool = preferred_input_method != "pad"
 	var allow_pad: bool = preferred_input_method != "mouse"
 	if allow_mouse and event is InputEventMouseMotion:
@@ -738,6 +784,8 @@ func _input(event: InputEvent) -> void:
 			_stop_sfx_move()
 	if allow_pad and event is InputEventJoypadButton:
 		input_handler.handle_pad_button(event.button_index, event.pressed)
+	if debug_stage_test_mode and input_recorder:
+		input_recorder.record_event(event)
 
 
 func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
@@ -1593,10 +1641,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 				pause_retry_elapsed = -1.0
 				_stop_bgm(bgm_game)
 				_play_sfx(sfx_window_close)
-				game_state = "title"
-				preferred_input_method = ""
-				title_start_time = Time.get_ticks_msec() / 1000.0
-				_play_bgm(bgm_title)
+				_return_to_title_or_stage_debug_from_test()
 			else:  # いいえ
 				pause_confirm_title = false
 				_play_sfx(sfx_window_close)
@@ -1618,6 +1663,8 @@ func _resume_from_pause() -> void:
 
 
 func _start_game() -> void:
+	debug_stage_test_mode = false
+	input_recorder = null
 	_stop_bgm(bgm_title)
 	stage_times.clear()
 	pause_retry_elapsed = -1.0
@@ -1632,6 +1679,324 @@ func _advance_stage() -> void:
 		game_state = "results"
 		_play_bgm(bgm_result)
 		queue_redraw()
+
+
+# =============================================================================
+# Stage debug（editor / debug ビルド）
+# =============================================================================
+
+func _debug_tools_enabled() -> bool:
+	return OS.is_debug_build() or Engine.is_editor_hint()
+
+
+func _return_to_title_or_stage_debug_from_test() -> void:
+	var back_to_stage_debug: bool = debug_stage_test_mode and _debug_tools_enabled()
+	debug_stage_test_mode = false
+	input_recorder = null
+	if back_to_stage_debug:
+		game_state = "stage_debug"
+		_sync_stage_debug_field_buffers()
+		stage_debug_last_error = ""
+	else:
+		game_state = "title"
+	preferred_input_method = ""
+	title_start_time = Time.get_ticks_msec() / 1000.0
+	_play_bgm(bgm_title)
+
+
+func _enter_stage_debug_screen() -> void:
+	stage_debug_scroll = 0.0
+	stage_debug_selected = 0
+	stage_debug_field_focus_idx = -1
+	stage_debug_edit_buffer = ""
+	stage_debug_last_error = ""
+	_sync_stage_debug_field_buffers()
+	game_state = "stage_debug"
+	queue_redraw()
+
+
+func _sync_stage_debug_field_buffers() -> void:
+	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(
+		stage_debug_selected, stage_debug_pending.get(stage_debug_selected, {})
+	)
+	stage_debug_field_buffers.clear()
+	for key in STAGE_DEBUG_FIELD_KEYS:
+		if key == "group_sizes" and cfg.has("group_sizes"):
+			var gs: Array = cfg["group_sizes"] as Array
+			stage_debug_field_buffers[key] = "%d,%d" % [int(gs[0]), int(gs[1])]
+		elif cfg.has(key):
+			stage_debug_field_buffers[key] = str(cfg[key])
+		else:
+			stage_debug_field_buffers[key] = ""
+	if stage_debug_field_focus_idx >= 0 and stage_debug_field_focus_idx < STAGE_DEBUG_FIELD_KEYS.size():
+		var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+		stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
+
+
+func _commit_focused_field_to_pending() -> void:
+	if stage_debug_field_focus_idx < 0 or stage_debug_field_focus_idx >= STAGE_DEBUG_FIELD_KEYS.size():
+		return
+	var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+	var err: String = _apply_field_string_to_pending(fk, stage_debug_edit_buffer)
+	stage_debug_last_error = err
+	_sync_stage_debug_field_buffers()
+
+
+func _apply_field_string_to_pending(key: String, text: String) -> String:
+	var s: String = text.strip_edges()
+	var idx: int = stage_debug_selected
+	var p: Dictionary = stage_debug_pending.get(idx, {}).duplicate(true)
+	if s == "":
+		p.erase(key)
+	else:
+		match key:
+			"type":
+				p["type"] = s
+			"num_points":
+				if not s.is_valid_int():
+					return "num_points が整数ではありません"
+				p["num_points"] = int(s)
+			"min_radius", "max_radius", "variance", "zigzag", "display_rate_min_pct", "clear_pct":
+				if not s.is_valid_float():
+					return "%s が数値ではありません" % key
+				p[key] = float(s)
+			"group_sizes":
+				var parts: PackedStringArray = s.split(",")
+				if parts.size() < 2:
+					return "group_sizes は 12,12 の形式にしてください"
+				if not parts[0].strip_edges().is_valid_int() or not parts[1].strip_edges().is_valid_int():
+					return "group_sizes が不正です"
+				p["group_sizes"] = [int(parts[0].strip_edges()), int(parts[1].strip_edges())]
+			_:
+				p[key] = s
+	var verr: String = StageDebugOverrides.validate_partial_with_master(idx, p)
+	if verr != "":
+		return verr
+	if p.is_empty():
+		stage_debug_pending.erase(idx)
+	else:
+		stage_debug_pending[idx] = p
+	return ""
+
+
+func _stage_debug_split_x(vp: Vector2) -> float:
+	return clampf(vp.x * STAGE_DEBUG_LEFT_COL_RATIO, 260.0, 520.0)
+
+
+func _stage_debug_action_row_y() -> float:
+	return STAGE_DEBUG_LIST_TOP_Y + 6.0
+
+
+func _stage_debug_fields_start_y() -> float:
+	return _stage_debug_action_row_y() + STAGE_DEBUG_ACTION_BTN_H + 12.0
+
+
+func _stage_debug_scroll_max(vp: Vector2) -> float:
+	var n: int = StageData.get_stages().size()
+	var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+	var list_region_h: float = list_bottom - STAGE_DEBUG_LIST_TOP_Y
+	var total_list_h: float = float(n) * STAGE_DEBUG_ROW_H
+	return maxf(0.0, total_list_h - list_region_h)
+
+
+func _stage_debug_button_rects(vp: Vector2) -> Array[Rect2]:
+	var split: float = _stage_debug_split_x(vp)
+	var bh: float = STAGE_DEBUG_ACTION_BTN_H
+	var gap: float = STAGE_DEBUG_ACTION_BTN_GAP
+	var y_actions: float = _stage_debug_action_row_y()
+	var y_top: float = STAGE_DEBUG_TOP_BTN_Y
+	var out: Array[Rect2] = []
+	var right_w: float = vp.x - split - 24.0
+	var bw3: float = minf(100.0, (right_w - 2.0 * gap) / 3.0)
+	bw3 = maxf(56.0, bw3)
+	var rx: float = split + 12.0
+	out.append(Rect2(rx, y_actions, bw3, bh))
+	out.append(Rect2(rx + bw3 + gap, y_actions, bw3, bh))
+	out.append(Rect2(rx + 2.0 * (bw3 + gap), y_actions, bw3, bh))
+	var tw: float = minf(96.0, (vp.x - split - 48.0) / 2.0 - gap * 0.5)
+	tw = maxf(72.0, tw)
+	var tr_x: float = vp.x - 12.0 - 2.0 * tw - gap
+	out.append(Rect2(tr_x, y_top, tw, bh))
+	out.append(Rect2(tr_x + tw + gap, y_top, tw, bh))
+	return out
+
+
+func _stage_debug_field_rect(vp: Vector2, fi: int) -> Rect2:
+	var split: float = _stage_debug_split_x(vp)
+	var margin: float = 12.0
+	var y0: float = _stage_debug_fields_start_y()
+	var fw: float = vp.x - split - margin * 2
+	var fh: float = 22.0
+	var y: float = y0 + float(fi) * (fh + 4.0)
+	return Rect2(split + margin, y, fw, fh)
+
+
+func _input_stage_debug(event: InputEvent) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		game_state = "title"
+		stage_debug_field_focus_idx = -1
+		queue_redraw()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+		stage_debug_scroll = maxf(0.0, stage_debug_scroll - 40.0)
+		queue_redraw()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+		stage_debug_scroll = minf(_stage_debug_scroll_max(vp), stage_debug_scroll + 40.0)
+		queue_redraw()
+		return
+	if stage_debug_field_focus_idx >= 0 and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_TAB:
+			_commit_focused_field_to_pending()
+			stage_debug_field_focus_idx = (stage_debug_field_focus_idx + 1) % STAGE_DEBUG_FIELD_KEYS.size()
+			var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+			stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
+			queue_redraw()
+			return
+		if event.keycode == KEY_ENTER:
+			_commit_focused_field_to_pending()
+			queue_redraw()
+			return
+		if event.keycode == KEY_BACKSPACE:
+			if stage_debug_edit_buffer.length() > 0:
+				stage_debug_edit_buffer = stage_debug_edit_buffer.left(stage_debug_edit_buffer.length() - 1)
+			queue_redraw()
+			return
+		if event.unicode >= 32 and event.unicode < 128:
+			stage_debug_edit_buffer += PackedByteArray([event.unicode]).get_string_from_utf8()
+			queue_redraw()
+			return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var pos: Vector2 = event.position
+		var rects: Array[Rect2] = _stage_debug_button_rects(vp)
+		var labels: Array[String] = ["テスト", "保存", "行リセット", "全リセット", "戻る"]
+		for bi in range(rects.size()):
+			if rects[bi].has_point(pos):
+				match bi:
+					0:
+						_start_stage_debug_test()
+					1:
+						_stage_debug_save_selected()
+					2:
+						_stage_debug_reset_selected_row()
+					3:
+						_stage_debug_reset_all_files()
+					4:
+						game_state = "title"
+						stage_debug_field_focus_idx = -1
+				queue_redraw()
+				return
+		for fi in range(STAGE_DEBUG_FIELD_KEYS.size()):
+			if _stage_debug_field_rect(vp, fi).has_point(pos):
+				stage_debug_field_focus_idx = fi
+				var fk: String = STAGE_DEBUG_FIELD_KEYS[fi]
+				stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
+				queue_redraw()
+				return
+		var split: float = _stage_debug_split_x(vp)
+		var n: int = StageData.get_stages().size()
+		var y0: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_scroll
+		var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+		for i in range(n):
+			var y1: float = y0 + float(i) * STAGE_DEBUG_ROW_H
+			if pos.y >= y1 and pos.y < y1 + STAGE_DEBUG_ROW_H and pos.y < list_bottom and pos.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
+				if pos.x >= 8.0 and pos.x < split - 8.0:
+					stage_debug_selected = i
+					_sync_stage_debug_field_buffers()
+					queue_redraw()
+				return
+
+
+func _start_stage_debug_test() -> void:
+	_commit_focused_field_to_pending()
+	var idx: int = stage_debug_selected
+	var p: Dictionary = stage_debug_pending.get(idx, {})
+	var err: String = StageDebugOverrides.validate_partial_with_master(idx, p)
+	if err != "":
+		stage_debug_last_error = err
+		queue_redraw()
+		return
+	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(idx, p)
+	err = StageDebugOverrides.validate_effective_config(cfg)
+	if err != "":
+		stage_debug_last_error = err
+		queue_redraw()
+		return
+	stage_debug_last_error = ""
+	debug_stage_test_seed = randi()
+	seed(debug_stage_test_seed)
+	var vp: Vector2 = get_viewport_rect().size
+	shape_center = Vector2(
+		vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5
+	)
+	current_stage = idx
+	debug_stage_test_mode = true
+	input_recorder = DebugInputRecorder.new()
+	stage_manager.start_stage(idx, shape_center, vp, point_positions, cfg)
+	_sync_stage_vars()
+	input_recorder.start_recording(debug_stage_test_seed, point_positions.duplicate() as Array[Vector2])
+	game_state = "guide_info"
+	guide_start_time = 0.0
+	hovered_index = -1
+	is_dragging = false
+	selected_indices.clear()
+	input_handler.reset_for_stage()
+	ui_renderer.clear_spore_particles()
+	hint_alpha = 0.0
+	hint_active = false
+	hints_triggered = [false, false]
+	guide_count_played = 0
+	queue_redraw()
+
+
+func _stage_debug_save_selected() -> void:
+	_commit_focused_field_to_pending()
+	var idx: int = stage_debug_selected
+	var p: Dictionary = stage_debug_pending.get(idx, {})
+	var err: String = StageDebugOverrides.save_stage_override(idx, p)
+	if err != "":
+		stage_debug_last_error = err
+	else:
+		stage_debug_last_error = "保存しました: %s" % StageDebugOverrides.path_for_index(idx)
+	queue_redraw()
+
+
+func _stage_debug_reset_selected_row() -> void:
+	var idx: int = stage_debug_selected
+	stage_debug_pending.erase(idx)
+	StageDebugOverrides.delete_stage_override(idx)
+	_sync_stage_debug_field_buffers()
+	stage_debug_last_error = "ステージ %d をマスターに戻しました" % idx
+	queue_redraw()
+
+
+func _stage_debug_reset_all_files() -> void:
+	stage_debug_pending.clear()
+	StageDebugOverrides.delete_all_overrides()
+	_sync_stage_debug_field_buffers()
+	stage_debug_last_error = "全ステージの調整ファイルを削除しました"
+	queue_redraw()
+
+
+func _hit_debug_log_button(pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	var w: float = 140.0
+	var h: float = 36.0
+	var r := Rect2(vp.x - w - 12.0, vp.y - h - 12.0, w, h)
+	return r.has_point(pos)
+
+
+func _flush_debug_input_log() -> void:
+	if input_recorder == null:
+		return
+	var path: String = input_recorder.save_to_user_file()
+	if path != "":
+		stage_debug_last_error = "ログ保存: %s" % path
+		print("debug log: ", path)
+	else:
+		stage_debug_last_error = "ログ保存に失敗しました"
+	queue_redraw()
 
 
 # =============================================================================
@@ -1659,6 +2024,8 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	_process_pad(delta)
+	if debug_stage_test_mode and input_recorder and game_state == "playing" and ui_renderer.is_stage_intro_done():
+		input_recorder.record_pad_stick_if_needed()
 	# ポイント移動中のループSE管理（is_dragging ではなく grab_input_active）
 	# 左スティックのみの選択切替はつかみではないため鳴らさない。A/右スティック＋マウスドラッグがつかみ。
 	# title_intro中はui_renderer側でsfx_moveを管理するため、ここでは停止しない
@@ -1692,6 +2059,9 @@ func _process(delta: float) -> void:
 	if game_state == "title" or game_state == "rules" or game_state == "rules_confirm" or game_state == "menu" or game_state == "config":
 		if game_state == "rules" or game_state == "rules_confirm":
 			ui_renderer.update_spore_particles(delta)
+		queue_redraw()
+
+	elif game_state == "stage_debug":
 		queue_redraw()
 
 	elif game_state == "guide_info":

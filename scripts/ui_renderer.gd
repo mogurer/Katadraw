@@ -436,11 +436,16 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_particles()
 		"results":
 			_draw_results(vp)
+		"stage_debug":
+			_draw_stage_debug(vp)
 
 	# 画面遷移フェードオーバーレイ
 	if _transition_alpha < 1.0:
 		var fade_a: float = 1.0 - _transition_alpha
 		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(_game.BG_COLOR.r, _game.BG_COLOR.g, _game.BG_COLOR.b, fade_a))
+
+	if _game.debug_stage_test_mode and state == "playing":
+		_draw_debug_log_button(vp)
 
 
 func draw_pause_overlay(vp: Vector2) -> void:
@@ -1070,6 +1075,134 @@ func _draw_rules_confirm(vp: Vector2) -> void:
 	var no_off: bool = _game.rules_confirm_index != 1
 	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
 	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
+
+
+func _draw_icon_outline_closed(pts_norm: Array, center: Vector2, r: float, col: Color) -> void:
+	"""正規化された閉じた輪郭（原点周り・おおよそ半径1）をアイコン円内に収めて描画"""
+	if pts_norm.size() < 2:
+		return
+	var max_d: float = 0.001
+	for p in pts_norm:
+		if p is Vector2:
+			max_d = maxf(max_d, (p as Vector2).length())
+	var scale: float = (r * 0.92) / max_d
+	var n: int = pts_norm.size()
+	for i in range(n):
+		var a: Vector2 = center + (pts_norm[i] as Vector2) * scale
+		var b: Vector2 = center + (pts_norm[(i + 1) % n] as Vector2) * scale
+		_game.draw_line(a, b, col, 2.0, true)
+
+
+func _draw_stage_debug_type_icon(center: Vector2, r: float, type_str: String, c: Color) -> void:
+	if type_str == "fish" or type_str == "cat_face":
+		var pts: Array = _game.stage_manager.get_normalized_outline_for_icon_debug(type_str)
+		if pts.size() >= 2:
+			_draw_icon_outline_closed(pts, center, r, c)
+			return
+	var nseg: int = 32
+	match type_str:
+		"triangle":
+			for i in range(3):
+				var a0: float = -PI * 0.5 + TAU * float(i) / 3.0
+				var a1: float = -PI * 0.5 + TAU * float(i + 1) / 3.0
+				_game.draw_line(center + Vector2(cos(a0), sin(a0)) * r, center + Vector2(cos(a1), sin(a1)) * r, c, 2.0)
+		"square":
+			var s: float = r * 0.82
+			_game.draw_rect(Rect2(center.x - s, center.y - s, s * 2.0, s * 2.0), c, false, 2.0)
+		"circle":
+			_game.draw_arc(center, r, 0.0, TAU, nseg, c, 2.0)
+		"two_circles":
+			var rr: float = r * 0.42
+			_game.draw_arc(center + Vector2(-r * 0.38, 0.0), rr, 0.0, TAU, 24, c, 2.0)
+			_game.draw_arc(center + Vector2(r * 0.38, 0.0), rr, 0.0, TAU, 24, c, 2.0)
+		"star":
+			var pts: PackedVector2Array = PackedVector2Array()
+			for i in range(10):
+				var rad: float = r * (0.42 if i % 2 == 0 else 0.88)
+				var ang: float = -PI * 0.5 + TAU * float(i) / 10.0
+				pts.append(center + Vector2(cos(ang), sin(ang)) * rad)
+			pts.append(pts[0])
+			_game.draw_polyline(pts, c, 2.0)
+		"heptagram", "heptagram_silhouette":
+			var pts2: PackedVector2Array = PackedVector2Array()
+			for i in range(7):
+				var ang2: float = -PI * 0.5 + TAU * float(i * 2) / 7.0
+				pts2.append(center + Vector2(cos(ang2), sin(ang2)) * r * 0.85)
+			pts2.append(pts2[0])
+			_game.draw_polyline(pts2, c, 2.0)
+		_:
+			_game.draw_rect(Rect2(center.x - r * 0.65, center.y - r * 0.65, r * 1.3, r * 1.3), c, false, 2.0)
+
+
+func _draw_stage_debug(vp: Vector2) -> void:
+	_draw_bg(vp)
+	var split: float = _game._stage_debug_split_x(vp)
+	var list_bottom: float = vp.y - _game.STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+	var accent: Color = Color(0.95, 0.19, 0.32)
+	var text_c: Color = Color(0.26, 0.21, 0.28)
+	var guide_w: float = minf(vp.x - 280.0, 560.0)
+	_game.draw_string(_game.font_bold, Vector2(24, 48), "STAGE DEBUG (F2)", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 36, accent)
+	_game.draw_string(_game.font, Vector2(24, 86), "Wheel: スクロール | ESC: タイトル | 左で選択 | 右で編集 Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
+	if _game.stage_debug_last_error != "":
+		_game.draw_string(_game.font, Vector2(24, 112), _game.stage_debug_last_error, HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.95, 0.3, 0.2))
+	# 右側パネル（白）+ 区切り線
+	var panel_top: float = _game._stage_debug_fields_start_y() - 8.0
+	var panel_rect := Rect2(split + 4.0, panel_top, vp.x - split - 8.0, vp.y - panel_top - _game.STAGE_DEBUG_CONTENT_BOTTOM_MARGIN)
+	_game.draw_rect(panel_rect, Color(1.0, 1.0, 1.0, 0.94))
+	_game.draw_rect(panel_rect, Color(0.85, 0.82, 0.86), false, 1.5)
+	_game.draw_line(Vector2(split, _game.STAGE_DEBUG_LIST_TOP_Y - 4.0), Vector2(split, vp.y - _game.STAGE_DEBUG_CONTENT_BOTTOM_MARGIN), text_c, 2.0)
+	# 左: ステージ一覧（スクロール）
+	var stages: Array = StageData.get_stages()
+	var y0: float = _game.STAGE_DEBUG_LIST_TOP_Y - _game.stage_debug_scroll
+	var fs: int = 16
+	var list_left: float = 8.0
+	var list_w: float = split - list_left - 8.0
+	var icon_r: float = minf(26.0, (_game.STAGE_DEBUG_ROW_H - 12.0) * 0.45)
+	for i in range(stages.size()):
+		var y: float = y0 + float(i) * _game.STAGE_DEBUG_ROW_H
+		if y + _game.STAGE_DEBUG_ROW_H < _game.STAGE_DEBUG_LIST_TOP_Y or y > list_bottom:
+			continue
+		var cfg: Dictionary = StageDebugOverrides.build_config_for_index(i, _game.stage_debug_pending.get(i, {}))
+		var sel: bool = i == _game.stage_debug_selected
+		var row_rect := Rect2(list_left, y, list_w, _game.STAGE_DEBUG_ROW_H - 4.0)
+		if sel:
+			_game.draw_rect(row_rect, Color(0.95, 0.19, 0.32, 0.14))
+		_game.draw_rect(row_rect, Color(0.88, 0.86, 0.88), false, 1.5)
+		var tname: String = str(cfg.get("type", "?"))
+		_game.draw_string(_game.font, Vector2(list_left + 10.0, y + 30.0), tname, HORIZONTAL_ALIGNMENT_LEFT, list_w - icon_r * 2.0 - 20.0, fs, text_c)
+		var icx: float = list_left + list_w - icon_r - 12.0
+		var icy: float = y + _game.STAGE_DEBUG_ROW_H * 0.5 - 2.0
+		_draw_stage_debug_type_icon(Vector2(icx, icy), icon_r, tname, accent if sel else text_c)
+	# ボタン（テスト・保存・行リセット | 右上 全リセット・戻る）
+	var rects: Array[Rect2] = _game._stage_debug_button_rects(vp)
+	var bl: Array[String] = ["テスト", "保存", "行リセット", "全リセット", "戻る"]
+	for bi in range(rects.size()):
+		var r: Rect2 = rects[bi]
+		_game.draw_rect(r, Color(0.95, 0.19, 0.32, 0.18))
+		_game.draw_rect(r, text_c, false, 2.0)
+		var fs_btn: int = 12 if r.size.x < 70.0 else 13
+		_game.draw_string(_game.font, Vector2(r.position.x + 5.0, r.position.y + 21.0), bl[bi], HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 10.0, fs_btn, text_c)
+	# 右: フィールド（1列）
+	for fi in range(_game.STAGE_DEBUG_FIELD_KEYS.size()):
+		var fr: Rect2 = _game._stage_debug_field_rect(vp, fi)
+		var fk: String = _game.STAGE_DEBUG_FIELD_KEYS[fi]
+		var buf: String = str(_game.stage_debug_field_buffers.get(fk, ""))
+		var focus: bool = fi == _game.stage_debug_field_focus_idx
+		_game.draw_rect(fr, Color(1.0, 1.0, 1.0))
+		_game.draw_rect(fr, accent if focus else Color(0.26, 0.21, 0.28), false, 5.75 if focus else 1.25)
+		var show: String = buf
+		if focus:
+			show = _game.stage_debug_edit_buffer
+		_game.draw_string(_game.font, Vector2(fr.position.x + 4, fr.position.y + 16), "%s: %s" % [fk, show], HORIZONTAL_ALIGNMENT_LEFT, fr.size.x - 8, 14, text_c)
+
+
+func _draw_debug_log_button(vp: Vector2) -> void:
+	var w: float = 140.0
+	var h: float = 36.0
+	var r := Rect2(vp.x - w - 12.0, vp.y - h - 12.0, w, h)
+	_game.draw_rect(r, Color(0.26, 0.21, 0.28, 0.55))
+	_game.draw_rect(r, Color(1.0, 1.0, 1.0), false, 5.75)
+	_game.draw_string(_game.font_bold, Vector2(r.position.x + 8, r.position.y + 24), "ログ出力", HORIZONTAL_ALIGNMENT_LEFT, w - 16, 18, Color(1.0, 1.0, 1.0))
 
 
 func _draw_config(vp: Vector2) -> void:
