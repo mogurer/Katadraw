@@ -207,8 +207,41 @@ func _ready() -> void:
 	title_logo_texture = _load_texture("res://assets/UI/kata-draw_logo.png")
 	title_logo02_texture = _load_texture("res://assets/UI/kata-draw_logo02.png")
 	bg_texture = _load_texture("res://assets/UI/kata-draw_bg.png")
+	_setup_game_cursor()
 	game_state = "logo"
 	logo_start_time = Time.get_ticks_msec() / 1000.0
+
+
+# =============================================================================
+# Mouse cursor（ゲームウィンドウ内のみ、OS のデフォルト矢印を差し替え）
+# =============================================================================
+
+func _setup_game_cursor() -> void:
+	# res://assets/UI/katacursor.png（エディタでインポート後に利用）
+	var tex_path := "res://assets/UI/katacursor.png"
+	var tex_src: Texture2D = _load_texture(tex_path)
+	if tex_src == null:
+		push_warning("Game cursor texture missing: " + tex_path)
+		return
+	var img: Image = tex_src.get_image()
+	if img == null:
+		img = Image.new()
+		img.load_from_file(tex_path)
+		# load_from_file の戻り値と OK の比較は型推論でエラーになる環境があるため、サイズで判定
+		if img.get_width() < 1 or img.get_height() < 1:
+			push_warning("Game cursor: could not read image data")
+			return
+	img = img.duplicate()
+	var nw: int = maxi(1, img.get_width() / 4)
+	var nh: int = maxi(1, img.get_height() / 4)
+	img.resize(nw, nh, Image.INTERPOLATE_LANCZOS)
+	var tex: Texture2D = ImageTexture.create_from_image(img)
+	# 左上をクリック基準（ホットスポットは縮小後テクスチャの左上）
+	var hotspot := Vector2.ZERO
+	# CursorShape は通常 0〜16（HELP）。Input.CURSOR_MAX は GDScript から見えない環境がある
+	const CURSOR_SHAPE_COUNT := 17
+	for shape in range(CURSOR_SHAPE_COUNT):
+		Input.set_custom_mouse_cursor(tex, shape as Input.CursorShape, hotspot)
 
 
 # =============================================================================
