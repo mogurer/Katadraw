@@ -155,6 +155,8 @@ var logo_start_time: float = 0.0
 var title_start_time: float = 0.0
 
 # --- Audio ---
+# 一時: BGM を聞こえないようにする。通常に戻すときは false にして _apply_bgm_volume() の通常分岐を有効にする。
+const BGM_TEMPORARILY_SILENT := true
 var bgm_title: AudioStreamPlayer
 var bgm_game: AudioStreamPlayer
 var bgm_result: AudioStreamPlayer
@@ -330,6 +332,9 @@ func _setup_audio() -> void:
 	sfx_stageclear.stream = _load_audio("res://assets/sounds/ui_stageclear.wav")
 	sfx_stageclear.volume_db = -14.5
 	add_child(sfx_stageclear)
+
+	_apply_bgm_volume()
+	_apply_se_volume()
 
 
 func _play_bgm(player: AudioStreamPlayer) -> void:
@@ -1096,6 +1101,11 @@ func _center_window() -> void:
 
 
 func _apply_bgm_volume() -> void:
+	if BGM_TEMPORARILY_SILENT:
+		bgm_title.volume_db = -80.0
+		bgm_game.volume_db = -80.0
+		bgm_result.volume_db = -80.0
+		return
 	# レベル5を基準(0dB補正)とし、0=ミュート, 10=最大
 	# BGM基準音量: title=-22.5, game/result=-16.5
 	var offset_db: float = _volume_offset_db(bgm_volume)
