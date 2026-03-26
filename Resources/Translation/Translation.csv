@@ -7,6 +7,8 @@ RULES_START,Start!,Start!,Start!,Start!
 BTN_NEXT,つぎへ,Next,下一步,下一步
 RULES_DEMO_HINT,Start でゲーム開始　マウスで [ つぎへ ] クリック,Start to start game　Click [Next] with mouse,Start 开始游戏　鼠标点击 [下一步],Start 開始遊戲　滑鼠點擊 [下一步]
 RULES_BTN_FOCUS_HINT,↑でデモへ　A で次へ,↑ for demo　A for next,↑ 查看演示　A 下一步,↑ 查看演示　A 下一步
+RULES_CONFIRM_MOUSE_TITLE,マウスでプレイしますか？,Play with the mouse?,用鼠标进行游戏吗？,用滑鼠進行遊戲嗎？
+RULES_CONFIRM_PAD_TITLE,コントローラでプレイしますか？,Play with the controller?,用手柄进行游戏吗？,用手把玩遊戲嗎？
 BTN_TO_TITLE,タイトルへ,To Title,返回标题,返回標題
 CTRL_MOUSE_HEADER,マウス,Mouse,鼠标,滑鼠
 CTRL_MOUSE_DRAG_KEY,ドラッグ,Drag,拖拽,拖曳

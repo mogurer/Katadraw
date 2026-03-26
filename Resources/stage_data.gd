@@ -22,8 +22,8 @@ static func get_stages() -> Array:
  		{"type": "two_circles", "num_points": 24, "group_sizes": [12, 12], "min_radius": 120.0, "max_radius": 240.0, "vertex_range": [4, 6], "variance": 0.50, "zigzag": 0.30, "clear_pct": 95.0},
 		# star: 20点
 		{"type": "star", "num_points": 10, "min_radius": 128.0, "max_radius": 420.0, "vertex_range": [3, 5], "variance": 0.55, "zigzag": 0.35, "clear_pct": 98.0},
-		# テスト: さかな
-		{"type": "fish", "num_points": 16, "min_radius": 160.0, "max_radius": 280.0, "variance": 0.15, "display_rate_min_pct": 82.0, "clear_pct": 98.0},
+		# テスト: さかな（細長いシルエットのため、同じ半径でも他図形より小さく見えやすい → 半径レンジを広めに）
+		{"type": "fish", "num_points": 9, "min_radius": 320.0, "max_radius": 560.0, "variance": 0.30, "display_rate_min_pct": 82.0, "clear_pct": 99.0},
 		# テスト: ねこの顔（16～20点）
 		{"type": "cat_face", "num_points": 18, "min_radius": 160.0, "max_radius": 280.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.2},
 		# heptagram: 七芒星

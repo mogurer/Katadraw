@@ -20,7 +20,12 @@ const REF_R_PERCENTILE_90 := 90.0
 const REF_R_PERCENTILE_95 := 95.0
 const REF_R_PERCENTILE := REF_R_PERCENTILE_95
 # ガイド固定サイズ: true で目標図形をプレイヤーに追従せず一定サイズ表示（正帰還ループ防止）
+# fish のみ例外で代表半径に追従（細長シルエットで固定時が窮屈になりやすいため）
 const GUIDE_USE_FIXED_SIZE := true
+
+
+func _guide_follows_player_radius() -> bool:
+	return stage_type == "fish"
 
 # --- Stage state ---
 var current_stage: int = 0
@@ -1175,14 +1180,15 @@ func _calculate_unified_arc_metrics(pts: Array[Vector2]) -> void:
 	var m: Dictionary = _calc_unified_arc_metrics(pts, 0, n)
 	current_centroid = m["centroid"]
 	current_avg_radius = m["avg_r"]
-	ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
+	var use_fixed_guide: bool = GUIDE_USE_FIXED_SIZE and not _guide_follows_player_radius()
+	ideal_display_radius = guide_radius_val if use_fixed_guide else current_avg_radius
 	current_circularity_error = m["circ_err"]
 	current_circularity = m["circ"]
 	current_smoothness_error = 0.0
 	current_smoothness = 100.0
 
 	var ideal_ref_r: float = _percentile_length_from_origin(ideal_outline_points, REF_R_PERCENTILE)
-	if GUIDE_USE_FIXED_SIZE:
+	if use_fixed_guide:
 		correspondence_scale = guide_radius_val / ideal_ref_r
 	else:
 		correspondence_scale = current_avg_radius / ideal_ref_r

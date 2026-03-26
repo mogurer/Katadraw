@@ -421,6 +421,9 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_config(vp)
 		"rules":
 			_draw_rules(vp)
+		"rules_confirm":
+			_draw_rules(vp)
+			_draw_rules_confirm(vp)
 		"guide_info":
 			_draw_guide_info(vp)
 		"guide_countdown":
@@ -1042,6 +1045,29 @@ func _draw_menu_quit_confirm(vp: Vector2) -> void:
 	var cbtn_cy: float = dlg_cy + 50.0
 	var yes_off: bool = _game.menu_confirm_index != 0
 	var no_off: bool = _game.menu_confirm_index != 1
+	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
+	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
+
+
+func _draw_rules_confirm(vp: Vector2) -> void:
+	# ルール画面の上に操作デバイス確認（メニュー終了確認と同レイアウト）
+	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
+	var cx: float = vp.x / 2.0
+	var dlg_cy: float = vp.y / 2.0
+	var dlg_w: float = 700.0
+	var dlg_h: float = 260.0
+	var dlg_rect := Rect2(Vector2(cx - dlg_w / 2.0, dlg_cy - dlg_h / 2.0), Vector2(dlg_w, dlg_h))
+	var dlg_shadow := Vector2(15.0, 15.0)
+	_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(0.26, 0.21, 0.28, 0.25))
+	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
+	_game.draw_rect(dlg_rect, Color(0.26, 0.21, 0.28), false, 5.75)
+	var title_key: String = "RULES_CONFIRM_MOUSE_TITLE" if _game.rules_confirm_kind == "mouse" else "RULES_CONFIRM_PAD_TITLE"
+	_game.draw_string(_game.font_bold, Vector2(cx - dlg_w / 2.0, dlg_cy - 45.0), tr(title_key), HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 42, Color(0.95, 0.19, 0.32))
+	var cbtn_w: float = 220.0
+	var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+	var cbtn_cy: float = dlg_cy + 50.0
+	var yes_off: bool = _game.rules_confirm_index != 0
+	var no_off: bool = _game.rules_confirm_index != 1
 	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
 	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
 

@@ -68,8 +68,8 @@ const TYPE_DEFAULTS: Dictionary = {
 	},
 	"fish": {
 		"num_points": 16,
-		"min_radius": 160.0,
-		"max_radius": 280.0,
+		"min_radius": 320.0,
+		"max_radius": 560.0,
 		"variance": 0.15,
 		"clear_pct": 95.0,
 		"display_rate_min_pct": 75.0,

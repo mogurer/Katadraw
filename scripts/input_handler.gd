@@ -69,6 +69,9 @@ func release_mouse_grab() -> void:
 	_game.selected_indices.clear()
 	_game.hovered_index = -1
 	drag_offsets.clear()
+	# パッドのつかみ状態も解除（クリア後も右スティック入力が残ると grab が再点灯するのを防ぐ）
+	pad_grabbing = false
+	_grabbing_from_right_stick = false
 	_game.queue_redraw()
 
 
@@ -654,6 +657,8 @@ func process_pad(delta: float) -> void:
 			_clamp_points_to_viewport()
 			_notify_points_changed()
 			_game.queue_redraw()
+			if _game.game_state != "playing" and _game.game_state != "rules":
+				return
 			if _grabbing_from_right_stick:
 				if not _left_stick_used_while_right_held:
 					_right_stick_dir_when_fixed = right_vec.normalized()  # 固定開始時の方向を記録（累積角度判定用）
@@ -686,8 +691,13 @@ func process_pad(delta: float) -> void:
 			_clamp_points_to_viewport()
 			_notify_points_changed()
 			_game.queue_redraw()
+			if _game.game_state != "playing" and _game.game_state != "rules":
+				return
 
 	# つかみ状態: 右スティック・A・マウスでポイントを動かせる状態か
+	if _game.game_state != "playing" and _game.game_state != "rules":
+		grab_input_active = false
+		return
 	grab_input_active = pad_grabbing_modifier or (_game.is_dragging and _last_input_method == "mouse")
 
 

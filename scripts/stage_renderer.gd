@@ -98,13 +98,13 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 			_draw_polygon_outline(center + offset1, r_scaled, 3, _game.polygon_rotation, col, width)
 		"square":
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			var base_val: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, _game.ideal_points, base_val * size_scale, _game.correspondence_rotation, col, width)
+			var base_sq: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
+			_draw_ideal_points_outline(center + offset1, _game.ideal_points, base_sq * size_scale, _game.correspondence_rotation, col, width)
 		"circle":
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
-			var base_val: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, pts, base_val * size_scale, _game.correspondence_rotation, col, width)
+			var base_ci: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
+			_draw_ideal_points_outline(center + offset1, pts, base_ci * size_scale, _game.correspondence_rotation, col, width)
 		"two_circles":
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			_draw_ring(center + offset1, r_scaled, col, width)
@@ -113,18 +113,22 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 		"star":
 			var col := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
-			var base_val: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, pts, base_val * size_scale, _game.correspondence_rotation, col, width)
+			var base_st: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
+			_draw_ideal_points_outline(center + offset1, pts, base_st * size_scale, _game.correspondence_rotation, col, width)
 		"heptagram", "heptagram_silhouette":
 			var col := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
-			var base_val: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, pts, base_val * size_scale, _game.correspondence_rotation, col, width)
-		"cat_face", "fish":
+			var base_hp: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
+			_draw_ideal_points_outline(center + offset1, pts, base_hp * size_scale, _game.correspondence_rotation, col, width)
+		"cat_face":
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
-			var base_val: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, pts, base_val * size_scale, _game.correspondence_rotation, col, width)
+			var pts_cf: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
+			var base_cf: float = _game.correspondence_scale if _game.correspondence_scale >= 10.0 else _game.guide_radius_val
+			_draw_ideal_points_outline(center + offset1, pts_cf, base_cf * size_scale, _game.correspondence_rotation, col, width)
+		"fish":
+			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			var pts_f: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
+			_draw_ideal_points_outline(center + offset1, pts_f, _game.correspondence_scale * size_scale, _game.correspondence_rotation, col, width)
 		_:
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			_draw_ring(center + offset1, r_scaled, col, width)
@@ -308,7 +312,7 @@ func _draw_ideal_points_outline(center: Vector2, points: Array, scale: float, ro
 	if points.size() < 2:
 		return
 	var draw_scale: float = scale
-	if draw_scale < 10.0:
+	if _game.stage_type != "fish" and draw_scale < 10.0:
 		draw_scale = _game.guide_radius_val
 	var cos_r: float = cos(rotation)
 	var sin_r: float = sin(rotation)
