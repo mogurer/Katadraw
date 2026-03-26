@@ -10,13 +10,6 @@
 # Exported builds
 export/
 build/
-*.pck
-
-# Godot editor (install locally; do not commit binaries)
-godot/
-
-# Local logs
-Logs/
 
 # OS generated files
 .DS_Store

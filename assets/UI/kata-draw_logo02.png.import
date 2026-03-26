@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dwuki1sgmpjvk"
-path="res://.godot/imported/kata-draw_logo.png-597b91ab718d955cc08895ef34ed3c3e.ctex"
+uid="uid://d4kqox3unuxl4"
+path="res://.godot/imported/kata-draw_logo02.png-ae49240b5f1debbfa9a413deba3611aa.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/UI/kata-draw_logo.png"
-dest_files=["res://.godot/imported/kata-draw_logo.png-597b91ab718d955cc08895ef34ed3c3e.ctex"]
+source_file="res://assets/UI/kata-draw_logo02.png"
+dest_files=["res://.godot/imported/kata-draw_logo02.png-ae49240b5f1debbfa9a413deba3611aa.ctex"]
 
 [params]
 

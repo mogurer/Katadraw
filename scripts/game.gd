@@ -118,7 +118,9 @@ func get_display_reproduction_rate_floor(current: float) -> float:
 	return floor(raw * 10.0) / 10.0
 
 # --- Menu / Config ---
-var menu_index: int = 0          # 0=Game Start, 1=Config
+var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
+var menu_confirm_quit: bool = false
+var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
 var config_index: int = 0        # 0=Resolution, 1=Window Mode, 2=Language, 3=BGM Vol, 4=SE Vol, 5=Back
 var config_sub: String = ""      # "" or "resolution", "window_mode", "language"
 var config_sub_index: int = 0    # cursor within sub-menu
@@ -144,6 +146,7 @@ var pause_retry_elapsed: float = -1.0  # やりなおし時、再開時の経過
 # --- Logo ---
 var logo_texture: Texture2D
 var title_logo_texture: Texture2D
+var title_logo02_texture: Texture2D
 var bg_texture: Texture2D
 var logo_start_time: float = 0.0
 var title_start_time: float = 0.0
@@ -161,6 +164,8 @@ var sfx_window_close: AudioStreamPlayer
 var sfx_catch: AudioStreamPlayer
 var sfx_move: AudioStreamPlayer
 var sfx_stageclear: AudioStreamPlayer
+var sfx_point: AudioStreamPlayer
+var sfx_motion: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 
 # --- Debug ---
@@ -174,23 +179,20 @@ func _ready() -> void:
 	input_handler.on_points_changed = _on_input_points_changed
 	input_handler.on_selection_changed = _on_selection_changed
 	TranslationServer.set_locale("ja")
-	var mplus_font := FontFile.new()
-	var err := mplus_font.load_dynamic_font("res://assets/fonts/Mplus2-Medium.otf")
-	if err == OK:
+	var mplus_font: Font = load("res://assets/fonts/Mplus2-Medium.otf")
+	if mplus_font:
 		mplus_font.fallbacks = [ThemeDB.fallback_font]
 		font = mplus_font
 	else:
 		font = ThemeDB.fallback_font
-	var bold_font := FontFile.new()
-	var err_b := bold_font.load_dynamic_font("res://assets/fonts/Mplus2-Bold.otf")
-	if err_b == OK:
+	var bold_font: Font = load("res://assets/fonts/Mplus2-Bold.otf")
+	if bold_font:
 		bold_font.fallbacks = [font]
 		font_bold = bold_font
 	else:
 		font_bold = font
-	var din_font := FontFile.new()
-	var err2 := din_font.load_dynamic_font("res://assets/fonts/D-DIN-PRO-700-Bold.otf")
-	if err2 == OK:
+	var din_font: FontFile = load("res://assets/fonts/D-DIN-PRO-700-Bold.otf")
+	if din_font:
 		din_font.fallbacks = [font]
 		din_font.set_extra_spacing(0, TextServer.SPACING_GLYPH, 5)
 		font_din = din_font
@@ -203,6 +205,7 @@ func _ready() -> void:
 	# Load logo texture
 	logo_texture = _load_texture("res://assets/UI/messed_logo.png")
 	title_logo_texture = _load_texture("res://assets/UI/kata-draw_logo.png")
+	title_logo02_texture = _load_texture("res://assets/UI/kata-draw_logo02.png")
 	bg_texture = _load_texture("res://assets/UI/kata-draw_bg.png")
 	game_state = "logo"
 	logo_start_time = Time.get_ticks_msec() / 1000.0
@@ -222,7 +225,7 @@ func _setup_audio() -> void:
 	add_child(bgm_title)
 
 	bgm_game = AudioStreamPlayer.new()
-	bgm_game.stream = _load_audio("res://assets/sounds/game.mp3")
+	bgm_game.stream = _load_audio("res://assets/sounds/audiostock_1544483_sample.mp3")
 	bgm_game.volume_db = -16.5
 	bgm_game.autoplay = false
 	if bgm_game.stream is AudioStreamMP3:
@@ -251,6 +254,16 @@ func _setup_audio() -> void:
 	sfx_on.stream = _load_audio("res://assets/sounds/ui_on.wav")
 	sfx_on.volume_db = -14.5
 	add_child(sfx_on)
+
+	sfx_point = AudioStreamPlayer.new()
+	sfx_point.stream = _load_audio("res://assets/sounds/ui_point.wav")
+	sfx_point.volume_db = -14.5
+	add_child(sfx_point)
+
+	sfx_motion = AudioStreamPlayer.new()
+	sfx_motion.stream = _load_audio("res://assets/sounds/motion.mp3")
+	sfx_motion.volume_db = -14.5
+	add_child(sfx_motion)
 
 	sfx_click = AudioStreamPlayer.new()
 	sfx_click.stream = _load_audio("res://assets/sounds/ui_click.wav")
@@ -543,9 +556,13 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "logo":
 		if is_confirm:
-			game_state = "title"
-			title_start_time = Time.get_ticks_msec() / 1000.0
-			_play_bgm(bgm_title)
+			game_state = "title_intro"
+			queue_redraw()
+		return
+
+	if game_state == "title_intro":
+		if is_confirm:
+			ui_renderer.start_title_intro_skip()
 			queue_redraw()
 		return
 
@@ -557,6 +574,7 @@ func _input(event: InputEvent) -> void:
 			ui_renderer.set_btn_press_with_callback(tr("TITLE_START"), func():
 				game_state = "menu"
 				menu_index = 0
+				menu_confirm_quit = false
 				queue_redraw()
 			)
 			queue_redraw()
@@ -672,14 +690,19 @@ func _input(event: InputEvent) -> void:
 
 
 func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
+	# 終了確認ダイアログ表示中
+	if menu_confirm_quit:
+		_input_menu_quit_confirm(event, is_confirm_key or is_confirm_pad, is_confirm_click)
+		return
+	var menu_count: int = 3
 	var moved: bool = false
 	# Keyboard / Pad up/down
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_UP:
-			menu_index = (menu_index - 1 + 2) % 2
+			menu_index = (menu_index - 1 + menu_count) % menu_count
 			moved = true
 		elif event.keycode == KEY_DOWN:
-			menu_index = (menu_index + 1) % 2
+			menu_index = (menu_index + 1) % menu_count
 			moved = true
 		elif event.keycode == KEY_ESCAPE:
 			game_state = "title"
@@ -689,10 +712,10 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			return
 	if event is InputEventJoypadButton and event.pressed:
 		if event.button_index == JOY_BUTTON_DPAD_UP:
-			menu_index = (menu_index - 1 + 2) % 2
+			menu_index = (menu_index - 1 + menu_count) % menu_count
 			moved = true
 		elif event.button_index == JOY_BUTTON_DPAD_DOWN:
-			menu_index = (menu_index + 1) % 2
+			menu_index = (menu_index + 1) % menu_count
 			moved = true
 		elif event.button_index == JOY_BUTTON_B:
 			game_state = "title"
@@ -700,13 +723,12 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			queue_redraw()
 			return
-	# Mouse hover detection (handled in _draw_menu via _process)
+	# Mouse hover detection
 	if event is InputEventMouseMotion:
 		var vp: Vector2 = get_viewport_rect().size
-		var cy: float = vp.y / 2.0
 		var mouse_y: float = event.position.y
-		for i in range(2):
-			var btn_cy: float = (cy + 10.0 + i * 72.0) * 1.3 + i * 20.0
+		for i in range(menu_count):
+			var btn_cy: float = ui_renderer.get_menu_btn_cy(vp, i, menu_count)
 			if mouse_y >= btn_cy - 35.0 and mouse_y <= btn_cy + 35.0:
 				menu_index = i
 	# Confirm: キー/パッドは選択項目を実行。マウスは項目上クリックのみ有効
@@ -719,7 +741,7 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			menu_index = clicked_item
 			do_confirm = true
 	if do_confirm:
-		var menu_labels: Array[String] = [tr("MENU_GAME_START"), tr("MENU_CONFIG")]
+		var menu_labels: Array[String] = [tr("MENU_GAME_START"), tr("MENU_CONFIG"), tr("MENU_QUIT")]
 		var idx: int = menu_index
 		ui_renderer.set_btn_press_with_callback(menu_labels[idx], func():
 			if idx == 0:
@@ -728,11 +750,85 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 				game_state = "config"
 				config_index = 0
 				config_sub = ""
+			elif idx == 2:
+				menu_confirm_quit = true
+				menu_confirm_index = 1  # デフォルト「いいえ」
 			queue_redraw()
 		)
 		queue_redraw()
 	if moved:
 		queue_redraw()
+
+
+func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_click: bool) -> void:
+	# ESC / B で閉じる
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		menu_confirm_quit = false
+		queue_redraw()
+		return
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B:
+		menu_confirm_quit = false
+		queue_redraw()
+		return
+	# 左右でカーソル移動
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_LEFT:
+			menu_confirm_index = (menu_confirm_index - 1 + 2) % 2
+			queue_redraw()
+		elif event.keycode == KEY_RIGHT:
+			menu_confirm_index = (menu_confirm_index + 1) % 2
+			queue_redraw()
+	if event is InputEventJoypadButton and event.pressed:
+		if event.button_index == JOY_BUTTON_DPAD_LEFT:
+			menu_confirm_index = (menu_confirm_index - 1 + 2) % 2
+			queue_redraw()
+		elif event.button_index == JOY_BUTTON_DPAD_RIGHT:
+			menu_confirm_index = (menu_confirm_index + 1) % 2
+			queue_redraw()
+	# マウスホバー
+	if event is InputEventMouseMotion:
+		var vp: Vector2 = get_viewport_rect().size
+		var cx: float = vp.x / 2.0
+		var dlg_w: float = 640.0
+		var cbtn_w: float = 220.0
+		var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+		var cbtn_cy: float = vp.y / 2.0 + 50.0
+		var mouse: Vector2 = event.position
+		if mouse.y >= cbtn_cy - 35.0 and mouse.y <= cbtn_cy + 35.0:
+			if mouse.x >= cx - cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx - cbtn_gap + cbtn_w / 2.0:
+				menu_confirm_index = 0
+			elif mouse.x >= cx + cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx + cbtn_gap + cbtn_w / 2.0:
+				menu_confirm_index = 1
+	# 決定
+	if is_confirm or is_confirm_click:
+		var do_action: bool = false
+		if is_confirm:
+			do_action = true
+		elif is_confirm_click:
+			var vp: Vector2 = get_viewport_rect().size
+			var cx: float = vp.x / 2.0
+			var cbtn_w: float = 220.0
+			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+			var cbtn_cy: float = vp.y / 2.0 + 50.0
+			var mouse: Vector2 = event.position
+			if mouse.y >= cbtn_cy - 35.0 and mouse.y <= cbtn_cy + 35.0:
+				if mouse.x >= cx - cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx - cbtn_gap + cbtn_w / 2.0:
+					menu_confirm_index = 0
+					do_action = true
+				elif mouse.x >= cx + cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx + cbtn_gap + cbtn_w / 2.0:
+					menu_confirm_index = 1
+					do_action = true
+		if do_action:
+			var confirm_label: String = tr("PAUSE_CONFIRM_YES") if menu_confirm_index == 0 else tr("PAUSE_CONFIRM_NO")
+			var cidx: int = menu_confirm_index
+			ui_renderer.set_btn_press_with_callback(confirm_label, func():
+				if cidx == 0:
+					get_tree().quit()
+				else:
+					menu_confirm_quit = false
+				queue_redraw()
+			)
+			queue_redraw()
 
 
 func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
@@ -973,6 +1069,8 @@ func _apply_se_volume() -> void:
 	sfx_catch.volume_db = -14.5 + offset_db
 	sfx_move.volume_db = -14.5 + offset_db
 	sfx_stageclear.volume_db = -14.5 + offset_db
+	sfx_point.volume_db = -14.5 + offset_db
+	sfx_motion.volume_db = -14.5 + offset_db
 
 
 func _volume_offset_db(level: int) -> float:
@@ -1106,9 +1204,9 @@ func _hit_results_button(pos: Vector2) -> bool:
 
 func _hit_menu_item(pos: Vector2) -> int:
 	var vp: Vector2 = get_viewport_rect().size
-	var cy: float = vp.y / 2.0
-	for i in range(2):
-		var btn_cy: float = (cy + 10.0 + i * 72.0) * 1.3 + i * 20.0
+	var menu_count: int = 3
+	for i in range(menu_count):
+		var btn_cy: float = ui_renderer.get_menu_btn_cy(vp, i, menu_count)
 		if pos.y >= btn_cy - 35.0 and pos.y <= btn_cy + 35.0:
 			return i
 	return -1
@@ -1411,16 +1509,31 @@ func _process(delta: float) -> void:
 		return
 	_process_pad(delta)
 	# ポイント移動中のループSE管理
+	# title_intro中はui_renderer側でsfx_moveを管理するため、ここでは停止しない
 	if (game_state == "playing" or game_state == "rules") and is_dragging:
 		_start_sfx_move()
-	elif _sfx_move_playing:
+	elif _sfx_move_playing and game_state != "title_intro":
 		_stop_sfx_move()
 	if game_state == "logo":
 		var elapsed: float = Time.get_ticks_msec() / 1000.0 - logo_start_time
 		if elapsed >= GameConfig.LOGO_TOTAL:
+			game_state = "title_intro"
+		queue_redraw()
+		return
+
+	if game_state == "title_intro":
+		if ui_renderer.is_title_intro_skip_done():
+			ui_renderer.suppress_hover_sfx(1.0)
 			game_state = "title"
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			_play_bgm(bgm_title)
+			_play_sfx(sfx_stageclear)
+		elif ui_renderer.is_title_intro_done():
+			ui_renderer.suppress_hover_sfx(1.0)
+			game_state = "title"
+			title_start_time = Time.get_ticks_msec() / 1000.0
+			_play_bgm(bgm_title)
+			_play_sfx(sfx_stageclear)
 		queue_redraw()
 		return
 
