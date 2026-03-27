@@ -138,7 +138,7 @@ var rules_demo_radius: float = 90.0
 var rules_confirm_kind: String = ""
 var rules_confirm_index: int = 0  # 0=はい 1=いいえ
 
-# --- Stage debug（editor / debug export のみ入口。F2）---
+# --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
 const STAGE_DEBUG_HEADER_H: float = 64.0
 # タイトル・ガイド文言の下からリスト行を描画（重なり防止）
@@ -1686,7 +1686,8 @@ func _advance_stage() -> void:
 # =============================================================================
 
 func _debug_tools_enabled() -> bool:
-	return OS.is_debug_build() or Engine.is_editor_hint()
+	# エディタ必須: エクスポートした .exe / .pck では常に false（デバッグビルドでも同様）
+	return Engine.is_editor_hint()
 
 
 func _return_to_title_or_stage_debug_from_test() -> void:
