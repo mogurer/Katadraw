@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cshpgrdeditor01"]
+
+[ext_resource type="Script" path="res://scripts/shape_grid_editor.gd" id="1"]
+
+[node name="ShapeGridEditor" type="Node2D"]
+script = ExtResource("1")

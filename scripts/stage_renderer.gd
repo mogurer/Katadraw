@@ -312,7 +312,7 @@ func _draw_ideal_points_outline(center: Vector2, points: Array, scale: float, ro
 	if points.size() < 2:
 		return
 	var draw_scale: float = scale
-	if _game.stage_type != "fish" and draw_scale < 10.0:
+	if not _game.guide_follows_player_radius and draw_scale < 10.0:
 		draw_scale = _game.guide_radius_val
 	var cos_r: float = cos(rotation)
 	var sin_r: float = sin(rotation)

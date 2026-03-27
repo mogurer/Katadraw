@@ -86,6 +86,8 @@ var guide_center_2: Vector2 = Vector2.ZERO
 var guide_radius_val: float = 0.0
 var ideal_display_radius: float = 0.0   # 理想形描画用（triangle/circle）。固定サイズ時は guide_radius_val
 var ideal_display_radius_2: float = 0.0  # two_circles 用
+## StageConfig.guide_follows_player_radius（ガイドをプレイヤー半径に追従させるか）
+var guide_follows_player_radius: bool = false
 var hint_alpha: float = 0.0
 var guide_count_played: int = 0  # tracks which count SE ticks have played
 var hint_active: bool = false
@@ -149,19 +151,79 @@ const STAGE_DEBUG_LEFT_COL_RATIO: float = 0.40
 const STAGE_DEBUG_TOP_BTN_Y: float = 32.0
 const STAGE_DEBUG_ACTION_BTN_H: float = 30.0
 const STAGE_DEBUG_ACTION_BTN_GAP: float = 8.0
+## 右パネル: 左は固定ラベル列、右のみ編集（値欄）。列幅は _stage_debug_field_label_column_width() で最長ラベルを測る
+const STAGE_DEBUG_FIELD_LABEL_FS: int = 14
+const STAGE_DEBUG_FIELD_VALUE_GAP: float = 10.0
+## description 欄の表示行数・1行のフォントサイズ（値欄の高さに使用）
+const STAGE_DEBUG_DESC_VISIBLE_LINES: int = 3
+## 行数が多いときの高さ上限（描画・高さ計算の共通上限）
+const STAGE_DEBUG_DESC_MAX_LINES: int = 50
+const STAGE_DEBUG_DESC_LINE_FS: int = 14
+const STAGE_DEBUG_FIELD_SINGLE_H: float = 22.0
+const STAGE_DEBUG_FIELD_ROW_GAP: float = 4.0
+## stage_name / description 右側の操作ボタン（カスタム行のみ表示）
+const STAGE_DEBUG_TEXT_BTN_W: float = 52.0
+const STAGE_DEBUG_TEXT_BTN_H: float = 20.0
+const STAGE_DEBUG_TEXT_BTN_GAP: float = 4.0
+const STAGE_DEBUG_DESC_PAD_TOP: float = 8.0
+const STAGE_DEBUG_DESC_LINE_INNER_GAP: float = 2.0
 const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 	"type", "num_points", "min_radius", "max_radius", "variance", "zigzag",
-	"display_rate_min_pct", "clear_pct", "group_sizes",
+	"display_rate_min_pct", "clear_pct", "guide_follows_player_radius", "group_sizes",
+	"stage_name", "description",
 ]
 var stage_debug_scroll: float = 0.0
 var stage_debug_selected: int = 0
-var stage_debug_pending: Dictionary = {}  # idx -> partial Dictionary
+var stage_debug_pending: Dictionary = {}  # マスタ行 index -> partial（②: インデックスオーバーライド専用）
+## ② Edit 産カスタム（ファイル1本=1行）。path -> フィールド編集の差分（config + meta.stage_name / meta.description）
+var stage_debug_custom_paths: Array[String] = []
+var stage_debug_custom_pending: Dictionary = {}
 var stage_debug_field_buffers: Dictionary = {}  # field_key -> String（選択行の編集用）
 var stage_debug_field_focus_idx: int = -1  # STAGE_DEBUG_FIELD_KEYS のインデックス、-1=なし
 var stage_debug_edit_buffer: String = ""
 var stage_debug_last_error: String = ""
+# --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
+const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
+	"fish", "cat_face", "triangle", "square", "circle", "star", "two_circles",
+]
+const STAGE_EDIT_TOP_BAR: float = 44.0
+const STAGE_EDIT_LEFT_RATIO: float = 0.66
+const STAGE_EDIT_FOOTER_H: float = 44.0
+## キャンバス上のグリッド間隔（ピクセル）。KatadrawShapeEditor の 24px に合わせる
+const STAGE_EDIT_GRID_CELL_PX: float = 24.0
+const STAGE_EDIT_CANVAS_HANDLE_R: float = 12.0
+const STAGE_EDIT_CANVAS_HIT_VERTEX_R: float = 28.0
+const STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE: float = 80.0
+const STAGE_EDIT_CANVAS_RIGHT_DRAG_THRESHOLD: float = 5.0
+var stage_edit_stage_id: String = "new_stage"
+## meta の JSON 保存時にそのままマージ（stage_name / description は STAGE DEBUG で編集）
+var stage_edit_meta_preserve: Dictionary = {}
+var stage_edit_type_idx: int = 0
+## fish のとき samples の polygon を初期値に使うか（オフ時は組み込み fish 頂点）
+var stage_edit_include_fish_shape: bool = true
+## 0=Stage ID（テキスト欄はこれのみ）
+var stage_edit_text_line: int = 0
+var stage_edit_last_error: String = ""
+## shape_type が fish / cat_face のときの編集用頂点（正規化座標）と辺（KatadrawShapeEditor と同様）
+var stage_edit_canvas_vertices: Array[Vector2] = []
+var stage_edit_canvas_edges: Array[Dictionary] = []
+var stage_edit_canvas_hover_edge: int = -1
+var stage_edit_canvas_drag_idx: int = -1
+var stage_edit_canvas_drag_norm_offset: Vector2 = Vector2.ZERO
+var stage_edit_canvas_right_drag_idx: int = -1
+var stage_edit_canvas_right_down_pos: Vector2 = Vector2.ZERO
+var stage_edit_canvas_right_drag_norm_offset: Vector2 = Vector2.ZERO
+var stage_edit_canvas_right_drag_committed: bool = false
+var _se_ld_single_arc_edge: int = -1
+var _se_ld_single_arc_angle: float = 0.0
+var _se_ld_both_edges: Array[int] = []
+var _se_ld_both_angles: Array[float] = []
+var _se_ld_both_centers: Array[Vector2] = []
+var _se_ld_both_last_centers: Array[Vector2] = []
 var debug_stage_test_mode: bool = false
 var debug_stage_test_seed: int = 0
+## テストプレイ guide_info の説明行に出す（カスタムの meta.stage_name）
+var debug_stage_test_meta_stage_name: String = ""
 var input_recorder: DebugInputRecorder
 
 # --- Pause Menu ---
@@ -500,6 +562,7 @@ func _sync_stage_vars() -> void:
 	guide_radius_val = stage_manager.guide_radius_val
 	ideal_display_radius = stage_manager.ideal_display_radius
 	ideal_display_radius_2 = stage_manager.ideal_display_radius_2
+	guide_follows_player_radius = stage_manager.guide_follows_player_radius
 
 
 func _start_stage(idx: int) -> void:
@@ -661,6 +724,10 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "config":
 		_input_config(event, is_confirm_key, is_confirm_pad, is_confirm_click)
+		return
+
+	if game_state == "stage_edit":
+		_input_stage_edit(event)
 		return
 
 	if game_state == "stage_debug":
@@ -1664,6 +1731,7 @@ func _resume_from_pause() -> void:
 
 func _start_game() -> void:
 	debug_stage_test_mode = false
+	debug_stage_test_meta_stage_name = ""
 	input_recorder = null
 	_stop_bgm(bgm_title)
 	stage_times.clear()
@@ -1682,19 +1750,23 @@ func _advance_stage() -> void:
 
 
 # =============================================================================
-# Stage debug（editor / debug ビルド）
+# Stage debug（エディタからの実行時のみ。F2）
 # =============================================================================
 
 func _debug_tools_enabled() -> bool:
-	# エディタ必須: エクスポートした .exe / .pck では常に false（デバッグビルドでも同様）
-	return Engine.is_editor_hint()
+	# エディタから F5 実行時、Engine.is_editor_hint() は false になることがある。
+	# OS.has_feature("editor") がエディタ経由の実行を表す。エクスポート版では両方 false。
+	return OS.has_feature("editor") or Engine.is_editor_hint()
 
 
 func _return_to_title_or_stage_debug_from_test() -> void:
 	var back_to_stage_debug: bool = debug_stage_test_mode and _debug_tools_enabled()
 	debug_stage_test_mode = false
+	debug_stage_test_meta_stage_name = ""
 	input_recorder = null
 	if back_to_stage_debug:
+		_refresh_stage_debug_custom_paths()
+		_clamp_stage_debug_selection()
 		game_state = "stage_debug"
 		_sync_stage_debug_field_buffers()
 		stage_debug_last_error = ""
@@ -1706,27 +1778,135 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 
 
 func _enter_stage_debug_screen() -> void:
+	_refresh_stage_debug_custom_paths()
 	stage_debug_scroll = 0.0
 	stage_debug_selected = 0
 	stage_debug_field_focus_idx = -1
 	stage_debug_edit_buffer = ""
 	stage_debug_last_error = ""
+	_clamp_stage_debug_selection()
 	_sync_stage_debug_field_buffers()
 	game_state = "stage_debug"
+	_stage_debug_sync_ime_for_field_focus()
 	queue_redraw()
 
 
+## STAGE DEBUG: 日本語 IME 用（カスタム描画の値欄で stage_name / description のときのみ有効化）
+func _stage_debug_sync_ime_for_field_focus() -> void:
+	if not _debug_tools_enabled():
+		return
+	if game_state != "stage_debug":
+		DisplayServer.window_set_ime_active(false)
+		return
+	var want_ime: bool = false
+	if stage_debug_field_focus_idx >= 0 and stage_debug_field_focus_idx < STAGE_DEBUG_FIELD_KEYS.size():
+		var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+		want_ime = fk == "stage_name" or fk == "description"
+	DisplayServer.window_set_ime_active(want_ime)
+
+
+func _refresh_stage_debug_custom_paths() -> void:
+	if not _debug_tools_enabled():
+		stage_debug_custom_paths.clear()
+		return
+	stage_debug_custom_paths = CustomStageFile.list_custom_stage_paths()
+
+
+func _stage_debug_master_count() -> int:
+	return StageData.get_stages().size()
+
+
+func _stage_debug_total_rows() -> int:
+	return _stage_debug_master_count() + stage_debug_custom_paths.size()
+
+
+func _stage_debug_is_custom_row(row: int) -> bool:
+	return row >= _stage_debug_master_count() and row < _stage_debug_total_rows()
+
+
+func _stage_debug_custom_path_at(row: int) -> String:
+	return stage_debug_custom_paths[row - _stage_debug_master_count()]
+
+
+func _clamp_stage_debug_selection() -> void:
+	var n: int = _stage_debug_total_rows()
+	if n <= 0:
+		stage_debug_selected = 0
+		return
+	if stage_debug_selected >= n:
+		stage_debug_selected = n - 1
+	if stage_debug_selected < 0:
+		stage_debug_selected = 0
+
+
+## カスタム行: ファイル + custom_pending をマージした raw（effective 前）
+func _stage_debug_custom_raw_merged(path: String) -> Dictionary:
+	var pr: Dictionary = CustomStageFile.parse_file(path)
+	if not pr.get("ok", false):
+		return {}
+	var raw: Dictionary = (pr["raw"] as Dictionary).duplicate(true)
+	var pend: Dictionary = stage_debug_custom_pending.get(path, {})
+	if pend.is_empty():
+		return raw
+	var cfg_partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
+	var meta_partial: Dictionary = {}
+	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+		meta_partial = (raw["meta"] as Dictionary).duplicate(true)
+	for k in pend:
+		if k == "stage_name" or k == "description":
+			var vs: String = str(pend[k]).strip_edges()
+			if vs == "":
+				meta_partial.erase(k)
+			else:
+				meta_partial[k] = vs
+		else:
+			cfg_partial[k] = pend[k]
+	raw["config"] = cfg_partial
+	if not meta_partial.is_empty():
+		raw["meta"] = meta_partial
+	elif raw.has("meta"):
+		raw.erase("meta")
+	return raw
+
+
 func _sync_stage_debug_field_buffers() -> void:
-	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(
-		stage_debug_selected, stage_debug_pending.get(stage_debug_selected, {})
-	)
+	var cfg: Dictionary = {}
+	var row: int = stage_debug_selected
+	var raw_cfg: Dictionary = {}
+	var meta_view: Dictionary = {}
+	if _stage_debug_is_custom_row(row):
+		var path: String = _stage_debug_custom_path_at(row)
+		var raw: Dictionary = _stage_debug_custom_raw_merged(path)
+		if not raw.is_empty():
+			cfg = CustomStageFile.effective_config_with_shape(raw)
+			raw_cfg = raw["config"] as Dictionary
+			if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+				meta_view = raw["meta"] as Dictionary
+	else:
+		cfg = StageDebugOverrides.build_config_for_index(
+			row, stage_debug_pending.get(row, {})
+		)
 	stage_debug_field_buffers.clear()
 	for key in STAGE_DEBUG_FIELD_KEYS:
+		if key == "stage_name":
+			if _stage_debug_is_custom_row(row):
+				stage_debug_field_buffers[key] = str(meta_view.get("stage_name", ""))
+			else:
+				stage_debug_field_buffers[key] = ""
+			continue
+		if key == "description":
+			if _stage_debug_is_custom_row(row):
+				stage_debug_field_buffers[key] = str(meta_view.get("description", ""))
+			else:
+				stage_debug_field_buffers[key] = ""
+			continue
 		if key == "group_sizes" and cfg.has("group_sizes"):
 			var gs: Array = cfg["group_sizes"] as Array
 			stage_debug_field_buffers[key] = "%d,%d" % [int(gs[0]), int(gs[1])]
+		elif _stage_debug_is_custom_row(row) and key == "type":
+			stage_debug_field_buffers[key] = str(raw_cfg.get("type", ""))
 		elif cfg.has(key):
-			stage_debug_field_buffers[key] = str(cfg[key])
+			stage_debug_field_buffers[key] = _stage_debug_config_value_str_for_buffer(key, cfg[key])
 		else:
 			stage_debug_field_buffers[key] = ""
 	if stage_debug_field_focus_idx >= 0 and stage_debug_field_focus_idx < STAGE_DEBUG_FIELD_KEYS.size():
@@ -1743,40 +1923,124 @@ func _commit_focused_field_to_pending() -> void:
 	_sync_stage_debug_field_buffers()
 
 
+func _validate_custom_stage_pending(path: String, partial: Dictionary) -> String:
+	var pr: Dictionary = CustomStageFile.parse_file(path)
+	if not pr.get("ok", false):
+		return str(pr.get("error", "読み込み失敗"))
+	var raw: Dictionary = (pr["raw"] as Dictionary).duplicate(true)
+	var cfg_partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
+	var meta_partial: Dictionary = {}
+	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+		meta_partial = (raw["meta"] as Dictionary).duplicate(true)
+	for k in partial:
+		if k == "stage_name" or k == "description":
+			var vs: String = str(partial[k]).strip_edges()
+			if vs == "":
+				meta_partial.erase(k)
+			else:
+				meta_partial[k] = vs
+		else:
+			cfg_partial[k] = partial[k]
+	raw["config"] = cfg_partial
+	if not meta_partial.is_empty():
+		raw["meta"] = meta_partial
+	elif raw.has("meta"):
+		raw.erase("meta")
+	var vroot: String = CustomStageFile.validate_root(raw)
+	if vroot != "":
+		return vroot
+	var cfg: Dictionary = CustomStageFile.effective_config_with_shape(raw)
+	return StageDebugOverrides.validate_effective_config(cfg)
+
+
 func _apply_field_string_to_pending(key: String, text: String) -> String:
 	var s: String = text.strip_edges()
-	var idx: int = stage_debug_selected
-	var p: Dictionary = stage_debug_pending.get(idx, {}).duplicate(true)
+	var row: int = stage_debug_selected
+	if (key == "stage_name" or key == "description") and not _stage_debug_is_custom_row(row):
+		if s == "":
+			return ""
+		return "stage_name / description はカスタムステージ行のみ編集できます"
+	if _stage_debug_is_custom_row(row):
+		var path: String = _stage_debug_custom_path_at(row)
+		var p: Dictionary = stage_debug_custom_pending.get(path, {}).duplicate(true)
+		if s == "":
+			# stage_name / description は空文字を pending に残す（erase だと未編集扱いでファイルの meta に戻る）
+			if key == "stage_name" or key == "description":
+				p[key] = ""
+			else:
+				p.erase(key)
+		else:
+			match key:
+				"type":
+					p["type"] = s
+				"num_points":
+					if not s.is_valid_int():
+						return "num_points が整数ではありません"
+					p["num_points"] = int(s)
+				"min_radius", "max_radius", "variance", "zigzag", "display_rate_min_pct", "clear_pct":
+					if not s.is_valid_float():
+						return "%s が数値ではありません" % key
+					p[key] = float(s)
+				"guide_follows_player_radius":
+					if s != "0" and s != "1":
+						return "guide_follows_player_radius は 0 または 1"
+					p[key] = int(s)
+				"group_sizes":
+					var parts: PackedStringArray = s.split(",")
+					if parts.size() < 2:
+						return "group_sizes は 12,12 の形式にしてください"
+					if not parts[0].strip_edges().is_valid_int() or not parts[1].strip_edges().is_valid_int():
+						return "group_sizes が不正です"
+					p["group_sizes"] = [int(parts[0].strip_edges()), int(parts[1].strip_edges())]
+				"stage_name", "description":
+					p[key] = s
+				_:
+					p[key] = s
+		var verr: String = _validate_custom_stage_pending(path, p)
+		if verr != "":
+			return verr
+		if p.is_empty():
+			stage_debug_custom_pending.erase(path)
+		else:
+			stage_debug_custom_pending[path] = p
+		return ""
+
+	var idx: int = row
+	var p2: Dictionary = stage_debug_pending.get(idx, {}).duplicate(true)
 	if s == "":
-		p.erase(key)
+		p2.erase(key)
 	else:
 		match key:
 			"type":
-				p["type"] = s
+				p2["type"] = s
 			"num_points":
 				if not s.is_valid_int():
 					return "num_points が整数ではありません"
-				p["num_points"] = int(s)
+				p2["num_points"] = int(s)
 			"min_radius", "max_radius", "variance", "zigzag", "display_rate_min_pct", "clear_pct":
 				if not s.is_valid_float():
 					return "%s が数値ではありません" % key
-				p[key] = float(s)
+				p2[key] = float(s)
+			"guide_follows_player_radius":
+				if s != "0" and s != "1":
+					return "guide_follows_player_radius は 0 または 1"
+				p2[key] = int(s)
 			"group_sizes":
 				var parts: PackedStringArray = s.split(",")
 				if parts.size() < 2:
 					return "group_sizes は 12,12 の形式にしてください"
 				if not parts[0].strip_edges().is_valid_int() or not parts[1].strip_edges().is_valid_int():
 					return "group_sizes が不正です"
-				p["group_sizes"] = [int(parts[0].strip_edges()), int(parts[1].strip_edges())]
+				p2["group_sizes"] = [int(parts[0].strip_edges()), int(parts[1].strip_edges())]
 			_:
-				p[key] = s
-	var verr: String = StageDebugOverrides.validate_partial_with_master(idx, p)
+				p2[key] = s
+	var verr: String = StageDebugOverrides.validate_partial_with_master(idx, p2)
 	if verr != "":
 		return verr
-	if p.is_empty():
+	if p2.is_empty():
 		stage_debug_pending.erase(idx)
 	else:
-		stage_debug_pending[idx] = p
+		stage_debug_pending[idx] = p2
 	return ""
 
 
@@ -1792,8 +2056,46 @@ func _stage_debug_fields_start_y() -> float:
 	return _stage_debug_action_row_y() + STAGE_DEBUG_ACTION_BTN_H + 12.0
 
 
+func _stage_debug_config_value_str_for_buffer(key: String, v: Variant) -> String:
+	match key:
+		"num_points", "guide_follows_player_radius":
+			return str(int(v))
+		_:
+			return str(v)
+
+
+func _stage_debug_description_line_count() -> int:
+	var dfi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
+	var txt: String = ""
+	if dfi >= 0 and stage_debug_field_focus_idx == dfi:
+		txt = stage_debug_edit_buffer
+	else:
+		txt = str(stage_debug_field_buffers.get("description", ""))
+	var n: int = max(1, txt.split("\n").size())
+	return max(STAGE_DEBUG_DESC_VISIBLE_LINES, min(n, STAGE_DEBUG_DESC_MAX_LINES))
+
+
+func _stage_debug_description_field_height() -> float:
+	var n: int = _stage_debug_description_line_count()
+	var line_h: float = font.get_height(STAGE_DEBUG_DESC_LINE_FS) + STAGE_DEBUG_DESC_LINE_INNER_GAP
+	return STAGE_DEBUG_DESC_PAD_TOP + line_h * float(n) + 4.0
+
+
+func _stage_debug_field_value_height(fi: int) -> float:
+	if fi >= 0 and fi < STAGE_DEBUG_FIELD_KEYS.size() and STAGE_DEBUG_FIELD_KEYS[fi] == "description":
+		return _stage_debug_description_field_height()
+	return STAGE_DEBUG_FIELD_SINGLE_H
+
+
+func _stage_debug_field_row_top_y(_vp: Vector2, fi: int) -> float:
+	var y: float = _stage_debug_fields_start_y()
+	for i in range(fi):
+		y += _stage_debug_field_value_height(i) + STAGE_DEBUG_FIELD_ROW_GAP
+	return y
+
+
 func _stage_debug_scroll_max(vp: Vector2) -> float:
-	var n: int = StageData.get_stages().size()
+	var n: int = _stage_debug_total_rows()
 	var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
 	var list_region_h: float = list_bottom - STAGE_DEBUG_LIST_TOP_Y
 	var total_list_h: float = float(n) * STAGE_DEBUG_ROW_H
@@ -1808,12 +2110,11 @@ func _stage_debug_button_rects(vp: Vector2) -> Array[Rect2]:
 	var y_top: float = STAGE_DEBUG_TOP_BTN_Y
 	var out: Array[Rect2] = []
 	var right_w: float = vp.x - split - 24.0
-	var bw3: float = minf(100.0, (right_w - 2.0 * gap) / 3.0)
-	bw3 = maxf(56.0, bw3)
+	var bw4: float = minf(100.0, (right_w - 3.0 * gap) / 4.0)
+	bw4 = maxf(48.0, bw4)
 	var rx: float = split + 12.0
-	out.append(Rect2(rx, y_actions, bw3, bh))
-	out.append(Rect2(rx + bw3 + gap, y_actions, bw3, bh))
-	out.append(Rect2(rx + 2.0 * (bw3 + gap), y_actions, bw3, bh))
+	for k in range(4):
+		out.append(Rect2(rx + float(k) * (bw4 + gap), y_actions, bw4, bh))
 	var tw: float = minf(96.0, (vp.x - split - 48.0) / 2.0 - gap * 0.5)
 	tw = maxf(72.0, tw)
 	var tr_x: float = vp.x - 12.0 - 2.0 * tw - gap
@@ -1822,21 +2123,840 @@ func _stage_debug_button_rects(vp: Vector2) -> Array[Rect2]:
 	return out
 
 
-func _stage_debug_field_rect(vp: Vector2, fi: int) -> Rect2:
+## 全フィールドの「名前:」のうち最長のピクセル幅 + 余白（右寄せで値欄の左端に揃える）
+func _stage_debug_field_label_column_width() -> float:
+	var max_w: float = 0.0
+	for k in STAGE_DEBUG_FIELD_KEYS:
+		var lbl: String = "%s:" % k
+		var sz: Vector2 = font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, STAGE_DEBUG_FIELD_LABEL_FS)
+		max_w = maxf(max_w, sz.x)
+	return max_w + 12.0
+
+
+## 値入力欄のみ（クリック・編集対象）。ラベル列は含まない。
+func _stage_debug_field_value_rect(vp: Vector2, fi: int) -> Rect2:
 	var split: float = _stage_debug_split_x(vp)
 	var margin: float = 12.0
-	var y0: float = _stage_debug_fields_start_y()
-	var fw: float = vp.x - split - margin * 2
-	var fh: float = 22.0
-	var y: float = y0 + float(fi) * (fh + 4.0)
-	return Rect2(split + margin, y, fw, fh)
+	var y: float = _stage_debug_field_row_top_y(vp, fi)
+	var label_w: float = _stage_debug_field_label_column_width()
+	var x0: float = split + margin + label_w + STAGE_DEBUG_FIELD_VALUE_GAP
+	var full_vw: float = vp.x - x0 - margin
+	full_vw = maxf(64.0, full_vw)
+	var vw: float = full_vw
+	if fi >= 0 and fi < STAGE_DEBUG_FIELD_KEYS.size():
+		var fk: String = STAGE_DEBUG_FIELD_KEYS[fi]
+		if fk == "stage_name":
+			var sn_actions_w: float = STAGE_DEBUG_TEXT_BTN_W * 3.0 + STAGE_DEBUG_TEXT_BTN_GAP * 2.0
+			vw = maxf(64.0, full_vw - sn_actions_w - STAGE_DEBUG_TEXT_BTN_GAP)
+		elif fk == "description":
+			var actions_w: float = STAGE_DEBUG_TEXT_BTN_W * 3.0 + STAGE_DEBUG_TEXT_BTN_GAP * 2.0
+			vw = maxf(64.0, full_vw - actions_w - STAGE_DEBUG_TEXT_BTN_GAP)
+	var h: float = _stage_debug_field_value_height(fi)
+	return Rect2(x0, y, vw, h)
+
+
+## action_idx: 0=コピー 1=消去 2=貼り付け（description と同順）
+func _stage_debug_stage_name_action_button_rect(vp: Vector2, action_idx: int) -> Rect2:
+	var fi: int = STAGE_DEBUG_FIELD_KEYS.find("stage_name")
+	if fi < 0 or action_idx < 0 or action_idx > 2:
+		return Rect2()
+	var fr: Rect2 = _stage_debug_field_value_rect(vp, fi)
+	var bx: float = fr.position.x + fr.size.x + STAGE_DEBUG_TEXT_BTN_GAP + float(action_idx) * (STAGE_DEBUG_TEXT_BTN_W + STAGE_DEBUG_TEXT_BTN_GAP)
+	var by: float = fr.position.y + (fr.size.y - STAGE_DEBUG_TEXT_BTN_H) * 0.5
+	return Rect2(bx, by, STAGE_DEBUG_TEXT_BTN_W, STAGE_DEBUG_TEXT_BTN_H)
+
+
+## action_idx: 0=コピー 1=消去 2=貼り付け
+func _stage_debug_description_action_button_rect(vp: Vector2, action_idx: int) -> Rect2:
+	var fi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
+	if fi < 0 or action_idx < 0 or action_idx > 2:
+		return Rect2()
+	var fr: Rect2 = _stage_debug_field_value_rect(vp, fi)
+	var bx: float = fr.position.x + fr.size.x + STAGE_DEBUG_TEXT_BTN_GAP + float(action_idx) * (STAGE_DEBUG_TEXT_BTN_W + STAGE_DEBUG_TEXT_BTN_GAP)
+	var by: float = fr.position.y + (fr.size.y - STAGE_DEBUG_TEXT_BTN_H) * 0.5
+	return Rect2(bx, by, STAGE_DEBUG_TEXT_BTN_W, STAGE_DEBUG_TEXT_BTN_H)
+
+
+func _stage_debug_paste_into_field(field_key: String) -> void:
+	if not _stage_debug_is_custom_row(stage_debug_selected):
+		return
+	var fi: int = STAGE_DEBUG_FIELD_KEYS.find(field_key)
+	if fi < 0:
+		return
+	stage_debug_field_focus_idx = fi
+	stage_debug_edit_buffer = _filter_stage_debug_paste_for_field(field_key, DisplayServer.clipboard_get())
+	stage_debug_last_error = _apply_field_string_to_pending(field_key, stage_debug_edit_buffer)
+	_sync_stage_debug_field_buffers()
+	_stage_debug_sync_ime_for_field_focus()
+
+
+func _stage_debug_description_copy_to_clipboard() -> void:
+	var dfi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
+	var txt: String
+	if stage_debug_field_focus_idx == dfi:
+		txt = stage_debug_edit_buffer
+	else:
+		txt = str(stage_debug_field_buffers.get("description", ""))
+	DisplayServer.clipboard_set(txt)
+
+
+func _stage_debug_stage_name_copy_to_clipboard() -> void:
+	var sfi: int = STAGE_DEBUG_FIELD_KEYS.find("stage_name")
+	var txt: String
+	if stage_debug_field_focus_idx == sfi:
+		txt = stage_debug_edit_buffer
+	else:
+		txt = str(stage_debug_field_buffers.get("stage_name", ""))
+	DisplayServer.clipboard_set(txt)
+
+
+func _stage_debug_stage_name_clear() -> void:
+	var sfi: int = STAGE_DEBUG_FIELD_KEYS.find("stage_name")
+	if sfi < 0:
+		return
+	stage_debug_field_focus_idx = sfi
+	stage_debug_edit_buffer = ""
+	stage_debug_last_error = _apply_field_string_to_pending("stage_name", "")
+	_sync_stage_debug_field_buffers()
+	_stage_debug_sync_ime_for_field_focus()
+
+
+func _stage_debug_description_clear() -> void:
+	var dfi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
+	if dfi < 0:
+		return
+	stage_debug_field_focus_idx = dfi
+	stage_debug_edit_buffer = ""
+	stage_debug_last_error = _apply_field_string_to_pending("description", "")
+	_sync_stage_debug_field_buffers()
+	_stage_debug_sync_ime_for_field_focus()
+
+
+func _filter_stage_debug_digits_only_char(ch: String) -> String:
+	if ch.length() != 1:
+		return ""
+	var c: int = ch.unicode_at(0)
+	if c >= 48 and c <= 57:
+		return ch
+	return ""
+
+
+func _filter_stage_debug_digits_only_string(s: String) -> String:
+	var out: String = ""
+	for i in range(s.length()):
+		var c: int = s.unicode_at(i)
+		if c >= 48 and c <= 57:
+			out += s[i]
+	return out
+
+
+func _filter_stage_debug_float_chars_string(s: String) -> String:
+	var out: String = ""
+	for i in range(s.length()):
+		var c: int = s.unicode_at(i)
+		if (c >= 48 and c <= 57) or c == 46 or c == 45:
+			out += s[i]
+	return out
+
+
+func _filter_stage_debug_float_char(ch: String) -> String:
+	if ch.length() != 1:
+		return ""
+	var c: int = ch.unicode_at(0)
+	if (c >= 48 and c <= 57) or c == 46 or c == 45:
+		return ch
+	return ""
+
+
+func _filter_stage_debug_group_sizes_char(ch: String) -> String:
+	if ch.length() != 1:
+		return ""
+	var c: int = ch.unicode_at(0)
+	if (c >= 48 and c <= 57) or c == 44:
+		return ch
+	return ""
+
+
+func _filter_stage_debug_group_sizes_string(s: String) -> String:
+	var out: String = ""
+	for i in range(s.length()):
+		var c: int = s.unicode_at(i)
+		if (c >= 48 and c <= 57) or c == 44:
+			out += s[i]
+	return out
+
+
+func _filter_stage_debug_guide_follow_char(ch: String) -> String:
+	if ch.length() != 1:
+		return ""
+	var c: int = ch.unicode_at(0)
+	if c == 48 or c == 49:
+		return ch
+	return ""
+
+
+func _filter_stage_debug_guide_follow_string(s: String) -> String:
+	var out: String = ""
+	for i in range(s.length()):
+		var c: int = s.unicode_at(i)
+		if c == 48 or c == 49:
+			out += s[i]
+	return out
+
+
+func _filter_stage_debug_char_for_field(key: String, ch: String) -> String:
+	match key:
+		"type":
+			return _filter_stage_id_allowed_only(ch)
+		"group_sizes":
+			return _filter_stage_debug_group_sizes_char(ch)
+		"num_points":
+			return _filter_stage_debug_digits_only_char(ch)
+		"guide_follows_player_radius":
+			return _filter_stage_debug_guide_follow_char(ch)
+		"stage_name":
+			if ch.length() != 1:
+				return ""
+			var cs: int = ch.unicode_at(0)
+			if cs < 32:
+				return ""
+			return ch
+		"description":
+			if ch.length() != 1:
+				return ""
+			var cd: int = ch.unicode_at(0)
+			if cd < 32 and cd != 10:
+				return ""
+			return ch
+		_:
+			return _filter_stage_debug_float_char(ch)
+
+
+func _filter_stage_debug_paste_for_field(key: String, clip: String) -> String:
+	match key:
+		"type":
+			return _filter_stage_id_allowed_only(clip)
+		"group_sizes":
+			return _filter_stage_debug_group_sizes_string(clip)
+		"num_points":
+			return _filter_stage_debug_digits_only_string(clip)
+		"guide_follows_player_radius":
+			return _filter_stage_debug_guide_follow_string(clip)
+		"stage_name", "description":
+			return clip
+		_:
+			return _filter_stage_debug_float_chars_string(clip)
+
+
+func _stage_debug_new_custom_button_rect(vp: Vector2) -> Rect2:
+	return Rect2(24.0, 132.0, 76.0, 30.0)
+
+
+## Stage ID 用: 小文字 a-z / 数字 / _ のみ（それ以外は除去）
+func _filter_stage_id_allowed_only(s: String) -> String:
+	var out: String = ""
+	for i in range(s.length()):
+		var c: int = s.unicode_at(i)
+		if (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95:
+			out += s[i]
+	return out
+
+
+func _sanitized_stage_edit_filename(s: String) -> String:
+	var t: String = _filter_stage_id_allowed_only(s.strip_edges())
+	if t.length() > 48:
+		t = t.left(48)
+	return t
+
+
+func _stage_edit_type_idx_from_saved_config(cfg: Dictionary) -> int:
+	var st: String = str(cfg.get("shape_type", ""))
+	if st.is_empty():
+		var tid: String = str(cfg.get("type", ""))
+		if StageConfig.TYPE_DEFAULTS.has(tid):
+			st = tid
+		else:
+			st = "fish"
+	for i in range(STAGE_EDIT_TYPE_OPTIONS.size()):
+		if STAGE_EDIT_TYPE_OPTIONS[i] == st:
+			return i
+	return 0
+
+
+func _shape_block_has_polygon(shape_block: Dictionary) -> bool:
+	var pv: Variant = shape_block.get("polygon_vertices", [])
+	return typeof(pv) == TYPE_ARRAY and (pv as Array).size() >= 3
+
+
+func _stage_edit_snap_current_canvas_to_grid() -> void:
+	if not _stage_edit_shape_has_canvas():
+		return
+	if stage_edit_canvas_vertices.is_empty():
+		return
+	var vp: Vector2 = get_viewport_rect().size
+	_stage_edit_snap_canvas_state_to_grid(_stage_edit_canvas_rect(vp))
+
+
+func _enter_stage_edit_screen() -> void:
+	if not _debug_tools_enabled():
+		return
+	DisplayServer.window_set_ime_active(false)
+	stage_edit_stage_id = "new_stage"
+	stage_edit_meta_preserve = {}
+	stage_edit_type_idx = 0
+	stage_edit_include_fish_shape = true
+	stage_edit_text_line = 0
+	stage_edit_last_error = ""
+	stage_edit_canvas_drag_idx = -1
+	stage_edit_canvas_right_drag_idx = -1
+	stage_edit_canvas_right_drag_committed = false
+	_init_stage_edit_canvas()
+	_stage_edit_snap_current_canvas_to_grid()
+	game_state = "stage_edit"
+	queue_redraw()
+
+
+func _enter_stage_edit_from_path(path: String) -> void:
+	if not _debug_tools_enabled():
+		return
+	DisplayServer.window_set_ime_active(false)
+	var pr: Dictionary = CustomStageFile.parse_file(path)
+	if not pr.get("ok", false):
+		stage_debug_last_error = str(pr.get("error", "読めません"))
+		queue_redraw()
+		return
+	stage_debug_last_error = ""
+	var raw: Dictionary = pr["raw"] as Dictionary
+	var cfg: Dictionary = raw["config"] as Dictionary
+	stage_edit_stage_id = str(cfg.get("type", "new_stage"))
+	stage_edit_meta_preserve = {}
+	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+		stage_edit_meta_preserve = (raw["meta"] as Dictionary).duplicate(true)
+	stage_edit_type_idx = _stage_edit_type_idx_from_saved_config(cfg)
+	stage_edit_include_fish_shape = true
+	stage_edit_text_line = 0
+	stage_edit_last_error = ""
+	stage_edit_canvas_drag_idx = -1
+	stage_edit_canvas_right_drag_idx = -1
+	stage_edit_canvas_right_drag_committed = false
+	_init_stage_edit_canvas(raw)
+	_stage_edit_snap_current_canvas_to_grid()
+	game_state = "stage_edit"
+	queue_redraw()
+
+
+func _exit_stage_edit_to_debug() -> void:
+	stage_edit_last_error = ""
+	game_state = "stage_debug"
+	queue_redraw()
+
+
+func _exit_stage_edit_after_save(saved_path: String) -> void:
+	stage_debug_custom_pending.erase(saved_path)
+	_refresh_stage_debug_custom_paths()
+	var idx: int = stage_debug_custom_paths.find(saved_path)
+	if idx < 0:
+		for i in range(stage_debug_custom_paths.size()):
+			if stage_debug_custom_paths[i].get_file() == saved_path.get_file():
+				idx = i
+				break
+	if idx >= 0:
+		stage_debug_selected = _stage_debug_master_count() + idx
+	else:
+		_clamp_stage_debug_selection()
+	stage_edit_last_error = ""
+	game_state = "stage_debug"
+	_sync_stage_debug_field_buffers()
+	stage_debug_last_error = "保存しました: %s" % saved_path.get_file()
+	queue_redraw()
+
+
+func _stage_edit_split_x(vp: Vector2) -> float:
+	return vp.x * STAGE_EDIT_LEFT_RATIO
+
+
+func _stage_edit_right_panel_rect(vp: Vector2) -> Rect2:
+	var top: float = STAGE_EDIT_TOP_BAR + 8.0
+	var split_x: float = _stage_edit_split_x(vp)
+	var gap: float = 14.0
+	var right_pad: float = 20.0
+	var x: float = split_x + gap * 0.5
+	var w: float = vp.x - x - right_pad
+	var h: float = vp.y - top - STAGE_EDIT_FOOTER_H
+	return Rect2(x, top, maxf(200.0, w), maxf(120.0, h))
+
+
+func _stage_edit_canvas_rect(vp: Vector2) -> Rect2:
+	var top: float = STAGE_EDIT_TOP_BAR + 8.0
+	var left_pad: float = 20.0
+	var split_x: float = _stage_edit_split_x(vp)
+	var gap: float = 14.0
+	var w: float = split_x - left_pad - gap * 0.5
+	var h: float = vp.y - top - STAGE_EDIT_FOOTER_H
+	return Rect2(left_pad, top, maxf(200.0, w), maxf(160.0, h))
+
+
+func _stage_edit_text_rect_filename(vp: Vector2) -> Rect2:
+	var pr: Rect2 = _stage_edit_right_panel_rect(vp)
+	var y: float = pr.position.y + 76.0
+	return Rect2(pr.position.x, y, pr.size.x, 28.0)
+
+
+func _stage_edit_type_chip_rect(vp: Vector2, i: int) -> Rect2:
+	var pr: Rect2 = _stage_edit_right_panel_rect(vp)
+	var fr: Rect2 = _stage_edit_text_rect_filename(vp)
+	var col: int = i % 4
+	var row: int = i / 4
+	var chip_w: float = minf(104.0, (pr.size.x - 32.0) / 4.0 - 6.0)
+	var x0: float = pr.position.x
+	var y0: float = fr.position.y + fr.size.y + 28.0
+	var x: float = x0 + float(col) * (chip_w + 8.0)
+	var y: float = y0 + float(row) * 32.0
+	return Rect2(x, y, chip_w, 28.0)
+
+
+func _stage_edit_fish_shape_toggle_rect(vp: Vector2) -> Rect2:
+	var pr: Rect2 = _stage_edit_right_panel_rect(vp)
+	var n: int = STAGE_EDIT_TYPE_OPTIONS.size()
+	var rows: int = (n + 3) / 4
+	var fr: Rect2 = _stage_edit_text_rect_filename(vp)
+	var y_chips: float = fr.position.y + fr.size.y + 28.0
+	var y: float = y_chips + float(rows) * 32.0 + 12.0
+	return Rect2(pr.position.x, y, 28.0, 28.0)
+
+
+func _stage_edit_shape_has_canvas() -> bool:
+	var tidx: int = clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)
+	var t: String = STAGE_EDIT_TYPE_OPTIONS[tidx]
+	return t == "fish" or t == "cat_face"
+
+
+func _init_stage_edit_canvas(merged_raw: Dictionary = {}) -> void:
+	stage_edit_canvas_vertices.clear()
+	stage_edit_canvas_edges.clear()
+	stage_edit_canvas_hover_edge = -1
+	stage_edit_canvas_right_drag_idx = -1
+	stage_edit_canvas_right_drag_committed = false
+	var tidx: int = clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)
+	var t: String = STAGE_EDIT_TYPE_OPTIONS[tidx]
+	var shape_block: Dictionary = {}
+	if not merged_raw.is_empty() and merged_raw.has("shape") and typeof(merged_raw["shape"]) == TYPE_DICTIONARY:
+		shape_block = merged_raw["shape"] as Dictionary
+	match t:
+		"fish":
+			if _shape_block_has_polygon(shape_block):
+				_stage_edit_vertices_from_shape_dict(shape_block)
+				if stage_edit_canvas_vertices.size() >= 3:
+					_stage_edit_sync_edges_from_shape_dict(shape_block)
+				else:
+					_stage_edit_vertices_from_builtin_fish()
+					_stage_edit_reset_edges_all_lines()
+			elif stage_edit_include_fish_shape:
+				var sh: Dictionary = CustomStageFile.load_sample_fish_shape_from_res()
+				_stage_edit_vertices_from_shape_dict(sh)
+				if stage_edit_canvas_vertices.size() < 3:
+					_stage_edit_vertices_from_builtin_fish()
+					_stage_edit_reset_edges_all_lines()
+				else:
+					_stage_edit_sync_edges_from_shape_dict(sh)
+			else:
+				_stage_edit_vertices_from_builtin_fish()
+				_stage_edit_reset_edges_all_lines()
+		"cat_face":
+			if _shape_block_has_polygon(shape_block):
+				_stage_edit_vertices_from_shape_dict(shape_block)
+				if stage_edit_canvas_vertices.size() >= 3:
+					_stage_edit_sync_edges_from_shape_dict(shape_block)
+				else:
+					_stage_edit_vertices_from_builtin_cat_face()
+					_stage_edit_set_edges_from_arc_dict(StageManager.get_cat_face_arc_controls())
+			else:
+				_stage_edit_vertices_from_builtin_cat_face()
+				_stage_edit_set_edges_from_arc_dict(StageManager.get_cat_face_arc_controls())
+		_:
+			pass
+
+
+func _stage_edit_reset_edges_all_lines() -> void:
+	var n: int = stage_edit_canvas_vertices.size()
+	stage_edit_canvas_edges.clear()
+	for i in range(n):
+		stage_edit_canvas_edges.append({"type": "line"})
+
+
+func _stage_edit_sync_edges_from_shape_dict(sh: Dictionary) -> void:
+	var n: int = stage_edit_canvas_vertices.size()
+	stage_edit_canvas_edges.clear()
+	for i in range(n):
+		stage_edit_canvas_edges.append({"type": "line"})
+	var ac: Variant = sh.get("arc_controls", {})
+	if typeof(ac) != TYPE_DICTIONARY:
+		return
+	for ks in ac as Dictionary:
+		var ei: int = int(str(ks))
+		var v2: Variant = CustomStageFile._parse_vec2((ac as Dictionary)[ks])
+		if v2 != null and ei >= 0 and ei < n:
+			stage_edit_canvas_edges[ei] = {"type": "arc", "arc_control": v2 as Vector2}
+
+
+func _stage_edit_set_edges_from_arc_dict(ac: Dictionary) -> void:
+	var n: int = stage_edit_canvas_vertices.size()
+	stage_edit_canvas_edges.clear()
+	for i in range(n):
+		stage_edit_canvas_edges.append({"type": "line"})
+	for k in ac:
+		var ei: int = int(k)
+		var pt: Vector2 = ac[k]
+		if ei >= 0 and ei < n:
+			stage_edit_canvas_edges[ei] = {"type": "arc", "arc_control": pt}
+
+
+func _stage_edit_vertices_from_shape_dict(sh: Dictionary) -> void:
+	stage_edit_canvas_vertices.clear()
+	var pv: Variant = sh.get("polygon_vertices", [])
+	if typeof(pv) != TYPE_ARRAY:
+		return
+	for p in pv as Array:
+		var v2: Variant = CustomStageFile._parse_vec2(p)
+		if v2 != null:
+			stage_edit_canvas_vertices.append(v2 as Vector2)
+
+
+func _stage_edit_vertices_from_builtin_fish() -> void:
+	stage_edit_canvas_vertices.clear()
+	var a: Array = StageManager.get_fish_polygon_vertices()
+	for p in a:
+		if p is Vector2:
+			stage_edit_canvas_vertices.append(p as Vector2)
+
+
+func _stage_edit_vertices_from_builtin_cat_face() -> void:
+	stage_edit_canvas_vertices.clear()
+	var a: Array = StageManager.get_cat_face_polygon_vertices()
+	for p in a:
+		if p is Vector2:
+			stage_edit_canvas_vertices.append(p as Vector2)
+
+
+func _stage_edit_clear_left_drag_arc_state() -> void:
+	_se_ld_single_arc_edge = -1
+	_se_ld_single_arc_angle = 0.0
+	_se_ld_both_edges.clear()
+	_se_ld_both_angles.clear()
+	_se_ld_both_centers.clear()
+	_se_ld_both_last_centers.clear()
+
+
+func _stage_edit_begin_left_drag_vertex(pt_idx: int, screen_pos: Vector2, rect: Rect2) -> void:
+	stage_edit_canvas_drag_idx = pt_idx
+	stage_edit_canvas_drag_norm_offset = stage_edit_canvas_vertices[pt_idx] - StageEditPolygonTools.screen_to_norm_exact(screen_pos, rect)
+	_stage_edit_clear_left_drag_arc_state()
+	var n: int = stage_edit_canvas_vertices.size()
+	if n < 3:
+		return
+	var prev_e: int = (pt_idx - 1 + n) % n
+	var curr_e: int = pt_idx
+	var prev_arc: bool = stage_edit_canvas_edges[prev_e].get("type", "line") == "arc"
+	var curr_arc: bool = stage_edit_canvas_edges[curr_e].get("type", "line") == "arc"
+	if prev_arc and curr_arc:
+		var pa: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[prev_e], rect)
+		var pc: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[pt_idx], rect)
+		var pb: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[(pt_idx + 1) % n], rect)
+		var ac_prev: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_edges[prev_e]["arc_control"], rect)
+		var ac_curr: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_edges[curr_e]["arc_control"], rect)
+		var ang_pc: float = StageEditPolygonTools.compute_arc_central_angle(pa, pc, ac_prev)
+		var ang_cp: float = StageEditPolygonTools.compute_arc_central_angle(pc, pb, ac_curr)
+		var circ_prev: Vector2 = StageEditPolygonTools.circumcenter(pa, pc, ac_prev)
+		var circ_curr: Vector2 = StageEditPolygonTools.circumcenter(pc, pb, ac_curr)
+		_se_ld_both_edges = [prev_e, curr_e]
+		_se_ld_both_angles = [ang_pc, ang_cp]
+		_se_ld_both_centers = [circ_prev, circ_curr]
+		_se_ld_both_last_centers = [circ_prev, circ_curr]
+	elif prev_arc and not curr_arc:
+		var pa: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[prev_e], rect)
+		var pb: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[pt_idx], rect)
+		var pc: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_edges[prev_e]["arc_control"], rect)
+		_se_ld_single_arc_angle = StageEditPolygonTools.compute_arc_central_angle(pa, pb, pc)
+		_se_ld_single_arc_edge = prev_e
+	elif curr_arc and not prev_arc:
+		var pa: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[pt_idx], rect)
+		var pb: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[(pt_idx + 1) % n], rect)
+		var pc: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_edges[curr_e]["arc_control"], rect)
+		_se_ld_single_arc_angle = StageEditPolygonTools.compute_arc_central_angle(pa, pb, pc)
+		_se_ld_single_arc_edge = curr_e
+
+
+func _stage_edit_grid_cell_px(rect: Rect2) -> float:
+	var m: float = minf(rect.size.x, rect.size.y)
+	return clampf(STAGE_EDIT_GRID_CELL_PX, 10.0, minf(24.0, m / 28.0))
+
+
+func _stage_edit_snap_norm_to_grid(norm: Vector2, rect: Rect2) -> Vector2:
+	var cell: float = _stage_edit_grid_cell_px(rect)
+	var c: Vector2 = rect.position + rect.size * 0.5
+	var rad: float = minf(rect.size.x, rect.size.y) * 0.42
+	var sp: Vector2 = c + Vector2(norm.x * rad, norm.y * rad)
+	var rel: Vector2 = sp - c
+	var qx: float = roundf(rel.x / cell) * cell
+	var qy: float = roundf(rel.y / cell) * cell
+	var sp2: Vector2 = c + Vector2(qx, qy)
+	var nn: Vector2 = StageEditPolygonTools.screen_to_norm_exact(sp2, rect)
+	nn.x = clampf(nn.x, -1.35, 1.35)
+	nn.y = clampf(nn.y, -1.35, 1.35)
+	return nn
+
+
+func _stage_edit_snap_canvas_state_to_grid(rect: Rect2) -> void:
+	for i in range(stage_edit_canvas_vertices.size()):
+		stage_edit_canvas_vertices[i] = _stage_edit_snap_norm_to_grid(stage_edit_canvas_vertices[i], rect)
+	for i in range(stage_edit_canvas_edges.size()):
+		var e: Dictionary = stage_edit_canvas_edges[i]
+		if e.get("type", "line") == "arc" and e.has("arc_control"):
+			var ac: Vector2 = e["arc_control"]
+			stage_edit_canvas_edges[i]["arc_control"] = _stage_edit_snap_norm_to_grid(ac, rect)
+
+
+func _stage_edit_canvas_norm_to_screen(norm: Vector2, rect: Rect2) -> Vector2:
+	var c: Vector2 = rect.position + rect.size * 0.5
+	var rad: float = minf(rect.size.x, rect.size.y) * 0.42
+	return c + Vector2(norm.x * rad, norm.y * rad)
+
+
+func _stage_edit_canvas_screen_to_norm(screen: Vector2, rect: Rect2) -> Vector2:
+	var c: Vector2 = rect.position + rect.size * 0.5
+	var rad: float = minf(rect.size.x, rect.size.y) * 0.42
+	if rad < 0.001:
+		return Vector2.ZERO
+	var d: Vector2 = screen - c
+	return Vector2(d.x / rad, d.y / rad)
+
+
+func _stage_edit_canvas_vertex_hit_at_screen(pos: Vector2, rect: Rect2) -> int:
+	var hr: float = STAGE_EDIT_CANVAS_HIT_VERTEX_R
+	for i in range(stage_edit_canvas_vertices.size()):
+		var sp: Vector2 = _stage_edit_canvas_norm_to_screen(stage_edit_canvas_vertices[i], rect)
+		if pos.distance_to(sp) <= hr:
+			return i
+	return -1
+
+
+func _stage_edit_bottom_button_layout(vp: Vector2) -> Array[Rect2]:
+	var btn_w: float = 168.0
+	var btn_h: float = 36.0
+	var gap: float = 12.0
+	var pad_r: float = 20.0
+	var pad_bottom: float = 16.0
+	var y: float = vp.y - STAGE_EDIT_FOOTER_H - pad_bottom - btn_h
+	var cancel_x: float = vp.x - pad_r - btn_w
+	var save_x: float = cancel_x - gap - btn_w
+	return [Rect2(save_x, y, btn_w, btn_h), Rect2(cancel_x, y, btn_w, btn_h)]
+
+
+func _stage_edit_save_button_rect(vp: Vector2) -> Rect2:
+	return _stage_edit_bottom_button_layout(vp)[0]
+
+
+func _stage_edit_cancel_button_rect(vp: Vector2) -> Rect2:
+	return _stage_edit_bottom_button_layout(vp)[1]
+
+
+func _stage_edit_save() -> void:
+	var base: String = _sanitized_stage_edit_filename(stage_edit_stage_id)
+	if base.is_empty():
+		stage_edit_last_error = "Stage ID は小文字・数字・_ のみで指定してください"
+		queue_redraw()
+		return
+	CustomStageFile.ensure_custom_stage_dir()
+	var path: String = "%s/%s.json" % [CustomStageFile.CUSTOM_STAGE_DIR, base]
+	var tidx: int = clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)
+	var shape_kind: String = STAGE_EDIT_TYPE_OPTIONS[tidx]
+	var partial: Dictionary = {"type": base, "shape_type": shape_kind}
+	var shape: Dictionary = {}
+	if shape_kind == "fish" or shape_kind == "cat_face":
+		if stage_edit_canvas_vertices.size() >= 3:
+			var pv: Array = []
+			for v in stage_edit_canvas_vertices:
+				pv.append([v.x, v.y])
+			shape["polygon_vertices"] = pv
+			var built: Dictionary = StageEditPolygonTools.build_arc_controls_for_save(stage_edit_canvas_edges)
+			if not built.is_empty():
+				var ac_out: Dictionary = {}
+				for k in built:
+					var pt: Vector2 = built[k] as Vector2
+					ac_out[str(k)] = [pt.x, pt.y]
+				shape["arc_controls"] = ac_out
+	var meta: Dictionary = stage_edit_meta_preserve.duplicate(true)
+	var payload: Dictionary = CustomStageFile.build_payload(partial, shape, meta)
+	var err: String = CustomStageFile.save_to_path(path, payload)
+	if err != "":
+		stage_edit_last_error = err
+		queue_redraw()
+		return
+	_exit_stage_edit_after_save(path)
+
+
+func _input_stage_edit(event: InputEvent) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	var crect: Rect2 = _stage_edit_canvas_rect(vp)
+	if event is InputEventMouseMotion:
+		if _stage_edit_shape_has_canvas():
+			if stage_edit_canvas_drag_idx >= 0:
+				stage_edit_canvas_vertices[stage_edit_canvas_drag_idx] = StageEditPolygonTools.get_left_drag_norm(
+					stage_edit_canvas_vertices, stage_edit_canvas_edges, crect, stage_edit_canvas_drag_idx, event.position, stage_edit_canvas_drag_norm_offset
+				)
+				StageEditPolygonTools.apply_left_drag_arc_update(
+					stage_edit_canvas_vertices, stage_edit_canvas_edges, crect,
+					_se_ld_single_arc_edge, _se_ld_single_arc_angle, _se_ld_both_edges, _se_ld_both_angles, _se_ld_both_centers, _se_ld_both_last_centers
+				)
+				_stage_edit_snap_canvas_state_to_grid(crect)
+				queue_redraw()
+				get_viewport().set_input_as_handled()
+			elif stage_edit_canvas_right_drag_idx >= 0:
+				stage_edit_canvas_right_drag_committed = stage_edit_canvas_right_drag_committed or (event.position.distance_to(stage_edit_canvas_right_down_pos) >= STAGE_EDIT_CANVAS_RIGHT_DRAG_THRESHOLD)
+				if stage_edit_canvas_right_drag_committed:
+					var nn: Vector2 = StageEditPolygonTools.screen_to_norm_exact(event.position, crect) + stage_edit_canvas_right_drag_norm_offset
+					nn.x = clampf(nn.x, -1.35, 1.35)
+					nn.y = clampf(nn.y, -1.35, 1.35)
+					nn = _stage_edit_snap_norm_to_grid(nn, crect)
+					stage_edit_canvas_vertices[stage_edit_canvas_right_drag_idx] = nn
+					StageEditPolygonTools.fix_arc_chain_controls(stage_edit_canvas_vertices, stage_edit_canvas_edges, stage_edit_canvas_right_drag_idx)
+					_stage_edit_snap_canvas_state_to_grid(crect)
+				queue_redraw()
+				get_viewport().set_input_as_handled()
+			elif crect.has_point(event.position):
+				var ne: int = StageEditPolygonTools.find_nearest_edge_screen(
+					stage_edit_canvas_vertices, stage_edit_canvas_edges, event.position, crect, STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE
+				)
+				if ne != stage_edit_canvas_hover_edge:
+					stage_edit_canvas_hover_edge = ne
+					queue_redraw()
+			elif stage_edit_canvas_hover_edge >= 0:
+				stage_edit_canvas_hover_edge = -1
+				queue_redraw()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if stage_edit_canvas_drag_idx >= 0:
+			stage_edit_canvas_vertices[stage_edit_canvas_drag_idx] = StageEditPolygonTools.get_left_drag_norm(
+				stage_edit_canvas_vertices, stage_edit_canvas_edges, crect, stage_edit_canvas_drag_idx, event.position, stage_edit_canvas_drag_norm_offset
+			)
+			StageEditPolygonTools.apply_left_drag_arc_update(
+				stage_edit_canvas_vertices, stage_edit_canvas_edges, crect,
+				_se_ld_single_arc_edge, _se_ld_single_arc_angle, _se_ld_both_edges, _se_ld_both_angles, _se_ld_both_centers, _se_ld_both_last_centers
+			)
+			_stage_edit_snap_canvas_state_to_grid(crect)
+			stage_edit_canvas_drag_idx = -1
+			_stage_edit_clear_left_drag_arc_state()
+			queue_redraw()
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		if stage_edit_canvas_right_drag_idx >= 0:
+			if not stage_edit_canvas_right_drag_committed:
+				StageEditPolygonTools.delete_point(stage_edit_canvas_vertices, stage_edit_canvas_edges, stage_edit_canvas_right_drag_idx)
+			stage_edit_canvas_right_drag_idx = -1
+			stage_edit_canvas_right_drag_committed = false
+			queue_redraw()
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		_exit_stage_edit_to_debug()
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_BACKSPACE:
+			if stage_edit_text_line == 0 and stage_edit_stage_id.length() > 0:
+				stage_edit_stage_id = stage_edit_stage_id.left(stage_edit_stage_id.length() - 1)
+			queue_redraw()
+			return
+		if event.keycode == KEY_V and (event.ctrl_pressed or event.meta_pressed):
+			if stage_edit_text_line == 0:
+				stage_edit_stage_id += _filter_stage_id_allowed_only(DisplayServer.clipboard_get())
+				if stage_edit_stage_id.length() > 48:
+					stage_edit_stage_id = stage_edit_stage_id.left(48)
+			queue_redraw()
+			return
+		if event.unicode >= 32 and event.unicode != 127:
+			var ch_str: String = String.chr(event.unicode)
+			if stage_edit_text_line == 0:
+				var ok: String = _filter_stage_id_allowed_only(ch_str)
+				if ok.length() > 0:
+					stage_edit_stage_id += ok
+					if stage_edit_stage_id.length() > 48:
+						stage_edit_stage_id = stage_edit_stage_id.left(48)
+			queue_redraw()
+			return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		var pos_r: Vector2 = event.position
+		if _stage_edit_shape_has_canvas() and crect.has_point(pos_r):
+			var vhr: int = _stage_edit_canvas_vertex_hit_at_screen(pos_r, crect)
+			if vhr >= 0:
+				stage_edit_canvas_right_drag_idx = vhr
+				stage_edit_canvas_right_down_pos = pos_r
+				stage_edit_canvas_right_drag_committed = false
+				stage_edit_canvas_right_drag_norm_offset = stage_edit_canvas_vertices[vhr] - StageEditPolygonTools.screen_to_norm_exact(pos_r, crect)
+				get_viewport().set_input_as_handled()
+				queue_redraw()
+				return
+			var eir: int = StageEditPolygonTools.find_nearest_edge_screen(
+				stage_edit_canvas_vertices, stage_edit_canvas_edges, pos_r, crect, STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE
+			)
+			if eir >= 0:
+				StageEditPolygonTools.add_point_on_edge(stage_edit_canvas_vertices, stage_edit_canvas_edges, eir, pos_r, crect, true)
+				get_viewport().set_input_as_handled()
+				queue_redraw()
+				return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var pos: Vector2 = event.position
+		if _stage_edit_shape_has_canvas() and crect.has_point(pos):
+			var hi: int = _stage_edit_canvas_vertex_hit_at_screen(pos, crect)
+			if hi >= 0:
+				_stage_edit_begin_left_drag_vertex(hi, pos, crect)
+				get_viewport().set_input_as_handled()
+				queue_redraw()
+				return
+			var eil: int = StageEditPolygonTools.find_nearest_edge_screen(
+				stage_edit_canvas_vertices, stage_edit_canvas_edges, pos, crect, STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE
+			)
+			if eil >= 0:
+				StageEditPolygonTools.add_point_on_edge(stage_edit_canvas_vertices, stage_edit_canvas_edges, eil, pos, crect, false)
+				get_viewport().set_input_as_handled()
+				queue_redraw()
+				return
+		if _stage_edit_save_button_rect(vp).has_point(pos):
+			_stage_edit_save()
+			return
+		if _stage_edit_cancel_button_rect(vp).has_point(pos):
+			_exit_stage_edit_to_debug()
+			return
+		if _stage_edit_text_rect_filename(vp).has_point(pos):
+			stage_edit_text_line = 0
+			queue_redraw()
+			return
+		if _stage_edit_fish_shape_toggle_rect(vp).has_point(pos) and STAGE_EDIT_TYPE_OPTIONS[clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)] == "fish":
+			stage_edit_include_fish_shape = not stage_edit_include_fish_shape
+			_init_stage_edit_canvas()
+			_stage_edit_snap_current_canvas_to_grid()
+			queue_redraw()
+			return
+		for ti in range(STAGE_EDIT_TYPE_OPTIONS.size()):
+			if _stage_edit_type_chip_rect(vp, ti).has_point(pos):
+				stage_edit_type_idx = ti
+				_init_stage_edit_canvas()
+				_stage_edit_snap_current_canvas_to_grid()
+				queue_redraw()
+				return
 
 
 func _input_stage_debug(event: InputEvent) -> void:
 	var vp: Vector2 = get_viewport_rect().size
+	if _debug_tools_enabled() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if _stage_debug_new_custom_button_rect(vp).has_point(event.position):
+			_enter_stage_edit_screen()
+			queue_redraw()
+			return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		game_state = "title"
 		stage_debug_field_focus_idx = -1
+		_stage_debug_sync_ime_for_field_focus()
+		game_state = "title"
 		queue_redraw()
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
@@ -1847,31 +2967,91 @@ func _input_stage_debug(event: InputEvent) -> void:
 		stage_debug_scroll = minf(_stage_debug_scroll_max(vp), stage_debug_scroll + 40.0)
 		queue_redraw()
 		return
-	if stage_debug_field_focus_idx >= 0 and event is InputEventKey and event.pressed and not event.echo:
+	if _debug_tools_enabled() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		var pos_r: Vector2 = event.position
+		var split_r: float = _stage_debug_split_x(vp)
+		var n_r: int = _stage_debug_total_rows()
+		var y0_r: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_scroll
+		var list_bottom_r: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+		for i_r in range(n_r):
+			var y1_r: float = y0_r + float(i_r) * STAGE_DEBUG_ROW_H
+			if pos_r.y >= y1_r and pos_r.y < y1_r + STAGE_DEBUG_ROW_H and pos_r.y < list_bottom_r and pos_r.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
+				if pos_r.x >= 8.0 and pos_r.x < split_r - 8.0:
+					if _stage_debug_is_custom_row(i_r):
+						_enter_stage_edit_from_path(_stage_debug_custom_path_at(i_r))
+						get_viewport().set_input_as_handled()
+					queue_redraw()
+				return
+	if stage_debug_field_focus_idx >= 0 and event is InputEventKey and event.pressed:
+		var fk_in: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+		var ime_comp: String = DisplayServer.ime_get_text()
 		if event.keycode == KEY_TAB:
-			_commit_focused_field_to_pending()
-			stage_debug_field_focus_idx = (stage_debug_field_focus_idx + 1) % STAGE_DEBUG_FIELD_KEYS.size()
-			var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
-			stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
-			queue_redraw()
+			if not event.echo:
+				_commit_focused_field_to_pending()
+				if stage_debug_last_error != "":
+					queue_redraw()
+					return
+				_stage_debug_write_selected_row_to_disk(false)
+				if stage_debug_last_error != "":
+					queue_redraw()
+					return
+				_sync_stage_debug_field_buffers()
+				var n_keys: int = STAGE_DEBUG_FIELD_KEYS.size()
+				if event.shift_pressed:
+					stage_debug_field_focus_idx = (stage_debug_field_focus_idx - 1 + n_keys) % n_keys
+				else:
+					stage_debug_field_focus_idx = (stage_debug_field_focus_idx + 1) % n_keys
+				var fk_tab: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+				stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk_tab, ""))
+				_stage_debug_sync_ime_for_field_focus()
+				queue_redraw()
 			return
 		if event.keycode == KEY_ENTER:
-			_commit_focused_field_to_pending()
-			queue_redraw()
+			if ime_comp != "":
+				queue_redraw()
+				return
+			if fk_in == "description":
+				stage_debug_edit_buffer += "\n"
+				queue_redraw()
+				return
+			if not event.echo:
+				_commit_focused_field_to_pending()
+				queue_redraw()
 			return
 		if event.keycode == KEY_BACKSPACE:
 			if stage_debug_edit_buffer.length() > 0:
 				stage_debug_edit_buffer = stage_debug_edit_buffer.left(stage_debug_edit_buffer.length() - 1)
 			queue_redraw()
 			return
-		if event.unicode >= 32 and event.unicode < 128:
-			stage_debug_edit_buffer += PackedByteArray([event.unicode]).get_string_from_utf8()
+		if event.keycode == KEY_V and (event.ctrl_pressed or event.meta_pressed):
+			if not event.echo:
+				var fk_paste: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+				if fk_paste == "stage_name" or fk_paste == "description":
+					stage_debug_edit_buffer = _filter_stage_debug_paste_for_field(fk_paste, DisplayServer.clipboard_get())
+					stage_debug_last_error = _apply_field_string_to_pending(fk_paste, stage_debug_edit_buffer)
+					_sync_stage_debug_field_buffers()
+				else:
+					stage_debug_edit_buffer += _filter_stage_debug_paste_for_field(fk_paste, DisplayServer.clipboard_get())
+				queue_redraw()
+			return
+		if fk_in == "stage_name" or fk_in == "description":
+			if event.unicode != 0:
+				var ch_u: String = String.chr(event.unicode)
+				var ok_u: String = _filter_stage_debug_char_for_field(fk_in, ch_u)
+				if ok_u.length() > 0:
+					stage_debug_edit_buffer += ok_u
+			queue_redraw()
+			return
+		if not event.echo and event.unicode >= 32 and event.unicode < 128:
+			var ch_in: String = PackedByteArray([event.unicode]).get_string_from_utf8()
+			var ok_in: String = _filter_stage_debug_char_for_field(fk_in, ch_in)
+			if ok_in.length() > 0:
+				stage_debug_edit_buffer += ok_in
 			queue_redraw()
 			return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var pos: Vector2 = event.position
 		var rects: Array[Rect2] = _stage_debug_button_rects(vp)
-		var labels: Array[String] = ["テスト", "保存", "行リセット", "全リセット", "戻る"]
 		for bi in range(rects.size()):
 			if rects[bi].has_point(pos):
 				match bi:
@@ -1880,29 +3060,78 @@ func _input_stage_debug(event: InputEvent) -> void:
 					1:
 						_stage_debug_save_selected()
 					2:
-						_stage_debug_reset_selected_row()
+						_stage_debug_open_shape_edit_for_selected()
 					3:
-						_stage_debug_reset_all_files()
+						_stage_debug_reset_selected_row()
 					4:
-						game_state = "title"
+						_stage_debug_reset_all_files()
+					5:
 						stage_debug_field_focus_idx = -1
+						_stage_debug_sync_ime_for_field_focus()
+						game_state = "title"
 				queue_redraw()
 				return
+		if _stage_debug_is_custom_row(stage_debug_selected):
+			for sni in range(3):
+				if _stage_debug_stage_name_action_button_rect(vp, sni).has_point(pos):
+					match sni:
+						0:
+							_stage_debug_stage_name_copy_to_clipboard()
+						1:
+							_stage_debug_stage_name_clear()
+						2:
+							_stage_debug_paste_into_field("stage_name")
+					queue_redraw()
+					return
+			for ai in range(3):
+				if _stage_debug_description_action_button_rect(vp, ai).has_point(pos):
+					match ai:
+						0:
+							_stage_debug_description_copy_to_clipboard()
+						1:
+							_stage_debug_description_clear()
+						2:
+							_stage_debug_paste_into_field("description")
+					queue_redraw()
+					return
 		for fi in range(STAGE_DEBUG_FIELD_KEYS.size()):
-			if _stage_debug_field_rect(vp, fi).has_point(pos):
+			if _stage_debug_field_value_rect(vp, fi).has_point(pos):
+				if fi == stage_debug_field_focus_idx:
+					queue_redraw()
+					return
+				if stage_debug_field_focus_idx >= 0:
+					_commit_focused_field_to_pending()
+					if stage_debug_last_error != "":
+						queue_redraw()
+						return
+					_stage_debug_write_selected_row_to_disk(false)
+					if stage_debug_last_error != "":
+						queue_redraw()
+						return
+					_sync_stage_debug_field_buffers()
 				stage_debug_field_focus_idx = fi
 				var fk: String = STAGE_DEBUG_FIELD_KEYS[fi]
 				stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
+				_stage_debug_sync_ime_for_field_focus()
 				queue_redraw()
 				return
 		var split: float = _stage_debug_split_x(vp)
-		var n: int = StageData.get_stages().size()
+		var n: int = _stage_debug_total_rows()
 		var y0: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_scroll
 		var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
 		for i in range(n):
 			var y1: float = y0 + float(i) * STAGE_DEBUG_ROW_H
 			if pos.y >= y1 and pos.y < y1 + STAGE_DEBUG_ROW_H and pos.y < list_bottom and pos.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
 				if pos.x >= 8.0 and pos.x < split - 8.0:
+					if i != stage_debug_selected:
+						_commit_focused_field_to_pending()
+						if stage_debug_last_error != "":
+							queue_redraw()
+							return
+						_stage_debug_write_selected_row_to_disk(false)
+						if stage_debug_last_error != "":
+							queue_redraw()
+							return
 					stage_debug_selected = i
 					_sync_stage_debug_field_buffers()
 					queue_redraw()
@@ -1912,6 +3141,49 @@ func _input_stage_debug(event: InputEvent) -> void:
 func _start_stage_debug_test() -> void:
 	_commit_focused_field_to_pending()
 	var idx: int = stage_debug_selected
+	if _stage_debug_is_custom_row(idx):
+		var path: String = _stage_debug_custom_path_at(idx)
+		var raw: Dictionary = _stage_debug_custom_raw_merged(path)
+		if raw.is_empty():
+			stage_debug_last_error = "カスタムファイルを読めません: %s" % path
+			queue_redraw()
+			return
+		var cfg: Dictionary = CustomStageFile.effective_config_with_shape(raw)
+		var err: String = StageDebugOverrides.validate_effective_config(cfg)
+		if err != "":
+			stage_debug_last_error = err
+			queue_redraw()
+			return
+		stage_debug_last_error = ""
+		debug_stage_test_seed = randi()
+		seed(debug_stage_test_seed)
+		debug_stage_test_meta_stage_name = ""
+		if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+			debug_stage_test_meta_stage_name = str((raw["meta"] as Dictionary).get("stage_name", ""))
+		var vp: Vector2 = get_viewport_rect().size
+		shape_center = Vector2(
+			vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5
+		)
+		current_stage = idx
+		debug_stage_test_mode = true
+		input_recorder = DebugInputRecorder.new()
+		stage_manager.start_stage(idx, shape_center, vp, point_positions, cfg)
+		_sync_stage_vars()
+		input_recorder.start_recording(debug_stage_test_seed, point_positions.duplicate() as Array[Vector2])
+		game_state = "guide_info"
+		guide_start_time = 0.0
+		hovered_index = -1
+		is_dragging = false
+		selected_indices.clear()
+		input_handler.reset_for_stage()
+		ui_renderer.clear_spore_particles()
+		hint_alpha = 0.0
+		hint_active = false
+		hints_triggered = [false, false]
+		guide_count_played = 0
+		queue_redraw()
+		return
+
 	var p: Dictionary = stage_debug_pending.get(idx, {})
 	var err: String = StageDebugOverrides.validate_partial_with_master(idx, p)
 	if err != "":
@@ -1927,6 +3199,7 @@ func _start_stage_debug_test() -> void:
 	stage_debug_last_error = ""
 	debug_stage_test_seed = randi()
 	seed(debug_stage_test_seed)
+	debug_stage_test_meta_stage_name = ""
 	var vp: Vector2 = get_viewport_rect().size
 	shape_center = Vector2(
 		vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5
@@ -1951,20 +3224,63 @@ func _start_stage_debug_test() -> void:
 	queue_redraw()
 
 
+## 現在選択行の pending をファイル／オーバーライドに書き出す（保存ボタンと同一ロジック）
+func _stage_debug_write_selected_row_to_disk(show_success_message: bool = true) -> void:
+	var idx: int = stage_debug_selected
+	if _stage_debug_is_custom_row(idx):
+		var path: String = _stage_debug_custom_path_at(idx)
+		var raw: Dictionary = _stage_debug_custom_raw_merged(path)
+		if raw.is_empty():
+			stage_debug_last_error = "保存できません（ファイルを読めません）"
+			return
+		var err: String = CustomStageFile.save_to_path(path, raw)
+		if err != "":
+			stage_debug_last_error = err
+		else:
+			stage_debug_custom_pending.erase(path)
+			if show_success_message:
+				stage_debug_last_error = "保存しました: %s" % path
+			else:
+				stage_debug_last_error = ""
+		return
+	var p: Dictionary = stage_debug_pending.get(idx, {})
+	var err2: String = StageDebugOverrides.save_stage_override(idx, p)
+	if err2 != "":
+		stage_debug_last_error = err2
+	else:
+		if show_success_message:
+			stage_debug_last_error = "保存しました: %s" % StageDebugOverrides.path_for_index(idx)
+		else:
+			stage_debug_last_error = ""
+
+
 func _stage_debug_save_selected() -> void:
 	_commit_focused_field_to_pending()
-	var idx: int = stage_debug_selected
-	var p: Dictionary = stage_debug_pending.get(idx, {})
-	var err: String = StageDebugOverrides.save_stage_override(idx, p)
-	if err != "":
-		stage_debug_last_error = err
-	else:
-		stage_debug_last_error = "保存しました: %s" % StageDebugOverrides.path_for_index(idx)
+	_stage_debug_write_selected_row_to_disk(true)
 	queue_redraw()
+
+
+func _stage_debug_open_shape_edit_for_selected() -> void:
+	if not _debug_tools_enabled():
+		return
+	var idx: int = stage_debug_selected
+	if not _stage_debug_is_custom_row(idx):
+		stage_debug_last_error = "図形編集は [C] カスタム行を選択したときのみ使えます"
+		queue_redraw()
+		return
+	var path: String = _stage_debug_custom_path_at(idx)
+	_enter_stage_edit_from_path(path)
 
 
 func _stage_debug_reset_selected_row() -> void:
 	var idx: int = stage_debug_selected
+	if _stage_debug_is_custom_row(idx):
+		var path: String = _stage_debug_custom_path_at(idx)
+		stage_debug_custom_pending.erase(path)
+		_sync_stage_debug_field_buffers()
+		stage_debug_last_error = "カスタムの未保存編集を破棄しました（ファイル本体は変更しません）"
+		queue_redraw()
+		return
 	stage_debug_pending.erase(idx)
 	StageDebugOverrides.delete_stage_override(idx)
 	_sync_stage_debug_field_buffers()
@@ -1974,10 +3290,26 @@ func _stage_debug_reset_selected_row() -> void:
 
 func _stage_debug_reset_all_files() -> void:
 	stage_debug_pending.clear()
+	stage_debug_custom_pending.clear()
 	StageDebugOverrides.delete_all_overrides()
 	_sync_stage_debug_field_buffers()
-	stage_debug_last_error = "全ステージの調整ファイルを削除しました"
+	stage_debug_last_error = "マスタのオーバーライドを削除し、カスタム行の未保存編集も破棄しました（user://custom_stages の JSON は削除していません）"
 	queue_redraw()
+
+
+func _stage_debug_list_row_label(row: int) -> String:
+	if row < 0 or row >= _stage_debug_total_rows():
+		return "?"
+	if row < _stage_debug_master_count():
+		var cfg: Dictionary = StageDebugOverrides.build_config_for_index(row, stage_debug_pending.get(row, {}))
+		return str(cfg.get("type", "?"))
+	var path: String = _stage_debug_custom_path_at(row)
+	var fn: String = path.get_file().get_basename()
+	var raw: Dictionary = _stage_debug_custom_raw_merged(path)
+	if raw.is_empty():
+		return "[C] %s" % fn
+	var cfg_part: Dictionary = raw["config"] as Dictionary
+	return "[C] %s" % str(cfg_part.get("type", fn))
 
 
 func _hit_debug_log_button(pos: Vector2) -> bool:

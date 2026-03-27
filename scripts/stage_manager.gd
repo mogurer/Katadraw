@@ -20,16 +20,14 @@ const REF_R_PERCENTILE_90 := 90.0
 const REF_R_PERCENTILE_95 := 95.0
 const REF_R_PERCENTILE := REF_R_PERCENTILE_95
 # ガイド固定サイズ: true で目標図形をプレイヤーに追従せず一定サイズ表示（正帰還ループ防止）
-# fish のみ例外で代表半径に追従（細長シルエットで固定時が窮屈になりやすいため）
+# guide_follows_player_radius が true のとき代表半径に追従（cfg で 0/1、デフォルトは fish のみ 1）
 const GUIDE_USE_FIXED_SIZE := true
-
-
-func _guide_follows_player_radius() -> bool:
-	return stage_type == "fish"
 
 # --- Stage state ---
 var current_stage: int = 0
 var stage_type: String = "circle"
+## StageConfig.guide_follows_player_radius を start_stage で解決した値（描画・_calculate_unified_arc_metrics 用）
+var guide_follows_player_radius: bool = false
 var min_radius: float = 0.0
 var max_radius: float = 0.0
 var clear_threshold: float = 5.0
@@ -68,6 +66,9 @@ var ideal_points: Array = []  # 理想点（原点中心）。start_stage で設
 var ideal_outline_points: Array = []  # cat_face: 描画用（弧を細かくサンプルした頂点）
 var correspondence_scale: float = 1.0
 var correspondence_rotation: float = 0.0
+# CustomStageFile / デバッグ用: cfg の shape_polygon_vertices / shape_arc_controls（JSON 由来）
+var _cfg_shape_polygon: Array = []
+var _cfg_shape_arc: Dictionary = {}
 
 # --- Guide ---
 var guide_center_1: Vector2 = Vector2.ZERO
@@ -95,9 +96,17 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 	num_points = cfg["num_points"]
 	clear_threshold = 100.0 - cfg["clear_pct"]
 	display_rate_min_pct = cfg.get("display_rate_min_pct", 50.0)
+	guide_follows_player_radius = StageConfig.resolve_guide_follows_player_radius(cfg, stage_type)
 
 	guide_radius_val = (min_radius + max_radius) / 2.0
 	guide_center_1 = shape_center
+
+	_cfg_shape_polygon.clear()
+	_cfg_shape_arc.clear()
+	if cfg.has("shape_polygon_vertices"):
+		_cfg_shape_polygon = _parse_polygon_vertices_from_cfg(cfg["shape_polygon_vertices"])
+	if cfg.has("shape_arc_controls"):
+		_cfg_shape_arc = _parse_arc_controls_from_cfg(cfg["shape_arc_controls"])
 
 	point_positions.clear()
 	ideal_points.clear()
@@ -289,14 +298,54 @@ func _generate_square_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 		pts.append(center + (ideal + noise) * base_r)
 
 
+func _parse_vec2_item(v: Variant) -> Variant:
+	if typeof(v) == TYPE_VECTOR2:
+		return v
+	if typeof(v) == TYPE_ARRAY:
+		var a: Array = v as Array
+		if a.size() < 2:
+			return null
+		return Vector2(float(a[0]), float(a[1]))
+	if typeof(v) == TYPE_DICTIONARY:
+		var d: Dictionary = v as Dictionary
+		if not d.has("x") or not d.has("y"):
+			return null
+		return Vector2(float(d["x"]), float(d["y"]))
+	return null
+
+
+func _parse_polygon_vertices_from_cfg(v: Variant) -> Array:
+	var out: Array = []
+	if typeof(v) != TYPE_ARRAY:
+		return out
+	for item in v as Array:
+		var p: Variant = _parse_vec2_item(item)
+		if p != null:
+			out.append(p)
+	return out
+
+
+func _parse_arc_controls_from_cfg(v: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if typeof(v) != TYPE_DICTIONARY:
+		return out
+	for k in v as Dictionary:
+		var p: Variant = _parse_vec2_item((v as Dictionary)[k])
+		if p == null:
+			continue
+		var ki: int = int(k) if str(k).is_valid_int() else int(k)
+		out[ki] = p
+	return out
+
+
 func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
 	"""案C: ねこの顔の理想点を生成。直線エッジと弧エッジを分けて処理"""
 	var base_r: float = (min_radius + max_radius) / 2.0
 	var variance_factor: float = cfg.get("variance", 0.15)
 	var n: int = num_points
 
-	var verts: Array = _get_cat_face_polygon_vertices()
-	var arc_ctrls: Dictionary = get_cat_face_arc_controls()
+	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _get_cat_face_polygon_vertices()
+	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
 	# 周長の重心で中心化し、同一スケールで正規化（製作中図形とガイドの中心一致用）
@@ -456,8 +505,8 @@ func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary)
 	var variance_factor: float = cfg.get("variance", 0.15)
 	var n: int = num_points
 
-	var verts: Array = get_fish_polygon_vertices()
-	var arc_ctrls: Dictionary = get_fish_arc_controls()
+	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else get_fish_polygon_vertices()
+	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_fish_arc_controls()
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -742,9 +791,13 @@ func _get_outline_edges_for_stage(stage_t: String) -> Array:
 		"square":
 			return _build_square_edges()
 		"cat_face":
-			return _build_polygon_arc_edges(_get_cat_face_polygon_vertices(), get_cat_face_arc_controls())
+			var cv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _get_cat_face_polygon_vertices()
+			var cc: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
+			return _build_polygon_arc_edges(cv, cc)
 		"fish":
-			return _build_polygon_arc_edges(get_fish_polygon_vertices(), get_fish_arc_controls())
+			var fv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else get_fish_polygon_vertices()
+			var fc: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_fish_arc_controls()
+			return _build_polygon_arc_edges(fv, fc)
 		"star":
 			return _build_polygon_arc_edges(get_star_polygon_vertices(), get_star_arc_controls())
 		"heptagram":
@@ -1216,7 +1269,7 @@ func _calculate_unified_arc_metrics(pts: Array[Vector2]) -> void:
 	var m: Dictionary = _calc_unified_arc_metrics(pts, 0, n)
 	current_centroid = m["centroid"]
 	current_avg_radius = m["avg_r"]
-	var use_fixed_guide: bool = GUIDE_USE_FIXED_SIZE and not _guide_follows_player_radius()
+	var use_fixed_guide: bool = GUIDE_USE_FIXED_SIZE and not guide_follows_player_radius
 	ideal_display_radius = guide_radius_val if use_fixed_guide else current_avg_radius
 	current_circularity_error = m["circ_err"]
 	current_circularity = m["circ"]

@@ -16,6 +16,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"zigzag": 0.08,
 		"clear_pct": 98.0,
 		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 	},
 	"square": {
 		"num_points": 4,
@@ -26,6 +27,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"zigzag": 0.08,
 		"clear_pct": 98.0,
 		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 	},
 	"circle": {
 		"num_points": 12,
@@ -36,6 +38,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"zigzag": 0.15,
 		"clear_pct": 97.0,
 		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 	},
 	"two_circles": {
 		"num_points": 24,
@@ -47,6 +50,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"zigzag": 0.30,
 		"clear_pct": 96.0,
 		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 	},
 	"star": {
 		"num_points": 10,
@@ -57,6 +61,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"zigzag": 0.35,
 		"clear_pct": 93.0,
 		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 	},
 	"cat_face": {
 		"num_points": 18,
@@ -65,6 +70,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"variance": 0.15,
 		"clear_pct": 95.0,
 		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 	},
 	"fish": {
 		"num_points": 16,
@@ -73,8 +79,25 @@ const TYPE_DEFAULTS: Dictionary = {
 		"variance": 0.15,
 		"clear_pct": 95.0,
 		"display_rate_min_pct": 75.0,
+		"guide_follows_player_radius": 1,
 	},
 }
+
+
+## ガイド表示・メトリクス: 0=固定ガイド寄り、1=プレイヤー代表半径に追従（細長シルエット向け）。
+## cfg にキーが無いときは従来互換で fish のみ true。
+static func resolve_guide_follows_player_radius(cfg: Dictionary, stage_type_str: String) -> bool:
+	if cfg.has("guide_follows_player_radius"):
+		var v: Variant = cfg["guide_follows_player_radius"]
+		if typeof(v) == TYPE_BOOL:
+			return v
+		if typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT:
+			return int(v) != 0
+		if typeof(v) == TYPE_STRING:
+			var s: String = str(v).strip_edges().to_lower()
+			return s == "1" or s == "true" or s == "yes"
+		return false
+	return stage_type_str == "fish"
 
 
 ## デフォルトにオーバーライドをマージして完全な設定を返す。

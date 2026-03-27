@@ -1,0 +1,28 @@
+{
+	"schema_version": 1,
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"display_name": "サンプル（本番マスタへ取り込む前の試用）"
+	},
+	"config": {
+		"type": "sample_fish",
+		"shape_type": "fish",
+		"num_points": 9,
+		"min_radius": 320.0,
+		"max_radius": 560.0,
+		"variance": 0.3,
+		"display_rate_min_pct": 82.0,
+		"clear_pct": 99.0
+	},
+	"shape": {
+		"polygon_vertices": [
+			[-0.9791, 0.0],
+			[-0.5983, -0.3807],
+			[0.1632, -0.3807],
+			[0.9247, 0.3807],
+			[0.9247, -0.3807],
+			[0.1632, 0.3807],
+			[-0.5983, 0.3807]
+		]
+	}
+}

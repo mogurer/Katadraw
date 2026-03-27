@@ -130,6 +130,16 @@ static func validate_effective_config(cfg: Dictionary) -> String:
 		var s1: int = int((gs as Array)[1])
 		if s0 + s1 != np:
 			return "group_sizes の合計が num_points と一致しません"
+	if cfg.has("guide_follows_player_radius"):
+		var gv: Variant = cfg["guide_follows_player_radius"]
+		if typeof(gv) == TYPE_BOOL:
+			pass
+		elif typeof(gv) == TYPE_INT or typeof(gv) == TYPE_FLOAT:
+			var gi: int = int(gv)
+			if gi != 0 and gi != 1:
+				return "guide_follows_player_radius は 0 または 1"
+		else:
+			return "guide_follows_player_radius は 0 または 1"
 	return ""
 
 

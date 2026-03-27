@@ -438,6 +438,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_results(vp)
 		"stage_debug":
 			_draw_stage_debug(vp)
+		"stage_edit":
+			_draw_stage_edit(vp)
 
 	# 画面遷移フェードオーバーレイ
 	if _transition_alpha < 1.0:
@@ -1093,6 +1095,25 @@ func _draw_icon_outline_closed(pts_norm: Array, center: Vector2, r: float, col: 
 		_game.draw_line(a, b, col, 2.0, true)
 
 
+func _draw_stage_custom_shape_preview(verts: Array[Vector2], edges: Array[Dictionary], preview_rect: Rect2, line_col: Color) -> void:
+	var n: int = verts.size()
+	if n < 3:
+		return
+	var ne: int = mini(edges.size(), n)
+	for ei in range(ne):
+		var ed: Dictionary = edges[ei]
+		var p0s: Vector2 = StageEditPolygonTools.norm_to_screen(verts[ei], preview_rect)
+		var p1s: Vector2 = StageEditPolygonTools.norm_to_screen(verts[(ei + 1) % n], preview_rect)
+		if ed.get("type", "line") == "arc" and ed.has("arc_control"):
+			var acs: Vector2 = StageEditPolygonTools.norm_to_screen(ed["arc_control"], preview_rect)
+			var arc_pts: Array = StageEditPolygonTools.sample_arc_3points(p0s, p1s, acs)
+			if arc_pts.size() >= 2:
+				for j in range(arc_pts.size() - 1):
+					_game.draw_line(arc_pts[j], arc_pts[j + 1], line_col, 1.5, true)
+		else:
+			_game.draw_line(p0s, p1s, line_col, 1.75, true)
+
+
 func _draw_stage_debug_type_icon(center: Vector2, r: float, type_str: String, c: Color) -> void:
 	if type_str == "fish" or type_str == "cat_face":
 		var pts: Array = _game.stage_manager.get_normalized_outline_for_icon_debug(type_str)
@@ -1134,6 +1155,16 @@ func _draw_stage_debug_type_icon(center: Vector2, r: float, type_str: String, c:
 			_game.draw_rect(Rect2(center.x - r * 0.65, center.y - r * 0.65, r * 1.3, r * 1.3), c, false, 2.0)
 
 
+func _draw_stage_debug_text_action_button(r: Rect2, label: String, text_c: Color) -> void:
+	_game.draw_rect(r, Color(0.96, 0.94, 0.95))
+	_game.draw_rect(r, Color(0.45, 0.4, 0.48), false, 1.0)
+	var fs_btn: int = 9
+	var sz: Vector2 = _game.font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_btn)
+	var tx: float = clampf(r.position.x + (r.size.x - sz.x) * 0.5, r.position.x + 2.0, r.position.x + maxf(2.0, r.size.x - sz.x - 2.0))
+	var ty: float = r.position.y + (r.size.y + sz.y) * 0.5 - 1.0
+	_game.draw_string(_game.font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_btn, text_c)
+
+
 func _draw_stage_debug(vp: Vector2) -> void:
 	_draw_bg(vp)
 	var split: float = _game._stage_debug_split_x(vp)
@@ -1142,58 +1173,266 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	var text_c: Color = Color(0.26, 0.21, 0.28)
 	var guide_w: float = minf(vp.x - 280.0, 560.0)
 	_game.draw_string(_game.font_bold, Vector2(24, 48), "STAGE DEBUG (F2)", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 36, accent)
-	_game.draw_string(_game.font, Vector2(24, 86), "Wheel: スクロール | ESC: タイトル | 左で選択 | 右で編集 Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
+	_game.draw_string(_game.font, Vector2(24, 86), "Wheel: スクロール | ESC: タイトル | [C]=custom_stages | 左で選択 | 右で編集・図形編集 | Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
 	if _game.stage_debug_last_error != "":
 		_game.draw_string(_game.font, Vector2(24, 112), _game.stage_debug_last_error, HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.95, 0.3, 0.2))
+	if _game._debug_tools_enabled():
+		var nr: Rect2 = _game._stage_debug_new_custom_button_rect(vp)
+		_game.draw_rect(nr, Color(0.95, 0.19, 0.32, 0.2))
+		_game.draw_rect(nr, Color(0.26, 0.21, 0.28), false, 2.0)
+		_game.draw_string(_game.font, Vector2(nr.position.x + 8.0, nr.position.y + 21.0), "新規", HORIZONTAL_ALIGNMENT_LEFT, nr.size.x - 16.0, 13, Color(0.26, 0.21, 0.28))
 	# 右側パネル（白）+ 区切り線
 	var panel_top: float = _game._stage_debug_fields_start_y() - 8.0
 	var panel_rect := Rect2(split + 4.0, panel_top, vp.x - split - 8.0, vp.y - panel_top - _game.STAGE_DEBUG_CONTENT_BOTTOM_MARGIN)
 	_game.draw_rect(panel_rect, Color(1.0, 1.0, 1.0, 0.94))
 	_game.draw_rect(panel_rect, Color(0.85, 0.82, 0.86), false, 1.5)
 	_game.draw_line(Vector2(split, _game.STAGE_DEBUG_LIST_TOP_Y - 4.0), Vector2(split, vp.y - _game.STAGE_DEBUG_CONTENT_BOTTOM_MARGIN), text_c, 2.0)
-	# 左: ステージ一覧（スクロール）
-	var stages: Array = StageData.get_stages()
+	# 左: ステージ一覧（マスタ + user://custom_stages の Edit 産）
+	var total_rows: int = _game._stage_debug_total_rows()
+	var master_n: int = _game._stage_debug_master_count()
 	var y0: float = _game.STAGE_DEBUG_LIST_TOP_Y - _game.stage_debug_scroll
 	var fs: int = 16
 	var list_left: float = 8.0
 	var list_w: float = split - list_left - 8.0
 	var icon_r: float = minf(26.0, (_game.STAGE_DEBUG_ROW_H - 12.0) * 0.45)
-	for i in range(stages.size()):
+	var prev_sz: float = minf(icon_r * 2.5, _game.STAGE_DEBUG_ROW_H - 10.0)
+	for i in range(total_rows):
 		var y: float = y0 + float(i) * _game.STAGE_DEBUG_ROW_H
 		if y + _game.STAGE_DEBUG_ROW_H < _game.STAGE_DEBUG_LIST_TOP_Y or y > list_bottom:
 			continue
-		var cfg: Dictionary = StageDebugOverrides.build_config_for_index(i, _game.stage_debug_pending.get(i, {}))
+		var cfg: Dictionary = {}
+		var tname: String = "?"
+		var raw_custom: Dictionary = {}
+		var label_max_w: float = list_w - icon_r * 2.0 - 20.0
+		if i < master_n:
+			cfg = StageDebugOverrides.build_config_for_index(i, _game.stage_debug_pending.get(i, {}))
+			tname = str(cfg.get("type", "?"))
+		else:
+			raw_custom = _game._stage_debug_custom_raw_merged(_game._stage_debug_custom_path_at(i))
+			label_max_w = list_w - prev_sz - 22.0
+			if not raw_custom.is_empty():
+				var cfg_part: Dictionary = raw_custom["config"] as Dictionary
+				tname = str(cfg_part.get("shape_type", cfg_part.get("type", "?")))
+				cfg = CustomStageFile.effective_config_with_shape(raw_custom)
 		var sel: bool = i == _game.stage_debug_selected
 		var row_rect := Rect2(list_left, y, list_w, _game.STAGE_DEBUG_ROW_H - 4.0)
 		if sel:
 			_game.draw_rect(row_rect, Color(0.95, 0.19, 0.32, 0.14))
 		_game.draw_rect(row_rect, Color(0.88, 0.86, 0.88), false, 1.5)
-		var tname: String = str(cfg.get("type", "?"))
-		_game.draw_string(_game.font, Vector2(list_left + 10.0, y + 30.0), tname, HORIZONTAL_ALIGNMENT_LEFT, list_w - icon_r * 2.0 - 20.0, fs, text_c)
+		var row_lbl: String = _game._stage_debug_list_row_label(i)
+		_game.draw_string(_game.font, Vector2(list_left + 10.0, y + 30.0), row_lbl, HORIZONTAL_ALIGNMENT_LEFT, label_max_w, fs, text_c)
 		var icx: float = list_left + list_w - icon_r - 12.0
 		var icy: float = y + _game.STAGE_DEBUG_ROW_H * 0.5 - 2.0
-		_draw_stage_debug_type_icon(Vector2(icx, icy), icon_r, tname, accent if sel else text_c)
-	# ボタン（テスト・保存・行リセット | 右上 全リセット・戻る）
+		var drew_preview: bool = false
+		if i >= master_n and not raw_custom.is_empty():
+			var sh_pv: Variant = raw_custom.get("shape", {})
+			if typeof(sh_pv) == TYPE_DICTIONARY:
+				var se: Dictionary = StageEditPolygonTools.shape_polygon_vertices_and_edges(sh_pv as Dictionary)
+				if se.get("ok", false):
+					var pr: Rect2 = Rect2(icx - prev_sz * 0.5, icy - prev_sz * 0.5, prev_sz, prev_sz)
+					_game.draw_rect(pr, Color(1.0, 1.0, 1.0, 0.92))
+					_game.draw_rect(pr, Color(0.82, 0.8, 0.84), false, 1.0)
+					var verts_pv: Array[Vector2] = se["verts"] as Array[Vector2]
+					var edges_pv: Array[Dictionary] = se["edges"] as Array[Dictionary]
+					_draw_stage_custom_shape_preview(verts_pv, edges_pv, pr, accent if sel else text_c)
+					drew_preview = true
+		if not drew_preview:
+			_draw_stage_debug_type_icon(Vector2(icx, icy), icon_r, tname, accent if sel else text_c)
+	# ボタン（テスト・保存・図形編集・設定リセット | 右上 全リセット・戻る）
 	var rects: Array[Rect2] = _game._stage_debug_button_rects(vp)
-	var bl: Array[String] = ["テスト", "保存", "行リセット", "全リセット", "戻る"]
+	var bl: Array[String] = ["テスト", "保存", "図形編集", "設定リセット", "全リセット", "戻る"]
 	for bi in range(rects.size()):
 		var r: Rect2 = rects[bi]
 		_game.draw_rect(r, Color(0.95, 0.19, 0.32, 0.18))
 		_game.draw_rect(r, text_c, false, 2.0)
-		var fs_btn: int = 12 if r.size.x < 70.0 else 13
-		_game.draw_string(_game.font, Vector2(r.position.x + 5.0, r.position.y + 21.0), bl[bi], HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 10.0, fs_btn, text_c)
-	# 右: フィールド（1列）
-	for fi in range(_game.STAGE_DEBUG_FIELD_KEYS.size()):
-		var fr: Rect2 = _game._stage_debug_field_rect(vp, fi)
+		var fs_btn: int = 11 if r.size.x < 58.0 else (12 if r.size.x < 72.0 else 13)
+		_game.draw_string(_game.font, Vector2(r.position.x + 4.0, r.position.y + 21.0), bl[bi], HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 8.0, fs_btn, text_c)
+	# 右: ラベル列（固定・幅は最長ラベルを測定）+ 値入力欄
+	var dbg_margin: float = 12.0
+	var label_w: float = _game._stage_debug_field_label_column_width()
+	var label_left: float = split + dbg_margin
+	var gap_dbg: float = _game.STAGE_DEBUG_FIELD_VALUE_GAP
+	var fs_lbl: int = _game.STAGE_DEBUG_FIELD_LABEL_FS
+	var grid_c: Color = Color(0.85, 0.82, 0.86)
+	var n_fields: int = _game.STAGE_DEBUG_FIELD_KEYS.size()
+	if n_fields > 0:
+		var fr0: Rect2 = _game._stage_debug_field_value_rect(vp, 0)
+		var frN: Rect2 = _game._stage_debug_field_value_rect(vp, n_fields - 1)
+		var div_x: float = label_left + label_w + gap_dbg * 0.5
+		_game.draw_line(Vector2(div_x, fr0.position.y - 2.0), Vector2(div_x, frN.position.y + frN.size.y + 4.0), grid_c, 1.0)
+	for fi in range(n_fields):
+		var fr_val: Rect2 = _game._stage_debug_field_value_rect(vp, fi)
 		var fk: String = _game.STAGE_DEBUG_FIELD_KEYS[fi]
 		var buf: String = str(_game.stage_debug_field_buffers.get(fk, ""))
 		var focus: bool = fi == _game.stage_debug_field_focus_idx
-		_game.draw_rect(fr, Color(1.0, 1.0, 1.0))
-		_game.draw_rect(fr, accent if focus else Color(0.26, 0.21, 0.28), false, 5.75 if focus else 1.25)
+		var row_bottom: float = fr_val.position.y + fr_val.size.y + 4.0
+		_game.draw_line(Vector2(label_left, row_bottom), Vector2(vp.x - dbg_margin, row_bottom), grid_c, 1.0)
+		if fi == 0:
+			_game.draw_line(Vector2(label_left, fr_val.position.y - 2.0), Vector2(vp.x - dbg_margin, fr_val.position.y - 2.0), grid_c, 1.0)
+		var lbl_txt: String = "%s:" % fk
+		var lbl_sz: Vector2 = _game.font.get_string_size(lbl_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_lbl)
+		var lbl_x: float = label_left + label_w - lbl_sz.x - 4.0
+		var lbl_y: float = fr_val.position.y + 16.0
+		if fk == "description":
+			lbl_y = fr_val.position.y + fr_val.size.y * 0.5 - lbl_sz.y * 0.5
+		_game.draw_string(_game.font, Vector2(lbl_x, lbl_y), lbl_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_lbl, text_c)
+		_game.draw_rect(fr_val, Color(1.0, 1.0, 1.0))
+		_game.draw_rect(fr_val, accent if focus else Color(0.26, 0.21, 0.28), false, 5.75 if focus else 1.25)
 		var show: String = buf
 		if focus:
 			show = _game.stage_debug_edit_buffer
-		_game.draw_string(_game.font, Vector2(fr.position.x + 4, fr.position.y + 16), "%s: %s" % [fk, show], HORIZONTAL_ALIGNMENT_LEFT, fr.size.x - 8, 14, text_c)
+		if fk == "description":
+			var desc_fs: int = _game.STAGE_DEBUG_DESC_LINE_FS
+			var pad_t: float = _game.STAGE_DEBUG_DESC_PAD_TOP
+			var lgap: float = _game.STAGE_DEBUG_DESC_LINE_INNER_GAP
+			var lines_d: PackedStringArray = show.split("\n")
+			var max_draw: int = _game.STAGE_DEBUG_DESC_MAX_LINES
+			var n_draw: int = mini(lines_d.size(), max_draw)
+			var ly: float = fr_val.position.y + pad_t + _game.font.get_ascent(desc_fs)
+			for dli in range(n_draw):
+				_game.draw_string(
+					_game.font, Vector2(fr_val.position.x + 4.0, ly), lines_d[dli],
+					HORIZONTAL_ALIGNMENT_LEFT, fr_val.size.x - 8.0, desc_fs, text_c
+				)
+				ly += _game.font.get_height(desc_fs) + lgap
+		elif fk == "stage_name":
+			var fs_sn: int = 14
+			var baseline_sn: float = fr_val.position.y + (fr_val.size.y - _game.font.get_height(fs_sn)) * 0.5 + _game.font.get_ascent(fs_sn)
+			_game.draw_string(_game.font, Vector2(fr_val.position.x + 4, baseline_sn), show, HORIZONTAL_ALIGNMENT_LEFT, fr_val.size.x - 8, fs_sn, text_c)
+		else:
+			_game.draw_string(_game.font, Vector2(fr_val.position.x + 4, fr_val.position.y + 16), show, HORIZONTAL_ALIGNMENT_LEFT, fr_val.size.x - 8, 14, text_c)
+		if _game._stage_debug_is_custom_row(_game.stage_debug_selected):
+			if fk == "stage_name":
+				_draw_stage_debug_text_action_button(_game._stage_debug_stage_name_action_button_rect(vp, 0), "コピー", text_c)
+				_draw_stage_debug_text_action_button(_game._stage_debug_stage_name_action_button_rect(vp, 1), "消去", text_c)
+				_draw_stage_debug_text_action_button(_game._stage_debug_stage_name_action_button_rect(vp, 2), "貼り付け", text_c)
+			elif fk == "description":
+				_draw_stage_debug_text_action_button(_game._stage_debug_description_action_button_rect(vp, 0), "コピー", text_c)
+				_draw_stage_debug_text_action_button(_game._stage_debug_description_action_button_rect(vp, 1), "消去", text_c)
+				_draw_stage_debug_text_action_button(_game._stage_debug_description_action_button_rect(vp, 2), "貼り付け", text_c)
+
+
+func _stage_edit_draw_canvas_grid(canvas_r: Rect2) -> void:
+	var cell: float = _game._stage_edit_grid_cell_px(canvas_r)
+	var cx: float = canvas_r.position.x + canvas_r.size.x * 0.5
+	var cy: float = canvas_r.position.y + canvas_r.size.y * 0.5
+	var dot_col := Color(0.78, 0.76, 0.82, 0.5)
+	var major_col := Color(0.68, 0.66, 0.72, 0.65)
+	var axis_col := Color(0.45, 0.42, 0.48, 0.75)
+	var i0x: int = int(floor((canvas_r.position.x - cx) / cell)) - 1
+	var i1x: int = i0x + int(ceil(canvas_r.size.x / cell)) + 3
+	for i in range(i0x, i1x + 1):
+		var xf: float = cx + float(i) * cell
+		if xf < canvas_r.position.x or xf > canvas_r.position.x + canvas_r.size.x:
+			continue
+		var is_axis: bool = absf(xf - cx) < 0.5
+		var is_major: bool = (i % 5) == 0
+		var col: Color = axis_col if is_axis else (major_col if is_major else dot_col)
+		var w: float = 1.5 if is_axis else (1.2 if is_major else 1.0)
+		_game.draw_line(Vector2(xf, canvas_r.position.y), Vector2(xf, canvas_r.position.y + canvas_r.size.y), col, w, true)
+	var i0y: int = int(floor((canvas_r.position.y - cy) / cell)) - 1
+	var i1y: int = i0y + int(ceil(canvas_r.size.y / cell)) + 3
+	for j in range(i0y, i1y + 1):
+		var yf: float = cy + float(j) * cell
+		if yf < canvas_r.position.y or yf > canvas_r.position.y + canvas_r.size.y:
+			continue
+		var is_axis: bool = absf(yf - cy) < 0.5
+		var is_major: bool = (j % 5) == 0
+		var col: Color = axis_col if is_axis else (major_col if is_major else dot_col)
+		var w: float = 1.5 if is_axis else (1.2 if is_major else 1.0)
+		_game.draw_line(Vector2(canvas_r.position.x, yf), Vector2(canvas_r.position.x + canvas_r.size.x, yf), col, w, true)
+
+
+func _draw_stage_edit(vp: Vector2) -> void:
+	_draw_bg(vp)
+	var accent: Color = Color(0.95, 0.19, 0.32)
+	var text_c: Color = Color(0.26, 0.21, 0.28)
+	var split_x: float = _game._stage_edit_split_x(vp)
+	var canvas_r: Rect2 = _game._stage_edit_canvas_rect(vp)
+	var panel_r: Rect2 = _game._stage_edit_right_panel_rect(vp)
+	var footer_top: float = vp.y - _game.STAGE_EDIT_FOOTER_H
+	_game.draw_string(_game.font_bold, Vector2(20, 34), "CUSTOM STAGE EDIT (v1)", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 40, 28, accent)
+	_game.draw_line(Vector2(split_x, _game.STAGE_EDIT_TOP_BAR + 4), Vector2(split_x, footer_top), Color(0.78, 0.72, 0.66), 1.0)
+	_game.draw_rect(panel_r, Color(0.96, 0.945, 0.92))
+	_game.draw_rect(panel_r, Color(0.78, 0.72, 0.66), false, 1.0)
+	var guide_w: float = panel_r.size.x - 4.0
+	_game.draw_string(_game.font, Vector2(panel_r.position.x, panel_r.position.y + 10), "保存先: user://custom_stages/＜Stage ID＞.json（config.type と同一）", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 13, text_c)
+	_game.draw_string(_game.font, Vector2(panel_r.position.x, panel_r.position.y + 28), "fish / cat_face: 左＝辺に直線で点／頂点を左ドラッグ。右＝辺に円弧で点、頂点は短押しで削除・ドラッグで移動。", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 13, Color(0.35, 0.28, 0.35))
+	var fr: Rect2 = _game._stage_edit_text_rect_filename(vp)
+	_game.draw_string(_game.font, Vector2(panel_r.position.x, fr.position.y - 18), "Stage ID（config.type・小文字・数字・_ のみ）", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 14, text_c)
+	var fn_focus: bool = _game.stage_edit_text_line == 0
+	_game.draw_rect(fr, Color(1.0, 1.0, 1.0))
+	_game.draw_rect(fr, accent if fn_focus else text_c, false, 3.0 if fn_focus else 1.5)
+	_game.draw_string(_game.font, Vector2(fr.position.x + 6, fr.position.y + 20), _game.stage_edit_stage_id, HORIZONTAL_ALIGNMENT_LEFT, fr.size.x - 12, 16, text_c)
+	_game.draw_string(_game.font, Vector2(panel_r.position.x, fr.position.y + fr.size.y + 12), "shape_type（クリックで選択）", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 14, text_c)
+	var n_types: int = _game.STAGE_EDIT_TYPE_OPTIONS.size()
+	var tidx: int = clampi(_game.stage_edit_type_idx, 0, n_types - 1)
+	for ti in range(n_types):
+		var cr: Rect2 = _game._stage_edit_type_chip_rect(vp, ti)
+		var nm: String = _game.STAGE_EDIT_TYPE_OPTIONS[ti]
+		var sel: bool = ti == tidx
+		_game.draw_rect(cr, Color(0.95, 0.19, 0.32, 0.22) if sel else Color(0.92, 0.9, 0.92))
+		_game.draw_rect(cr, accent if sel else text_c, false, 2.0)
+		_game.draw_string(_game.font, Vector2(cr.position.x + 6, cr.position.y + 19), nm, HORIZONTAL_ALIGNMENT_LEFT, cr.size.x - 12, 13, text_c)
+	var cur_type: String = _game.STAGE_EDIT_TYPE_OPTIONS[tidx]
+	var fish_on: bool = cur_type == "fish"
+	var tr: Rect2 = _game._stage_edit_fish_shape_toggle_rect(vp)
+	_game.draw_rect(tr, Color(1.0, 1.0, 1.0))
+	_game.draw_rect(tr, text_c, false, 1.5)
+	if fish_on and _game.stage_edit_include_fish_shape:
+		_game.draw_line(Vector2(tr.position.x + 6, tr.position.y + 14), Vector2(tr.position.x + 11, tr.position.y + 19), accent, 2.0, true)
+		_game.draw_line(Vector2(tr.position.x + 11, tr.position.y + 19), Vector2(tr.position.x + 20, tr.position.y + 8), accent, 2.0, true)
+	var toggle_lbl: String = "fish の初期頂点に res://samples/custom_stage.example.json の polygon を使う"
+	if not fish_on:
+		toggle_lbl = "（shape_type が fish のときのみ）"
+	_game.draw_string(_game.font, Vector2(tr.position.x + 34, tr.position.y + 20), toggle_lbl, HORIZONTAL_ALIGNMENT_LEFT, panel_r.size.x - 40.0, 13, text_c if fish_on else Color(0.5, 0.48, 0.52))
+	_game.draw_string(_game.font, Vector2(canvas_r.position.x, canvas_r.position.y - 16), "キャンバス: グリッドスナップ（約24px）／左＝直線で点 ／ 右＝円弧で点", HORIZONTAL_ALIGNMENT_LEFT, canvas_r.size.x, 13, Color(0.4, 0.35, 0.42))
+	var has_cv: bool = cur_type == "fish" or cur_type == "cat_face"
+	if has_cv:
+		_game.draw_rect(canvas_r, Color(0.97, 0.96, 0.97))
+		_stage_edit_draw_canvas_grid(canvas_r)
+		_game.draw_rect(canvas_r, Color(0.55, 0.5, 0.58), false, 1.5)
+		var verts: Array[Vector2] = _game.stage_edit_canvas_vertices
+		var edges: Array = _game.stage_edit_canvas_edges
+		var n: int = verts.size()
+		var hover_e: int = _game.stage_edit_canvas_hover_edge
+		var line_c: Color = Color(0.35, 0.3, 0.42)
+		var line_hover_c: Color = Color(0.50, 0.55, 0.70)
+		var arc_c: Color = Color(0.40, 0.45, 0.55)
+		for ei in range(edges.size()):
+			var p0s: Vector2 = _game._stage_edit_canvas_norm_to_screen(verts[ei], canvas_r)
+			var p1s: Vector2 = _game._stage_edit_canvas_norm_to_screen(verts[(ei + 1) % n], canvas_r)
+			var ed: Dictionary = edges[ei]
+			var is_arc: bool = ed.get("type", "line") == "arc" and ed.has("arc_control")
+			var seg_col: Color = line_hover_c if ei == hover_e else line_c
+			if is_arc:
+				var acs: Vector2 = _game._stage_edit_canvas_norm_to_screen(ed["arc_control"], canvas_r)
+				var arc_pts: Array = StageEditPolygonTools.sample_arc_3points(p0s, p1s, acs)
+				if arc_pts.size() >= 2:
+					for j in range(arc_pts.size() - 1):
+						_game.draw_line(arc_pts[j], arc_pts[j + 1], arc_c, 2.5, true)
+			else:
+				_game.draw_line(p0s, p1s, seg_col, 2.5, true)
+		for vi in range(n):
+			var hp: Vector2 = _game._stage_edit_canvas_norm_to_screen(verts[vi], canvas_r)
+			_game.draw_circle(hp, _game.STAGE_EDIT_CANVAS_HANDLE_R, Color(0.95, 0.19, 0.32, 0.35))
+			_game.draw_arc(hp, _game.STAGE_EDIT_CANVAS_HANDLE_R, 0.0, TAU, 24, Color(0.95, 0.19, 0.32), 2.0, true)
+	else:
+		_game.draw_rect(canvas_r, Color(0.93, 0.92, 0.93))
+		_stage_edit_draw_canvas_grid(canvas_r)
+		_game.draw_rect(canvas_r, Color(0.65, 0.62, 0.68), false, 1.25)
+		_game.draw_string(_game.font, Vector2(canvas_r.position.x + 12, canvas_r.position.y + canvas_r.size.y * 0.45), "図形キャンバスは fish / cat_face のみ", HORIZONTAL_ALIGNMENT_LEFT, canvas_r.size.x - 24, 15, Color(0.5, 0.46, 0.52))
+	var sr: Rect2 = _game._stage_edit_save_button_rect(vp)
+	var cbr: Rect2 = _game._stage_edit_cancel_button_rect(vp)
+	_game.draw_rect(sr, Color(0.95, 0.19, 0.32, 0.22))
+	_game.draw_rect(sr, text_c, false, 2.0)
+	_game.draw_string(_game.font, Vector2(sr.position.x + 10, sr.position.y + 23), "保存して一覧へ", HORIZONTAL_ALIGNMENT_LEFT, sr.size.x - 20, 14, text_c)
+	_game.draw_rect(cbr, Color(0.88, 0.86, 0.88))
+	_game.draw_rect(cbr, text_c, false, 2.0)
+	_game.draw_string(_game.font, Vector2(cbr.position.x + 36, cbr.position.y + 23), "キャンセル", HORIZONTAL_ALIGNMENT_LEFT, cbr.size.x - 72, 14, text_c)
+	if _game.stage_edit_last_error != "":
+		_game.draw_string(_game.font, Vector2(panel_r.position.x, vp.y - 50), _game.stage_edit_last_error, HORIZONTAL_ALIGNMENT_LEFT, panel_r.size.x, 15, Color(0.95, 0.3, 0.2))
+	_game.draw_string(_game.font, Vector2(40, vp.y - 22), "ESC: 戻る | キャンバス: グリッドスナップ・左＝直線追加/ドラッグ | 右＝円弧追加・削除/移動", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 80, 13, Color(0.45, 0.4, 0.48))
 
 
 func _draw_debug_log_button(vp: Vector2) -> void:
@@ -1852,6 +2091,8 @@ func _draw_guide_info(vp: Vector2) -> void:
 	var y3: float = y2 + num_desc_h + gap2 + desc_asc
 	var a3: float = e3
 	var type_desc: String = _stage_renderer.get_type_description()
+	if _game.debug_stage_test_mode and _game.debug_stage_test_meta_stage_name.strip_edges() != "":
+		type_desc = _game.debug_stage_test_meta_stage_name
 	_game.draw_string(_game.font, Vector2(tx, y3 + slide_px * (1.0 - e3)), type_desc, HORIZONTAL_ALIGNMENT_CENTER, text_w, desc_fs, Color(0.35, 0.28, 0.35, a3))
 
 	# 上部ブロックの下端
