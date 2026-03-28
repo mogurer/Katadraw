@@ -219,6 +219,8 @@ var stage_edit_canvas_right_drag_committed: bool = false
 ## Edit キャンバス用 undo / redo（頂点・辺のスナップショット）
 var stage_edit_undo_stack: Array = []
 var stage_edit_redo_stack: Array = []
+## ◀▶▲▼ 鏡像プレビュー（各ボタンでトグル、データは変更しない）
+var stage_edit_mirror_preview: Array[bool] = [false, false, false, false]
 var _se_ld_single_arc_edge: int = -1
 var _se_ld_single_arc_angle: float = 0.0
 var _se_ld_both_edges: Array[int] = []
@@ -2417,6 +2419,7 @@ func _enter_stage_edit_screen() -> void:
 	stage_edit_canvas_right_drag_committed = false
 	stage_edit_undo_stack.clear()
 	stage_edit_redo_stack.clear()
+	stage_edit_mirror_preview = [false, false, false, false]
 	_init_stage_edit_canvas()
 	_stage_edit_snap_current_canvas_to_grid()
 	game_state = "stage_edit"
@@ -2448,6 +2451,7 @@ func _enter_stage_edit_from_path(path: String) -> void:
 	stage_edit_canvas_right_drag_committed = false
 	stage_edit_undo_stack.clear()
 	stage_edit_redo_stack.clear()
+	stage_edit_mirror_preview = [false, false, false, false]
 	_init_stage_edit_canvas(raw)
 	_stage_edit_snap_current_canvas_to_grid()
 	game_state = "stage_edit"
@@ -2819,7 +2823,7 @@ func _stage_edit_apply_redo() -> void:
 	_stage_edit_clear_left_drag_arc_state()
 
 
-## 順に ◀ ▶ ▲ ▼（キャンバス上端中央・右縦並び）。◀=右→左複写 ▶=左→右複写 ▲=下→上 ▼=上→下
+## 順に ◀ ▶ ▲ ▼（キャンバス上端中央・右縦並び）。鏡像プレビューのトグル（データは変更しない）
 func _stage_edit_mirror_button_rects(vp: Vector2) -> Array[Rect2]:
 	var w: float = STAGE_EDIT_MIRROR_BTN_SZ
 	var g: float = 6.0
@@ -2836,23 +2840,10 @@ func _stage_edit_mirror_button_rects(vp: Vector2) -> Array[Rect2]:
 	return out
 
 
-func _stage_edit_mirror_by_button_index(mi: int) -> void:
+func _stage_edit_toggle_mirror_preview(mi: int) -> void:
 	if mi < 0 or mi > 3:
 		return
-	if not _stage_edit_shape_has_canvas() or stage_edit_canvas_vertices.size() < 3:
-		return
-	var crect: Rect2 = _stage_edit_canvas_rect(get_viewport_rect().size)
-	_stage_edit_push_undo()
-	match mi:
-		0:
-			StageEditPolygonTools.mirror_copy_right_to_left(stage_edit_canvas_vertices, stage_edit_canvas_edges)
-		1:
-			StageEditPolygonTools.mirror_copy_left_to_right(stage_edit_canvas_vertices, stage_edit_canvas_edges)
-		2:
-			StageEditPolygonTools.mirror_copy_bottom_to_top(stage_edit_canvas_vertices, stage_edit_canvas_edges)
-		3:
-			StageEditPolygonTools.mirror_copy_top_to_bottom(stage_edit_canvas_vertices, stage_edit_canvas_edges)
-	_stage_edit_snap_canvas_state_to_grid(crect)
+	stage_edit_mirror_preview[mi] = not stage_edit_mirror_preview[mi]
 
 
 func _stage_edit_save() -> void:
@@ -3031,7 +3022,7 @@ func _input_stage_edit(event: InputEvent) -> void:
 		var mrs: Array[Rect2] = _stage_edit_mirror_button_rects(vp)
 		for mii in range(mrs.size()):
 			if mrs[mii].has_point(pos):
-				_stage_edit_mirror_by_button_index(mii)
+				_stage_edit_toggle_mirror_preview(mii)
 				queue_redraw()
 				get_viewport().set_input_as_handled()
 				return

@@ -1312,6 +1312,64 @@ func _draw_stage_debug(vp: Vector2) -> void:
 				_draw_stage_debug_text_action_button(_game._stage_debug_description_action_button_rect(vp, 2), "貼り付け", text_c)
 
 
+## 正規化座標で半面に含まれる辺を鏡映し、キャンバス上に薄く描く（◀右→左 ▶左→右 ▲下→上 ▼上→下）
+func _stage_edit_draw_mirror_previews(canvas_r: Rect2, verts: Array[Vector2], edges: Array, n: int) -> void:
+	var pv: Array[bool] = _game.stage_edit_mirror_preview
+	if not (pv[0] or pv[1] or pv[2] or pv[3]):
+		return
+	if n < 2 or edges.is_empty():
+		return
+	var ghost_line := Color(0.42, 0.38, 0.48, 0.22)
+	var ghost_arc := Color(0.48, 0.44, 0.55, 0.22)
+	var lw: float = 1.5
+	for ei in range(edges.size()):
+		var p0: Vector2 = verts[ei]
+		var p1: Vector2 = verts[(ei + 1) % n]
+		var ed: Dictionary = edges[ei]
+		var is_arc: bool = ed.get("type", "line") == "arc" and ed.has("arc_control")
+		if pv[0] and p0.x > 0.0 and p1.x > 0.0:
+			_stage_edit_draw_one_mirror_edge(canvas_r, p0, p1, ed, is_arc, ghost_line, ghost_arc, lw, false)
+		if pv[1] and p0.x <= 0.0 and p1.x <= 0.0:
+			_stage_edit_draw_one_mirror_edge(canvas_r, p0, p1, ed, is_arc, ghost_line, ghost_arc, lw, false)
+		if pv[2] and p0.y >= 0.0 and p1.y >= 0.0:
+			_stage_edit_draw_one_mirror_edge(canvas_r, p0, p1, ed, is_arc, ghost_line, ghost_arc, lw, true)
+		if pv[3] and p0.y < 0.0 and p1.y < 0.0:
+			_stage_edit_draw_one_mirror_edge(canvas_r, p0, p1, ed, is_arc, ghost_line, ghost_arc, lw, true)
+
+
+func _stage_edit_draw_one_mirror_edge(
+	canvas_r: Rect2,
+	p0: Vector2,
+	p1: Vector2,
+	ed: Dictionary,
+	is_arc: bool,
+	ghost_line: Color,
+	ghost_arc: Color,
+	lw: float,
+	vertical_axis: bool
+) -> void:
+	var mp0: Vector2
+	var mp1: Vector2
+	if vertical_axis:
+		mp0 = Vector2(p0.x, -p0.y)
+		mp1 = Vector2(p1.x, -p1.y)
+	else:
+		mp0 = Vector2(-p0.x, p0.y)
+		mp1 = Vector2(-p1.x, p1.y)
+	var p0s: Vector2 = _game._stage_edit_canvas_norm_to_screen(mp0, canvas_r)
+	var p1s: Vector2 = _game._stage_edit_canvas_norm_to_screen(mp1, canvas_r)
+	if is_arc:
+		var ac: Vector2 = ed["arc_control"] as Vector2
+		var mac: Vector2 = Vector2(ac.x, -ac.y) if vertical_axis else Vector2(-ac.x, ac.y)
+		var acs: Vector2 = _game._stage_edit_canvas_norm_to_screen(mac, canvas_r)
+		var arc_pts: Array = StageEditPolygonTools.sample_arc_3points(p0s, p1s, acs)
+		if arc_pts.size() >= 2:
+			for j in range(arc_pts.size() - 1):
+				_game.draw_line(arc_pts[j], arc_pts[j + 1], ghost_arc, lw, true)
+	else:
+		_game.draw_line(p0s, p1s, ghost_line, lw, true)
+
+
 func _stage_edit_draw_canvas_grid(canvas_r: Rect2) -> void:
 	var cell: float = _game._stage_edit_grid_cell_px(canvas_r)
 	var cx: float = canvas_r.position.x + canvas_r.size.x * 0.5
@@ -1395,6 +1453,7 @@ func _draw_stage_edit(vp: Vector2) -> void:
 		var verts: Array[Vector2] = _game.stage_edit_canvas_vertices
 		var edges: Array = _game.stage_edit_canvas_edges
 		var n: int = verts.size()
+		_stage_edit_draw_mirror_previews(canvas_r, verts, edges, n)
 		var hover_e: int = _game.stage_edit_canvas_hover_edge
 		var line_c: Color = Color(0.35, 0.3, 0.42)
 		var line_hover_c: Color = Color(0.50, 0.55, 0.70)
@@ -1421,8 +1480,9 @@ func _draw_stage_edit(vp: Vector2) -> void:
 		var mlbl: Array[String] = ["◀", "▶", "▲", "▼"]
 		for mi in range(mrs.size()):
 			var mr: Rect2 = mrs[mi]
-			_game.draw_rect(mr, Color(0.98, 0.97, 0.99, 0.96))
-			_game.draw_rect(mr, accent, false, 2.0)
+			var on: bool = _game.stage_edit_mirror_preview[mi]
+			_game.draw_rect(mr, Color(0.95, 0.19, 0.32, 0.24) if on else Color(0.98, 0.97, 0.99, 0.96))
+			_game.draw_rect(mr, accent, false, 2.5 if on else 2.0)
 			var fs_m: int = 17
 			var sz_m: Vector2 = _game.font.get_string_size(mlbl[mi], HORIZONTAL_ALIGNMENT_LEFT, -1, fs_m)
 			_game.draw_string(_game.font, Vector2(mr.position.x + (mr.size.x - sz_m.x) * 0.5, mr.position.y + 24.0), mlbl[mi], HORIZONTAL_ALIGNMENT_LEFT, -1, fs_m, text_c)
@@ -1441,7 +1501,7 @@ func _draw_stage_edit(vp: Vector2) -> void:
 	_game.draw_string(_game.font, Vector2(cbr.position.x + 36, cbr.position.y + 23), "キャンセル", HORIZONTAL_ALIGNMENT_LEFT, cbr.size.x - 72, 14, text_c)
 	if _game.stage_edit_last_error != "":
 		_game.draw_string(_game.font, Vector2(panel_r.position.x, vp.y - 50), _game.stage_edit_last_error, HORIZONTAL_ALIGNMENT_LEFT, panel_r.size.x, 15, Color(0.95, 0.3, 0.2))
-	_game.draw_string(_game.font, Vector2(40, vp.y - 22), "ESC: 戻る | Ctrl+Z 元に戻す | Ctrl+Y / Ctrl+Shift+Z やり直し | ◀右→左 ▶左→右 ▲下→上 ▼上→下 複写 | キャンバス: 左＝直線/ドラッグ 右＝円弧/削除", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 80, 12, Color(0.45, 0.4, 0.48))
+	_game.draw_string(_game.font, Vector2(40, vp.y - 22), "ESC: 戻る | Ctrl+Z 元に戻す | Ctrl+Y / Ctrl+Shift+Z やり直し | ◀▶▲▼ 鏡像プレビュー（クリックでオンオフ） | キャンバス: 左＝直線/ドラッグ 右＝円弧/削除", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 80, 12, Color(0.45, 0.4, 0.48))
 
 
 func _draw_debug_log_button(vp: Vector2) -> void:
