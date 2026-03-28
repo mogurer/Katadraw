@@ -195,6 +195,8 @@ const STAGE_EDIT_CANVAS_HANDLE_R: float = 12.0
 const STAGE_EDIT_CANVAS_HIT_VERTEX_R: float = 28.0
 const STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE: float = 80.0
 const STAGE_EDIT_CANVAS_RIGHT_DRAG_THRESHOLD: float = 5.0
+const STAGE_EDIT_MIRROR_BTN_SZ: float = 36.0
+const STAGE_EDIT_UNDO_STACK_MAX: int = 80
 var stage_edit_stage_id: String = "new_stage"
 ## meta の JSON 保存時にそのままマージ（stage_name / description は STAGE DEBUG で編集）
 var stage_edit_meta_preserve: Dictionary = {}
@@ -214,6 +216,9 @@ var stage_edit_canvas_right_drag_idx: int = -1
 var stage_edit_canvas_right_down_pos: Vector2 = Vector2.ZERO
 var stage_edit_canvas_right_drag_norm_offset: Vector2 = Vector2.ZERO
 var stage_edit_canvas_right_drag_committed: bool = false
+## Edit キャンバス用 undo / redo（頂点・辺のスナップショット）
+var stage_edit_undo_stack: Array = []
+var stage_edit_redo_stack: Array = []
 var _se_ld_single_arc_edge: int = -1
 var _se_ld_single_arc_angle: float = 0.0
 var _se_ld_both_edges: Array[int] = []
@@ -2410,6 +2415,8 @@ func _enter_stage_edit_screen() -> void:
 	stage_edit_canvas_drag_idx = -1
 	stage_edit_canvas_right_drag_idx = -1
 	stage_edit_canvas_right_drag_committed = false
+	stage_edit_undo_stack.clear()
+	stage_edit_redo_stack.clear()
 	_init_stage_edit_canvas()
 	_stage_edit_snap_current_canvas_to_grid()
 	game_state = "stage_edit"
@@ -2439,6 +2446,8 @@ func _enter_stage_edit_from_path(path: String) -> void:
 	stage_edit_canvas_drag_idx = -1
 	stage_edit_canvas_right_drag_idx = -1
 	stage_edit_canvas_right_drag_committed = false
+	stage_edit_undo_stack.clear()
+	stage_edit_redo_stack.clear()
 	_init_stage_edit_canvas(raw)
 	_stage_edit_snap_current_canvas_to_grid()
 	game_state = "stage_edit"
@@ -2760,6 +2769,86 @@ func _stage_edit_cancel_button_rect(vp: Vector2) -> Rect2:
 	return _stage_edit_bottom_button_layout(vp)[1]
 
 
+func _stage_edit_snapshot_state() -> Dictionary:
+	var ed: Array = []
+	for e in stage_edit_canvas_edges:
+		ed.append((e as Dictionary).duplicate())
+	return {"verts": stage_edit_canvas_vertices.duplicate(), "edges": ed}
+
+
+func _stage_edit_restore_snapshot(snap: Dictionary) -> void:
+	stage_edit_canvas_vertices.clear()
+	for v in snap["verts"] as Array:
+		if v is Vector2:
+			stage_edit_canvas_vertices.append(v as Vector2)
+	stage_edit_canvas_edges.clear()
+	for e in snap["edges"] as Array:
+		stage_edit_canvas_edges.append((e as Dictionary).duplicate())
+
+
+func _stage_edit_push_undo() -> void:
+	if not _stage_edit_shape_has_canvas():
+		return
+	stage_edit_undo_stack.append(_stage_edit_snapshot_state())
+	if stage_edit_undo_stack.size() > STAGE_EDIT_UNDO_STACK_MAX:
+		stage_edit_undo_stack.pop_front()
+	stage_edit_redo_stack.clear()
+
+
+func _stage_edit_apply_undo() -> void:
+	if not _stage_edit_shape_has_canvas() or stage_edit_undo_stack.is_empty():
+		return
+	stage_edit_redo_stack.append(_stage_edit_snapshot_state())
+	var snap: Dictionary = stage_edit_undo_stack.pop_back() as Dictionary
+	_stage_edit_restore_snapshot(snap)
+	stage_edit_canvas_hover_edge = -1
+	stage_edit_canvas_drag_idx = -1
+	stage_edit_canvas_right_drag_idx = -1
+	_stage_edit_clear_left_drag_arc_state()
+
+
+func _stage_edit_apply_redo() -> void:
+	if not _stage_edit_shape_has_canvas() or stage_edit_redo_stack.is_empty():
+		return
+	stage_edit_undo_stack.append(_stage_edit_snapshot_state())
+	var snap: Dictionary = stage_edit_redo_stack.pop_back() as Dictionary
+	_stage_edit_restore_snapshot(snap)
+	stage_edit_canvas_hover_edge = -1
+	stage_edit_canvas_drag_idx = -1
+	stage_edit_canvas_right_drag_idx = -1
+	_stage_edit_clear_left_drag_arc_state()
+
+
+## 順に ◀ ▶ ▲ ▼（左右反転×2・上下反転×2。同種は同一の幾何変換）
+func _stage_edit_mirror_button_rects(vp: Vector2) -> Array[Rect2]:
+	var w: float = STAGE_EDIT_MIRROR_BTN_SZ
+	var g: float = 8.0
+	var cx: float = vp.x * 0.5
+	var y_top: float = STAGE_EDIT_TOP_BAR + 6.0
+	var rx: float = vp.x - w - 20.0
+	var cy: float = vp.y * 0.5
+	var out: Array[Rect2] = []
+	out.append(Rect2(cx - w - g * 0.5, y_top, w, w))
+	out.append(Rect2(cx + g * 0.5, y_top, w, w))
+	out.append(Rect2(rx, cy - w - g * 0.5, w, w))
+	out.append(Rect2(rx, cy + g * 0.5, w, w))
+	return out
+
+
+func _stage_edit_mirror_by_button_index(mi: int) -> void:
+	if mi < 0 or mi > 3:
+		return
+	if not _stage_edit_shape_has_canvas() or stage_edit_canvas_vertices.size() < 3:
+		return
+	var crect: Rect2 = _stage_edit_canvas_rect(get_viewport_rect().size)
+	_stage_edit_push_undo()
+	if mi <= 1:
+		StageEditPolygonTools.mirror_vertices_edges_horiz(stage_edit_canvas_vertices, stage_edit_canvas_edges)
+	else:
+		StageEditPolygonTools.mirror_vertices_edges_vert(stage_edit_canvas_vertices, stage_edit_canvas_edges)
+	_stage_edit_snap_canvas_state_to_grid(crect)
+
+
 func _stage_edit_save() -> void:
 	var base: String = _sanitized_stage_edit_filename(stage_edit_stage_id)
 	if base.is_empty():
@@ -2771,6 +2860,21 @@ func _stage_edit_save() -> void:
 	var tidx: int = clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)
 	var shape_kind: String = STAGE_EDIT_TYPE_OPTIONS[tidx]
 	var partial: Dictionary = {"type": base, "shape_type": shape_kind}
+	if StageConfig.TYPE_DEFAULTS.has(shape_kind):
+		var defs: Dictionary = StageConfig.TYPE_DEFAULTS[shape_kind] as Dictionary
+		for k in defs:
+			partial[k] = defs[k]
+	var np: int
+	if (shape_kind == "fish" or shape_kind == "cat_face") and stage_edit_canvas_edges.size() > 0:
+		np = StageEditPolygonTools.compute_num_points_from_edges(stage_edit_canvas_edges)
+	else:
+		np = int((StageConfig.TYPE_DEFAULTS.get(shape_kind, {}) as Dictionary).get("num_points", 12))
+	partial["num_points"] = np
+	partial["min_radius"] = 200.0
+	partial["max_radius"] = 400.0
+	partial["display_rate_min_pct"] = 80.0
+	partial["clear_pct"] = 99.0
+	partial["guide_follows_player_radius"] = 0
 	var shape: Dictionary = {}
 	if shape_kind == "fish" or shape_kind == "cat_face":
 		if stage_edit_canvas_vertices.size() >= 3:
@@ -2798,6 +2902,16 @@ func _stage_edit_save() -> void:
 func _input_stage_edit(event: InputEvent) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var crect: Rect2 = _stage_edit_canvas_rect(vp)
+	if event is InputEventKey and event.pressed and not event.echo:
+		if (event.ctrl_pressed or event.meta_pressed) and (event.keycode == KEY_Z or event.keycode == KEY_Y):
+			if _stage_edit_shape_has_canvas():
+				if event.keycode == KEY_Y or (event.keycode == KEY_Z and event.shift_pressed):
+					_stage_edit_apply_redo()
+				elif event.keycode == KEY_Z:
+					_stage_edit_apply_undo()
+				queue_redraw()
+				get_viewport().set_input_as_handled()
+				return
 	if event is InputEventMouseMotion:
 		if _stage_edit_shape_has_canvas():
 			if stage_edit_canvas_drag_idx >= 0:
@@ -2889,6 +3003,7 @@ func _input_stage_edit(event: InputEvent) -> void:
 		if _stage_edit_shape_has_canvas() and crect.has_point(pos_r):
 			var vhr: int = _stage_edit_canvas_vertex_hit_at_screen(pos_r, crect)
 			if vhr >= 0:
+				_stage_edit_push_undo()
 				stage_edit_canvas_right_drag_idx = vhr
 				stage_edit_canvas_right_down_pos = pos_r
 				stage_edit_canvas_right_drag_committed = false
@@ -2900,15 +3015,24 @@ func _input_stage_edit(event: InputEvent) -> void:
 				stage_edit_canvas_vertices, stage_edit_canvas_edges, pos_r, crect, STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE
 			)
 			if eir >= 0:
+				_stage_edit_push_undo()
 				StageEditPolygonTools.add_point_on_edge(stage_edit_canvas_vertices, stage_edit_canvas_edges, eir, pos_r, crect, true)
 				get_viewport().set_input_as_handled()
 				queue_redraw()
 				return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var pos: Vector2 = event.position
+		var mrs: Array[Rect2] = _stage_edit_mirror_button_rects(vp)
+		for mii in range(mrs.size()):
+			if mrs[mii].has_point(pos):
+				_stage_edit_mirror_by_button_index(mii)
+				queue_redraw()
+				get_viewport().set_input_as_handled()
+				return
 		if _stage_edit_shape_has_canvas() and crect.has_point(pos):
 			var hi: int = _stage_edit_canvas_vertex_hit_at_screen(pos, crect)
 			if hi >= 0:
+				_stage_edit_push_undo()
 				_stage_edit_begin_left_drag_vertex(hi, pos, crect)
 				get_viewport().set_input_as_handled()
 				queue_redraw()
@@ -2917,6 +3041,7 @@ func _input_stage_edit(event: InputEvent) -> void:
 				stage_edit_canvas_vertices, stage_edit_canvas_edges, pos, crect, STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE
 			)
 			if eil >= 0:
+				_stage_edit_push_undo()
 				StageEditPolygonTools.add_point_on_edge(stage_edit_canvas_vertices, stage_edit_canvas_edges, eil, pos, crect, false)
 				get_viewport().set_input_as_handled()
 				queue_redraw()

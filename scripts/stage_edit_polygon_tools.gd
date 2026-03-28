@@ -203,10 +203,27 @@ static func add_point_on_edge(
 		else:
 			var t: float = clampf((screen_pos - p0s).dot(ab) / len_sq, 0.0, 1.0)
 			proj = p0s + ab * t
-		var sn: Vector2 = screen_to_norm_exact(proj, rect)
-		sn.x = clampf(sn.x, -1.35, 1.35)
-		sn.y = clampf(sn.y, -1.35, 1.35)
-		grid_pos = sn
+		var proj_norm: Vector2 = screen_to_norm_exact(proj, rect)
+		proj_norm.x = clampf(proj_norm.x, -1.35, 1.35)
+		proj_norm.y = clampf(proj_norm.y, -1.35, 1.35)
+		if as_arc:
+			# 直線辺上に投影だけだと 3 点が共線になり、弧が退化してジグザグになる。クリック側へ微小な法線オフセットを入れる
+			var seg: Vector2 = p1 - p0
+			var seg_len_sq: float = seg.length_squared()
+			if seg_len_sq > 1e-12:
+				var perp_n: Vector2 = Vector2(-seg.y, seg.x).normalized()
+				var mouse_norm: Vector2 = screen_to_norm_exact(screen_pos, rect)
+				var mid_n: Vector2 = (p0 + p1) * 0.5
+				var toward: float = perp_n.dot(mouse_norm - mid_n)
+				var sign_b: float = 1.0 if toward >= 0.0 else -1.0
+				var bulge: float = maxf(0.008, minf(0.08, sqrt(seg_len_sq) * 0.06))
+				grid_pos = proj_norm + perp_n * bulge * sign_b
+			else:
+				grid_pos = proj_norm
+			grid_pos.x = clampf(grid_pos.x, -1.35, 1.35)
+			grid_pos.y = clampf(grid_pos.y, -1.35, 1.35)
+		else:
+			grid_pos = proj_norm
 	if grid_pos.distance_to(p0) < 0.01 or grid_pos.distance_to(p1) < 0.01:
 		return
 	var idx: int = edge_idx + 1
@@ -416,6 +433,36 @@ static func get_left_drag_norm(
 	result.x = clampf(result.x, -1.35, 1.35)
 	result.y = clampf(result.y, -1.35, 1.35)
 	return ensure_not_on_adjacent_norm(verts, dragging_idx, result)
+
+
+## Edit 保存時の num_points:（直線辺の数）+（曲線辺の数×2）+ 1
+static func compute_num_points_from_edges(edges: Array) -> int:
+	var n_line: int = 0
+	var n_arc: int = 0
+	for e in edges:
+		if e is Dictionary and e.get("type", "line") == "arc" and e.has("arc_control"):
+			n_arc += 1
+		else:
+			n_line += 1
+	return n_line + n_arc * 2 + 1
+
+
+static func mirror_vertices_edges_horiz(verts: Array[Vector2], edges: Array[Dictionary]) -> void:
+	for i in range(verts.size()):
+		verts[i].x *= -1.0
+	for e in edges:
+		if e.get("type", "line") == "arc" and e.has("arc_control"):
+			var ac: Vector2 = e["arc_control"]
+			e["arc_control"] = Vector2(-ac.x, ac.y)
+
+
+static func mirror_vertices_edges_vert(verts: Array[Vector2], edges: Array[Dictionary]) -> void:
+	for i in range(verts.size()):
+		verts[i].y *= -1.0
+	for e in edges:
+		if e.get("type", "line") == "arc" and e.has("arc_control"):
+			var ac: Vector2 = e["arc_control"]
+			e["arc_control"] = Vector2(ac.x, -ac.y)
 
 
 static func build_arc_controls_for_save(edges: Array[Dictionary]) -> Dictionary:

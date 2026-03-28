@@ -1352,6 +1352,15 @@ func _draw_stage_edit(vp: Vector2) -> void:
 	var panel_r: Rect2 = _game._stage_edit_right_panel_rect(vp)
 	var footer_top: float = vp.y - _game.STAGE_EDIT_FOOTER_H
 	_game.draw_string(_game.font_bold, Vector2(20, 34), "CUSTOM STAGE EDIT (v1)", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 40, 28, accent)
+	var mrs: Array[Rect2] = _game._stage_edit_mirror_button_rects(vp)
+	var mlbl: Array[String] = ["◀", "▶", "▲", "▼"]
+	for mi in range(mrs.size()):
+		var mr: Rect2 = mrs[mi]
+		_game.draw_rect(mr, Color(0.96, 0.94, 0.96))
+		_game.draw_rect(mr, text_c, false, 1.5)
+		var fs_m: int = 17
+		var sz_m: Vector2 = _game.font.get_string_size(mlbl[mi], HORIZONTAL_ALIGNMENT_LEFT, -1, fs_m)
+		_game.draw_string(_game.font, Vector2(mr.position.x + (mr.size.x - sz_m.x) * 0.5, mr.position.y + 24.0), mlbl[mi], HORIZONTAL_ALIGNMENT_LEFT, -1, fs_m, text_c)
 	_game.draw_line(Vector2(split_x, _game.STAGE_EDIT_TOP_BAR + 4), Vector2(split_x, footer_top), Color(0.78, 0.72, 0.66), 1.0)
 	_game.draw_rect(panel_r, Color(0.96, 0.945, 0.92))
 	_game.draw_rect(panel_r, Color(0.78, 0.72, 0.66), false, 1.0)
@@ -1432,7 +1441,7 @@ func _draw_stage_edit(vp: Vector2) -> void:
 	_game.draw_string(_game.font, Vector2(cbr.position.x + 36, cbr.position.y + 23), "キャンセル", HORIZONTAL_ALIGNMENT_LEFT, cbr.size.x - 72, 14, text_c)
 	if _game.stage_edit_last_error != "":
 		_game.draw_string(_game.font, Vector2(panel_r.position.x, vp.y - 50), _game.stage_edit_last_error, HORIZONTAL_ALIGNMENT_LEFT, panel_r.size.x, 15, Color(0.95, 0.3, 0.2))
-	_game.draw_string(_game.font, Vector2(40, vp.y - 22), "ESC: 戻る | キャンバス: グリッドスナップ・左＝直線追加/ドラッグ | 右＝円弧追加・削除/移動", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 80, 13, Color(0.45, 0.4, 0.48))
+	_game.draw_string(_game.font, Vector2(40, vp.y - 22), "ESC: 戻る | Ctrl+Z 元に戻す | Ctrl+Y / Ctrl+Shift+Z やり直し | 上◀▶左右反転・右▲▼上下反転 | キャンバス: 左＝直線/ドラッグ 右＝円弧/削除", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 80, 12, Color(0.45, 0.4, 0.48))
 
 
 func _draw_debug_log_button(vp: Vector2) -> void:
