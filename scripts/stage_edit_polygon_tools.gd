@@ -465,6 +465,208 @@ static func mirror_vertices_edges_vert(verts: Array[Vector2], edges: Array[Dicti
 			e["arc_control"] = Vector2(ac.x, -ac.y)
 
 
+## 左半面(x<=0)は維持し、右半面(x>0)を左の鏡像で上書き（▶）
+## 頂点はポリゴン順の左右リストを同じ長さで対応付け、辺も「両端が同じ側」の辺を順に複写する。
+static func mirror_copy_left_to_right(verts: Array[Vector2], edges: Array[Dictionary]) -> void:
+	var n: int = verts.size()
+	if n < 3:
+		return
+	var left_idx: Array[int] = []
+	var right_idx: Array[int] = []
+	for i in range(n):
+		if verts[i].x <= 0.0:
+			left_idx.append(i)
+		else:
+			right_idx.append(i)
+	_apply_vertex_pairs_horiz(verts, left_idx, right_idx)
+	_apply_edge_pairs_horiz(verts, edges, n, true)
+
+
+## 右半面(x>0)は維持し、左半面(x<0)を右の鏡像で上書き（◀）
+static func mirror_copy_right_to_left(verts: Array[Vector2], edges: Array[Dictionary]) -> void:
+	var n: int = verts.size()
+	if n < 3:
+		return
+	var left_idx: Array[int] = []
+	var right_idx: Array[int] = []
+	for i in range(n):
+		if verts[i].x < 0.0:
+			left_idx.append(i)
+		else:
+			right_idx.append(i)
+	_apply_vertex_pairs_horiz(verts, right_idx, left_idx)
+	_apply_edge_pairs_horiz(verts, edges, n, false)
+
+
+## 下側(y>=0)は維持し、上側(y<0)を下の鏡像で上書き（▲）
+static func mirror_copy_bottom_to_top(verts: Array[Vector2], edges: Array[Dictionary]) -> void:
+	var n: int = verts.size()
+	if n < 3:
+		return
+	var bot_idx: Array[int] = []
+	var top_idx: Array[int] = []
+	for i in range(n):
+		if verts[i].y >= 0.0:
+			bot_idx.append(i)
+		else:
+			top_idx.append(i)
+	_apply_vertex_pairs_vert(verts, bot_idx, top_idx)
+	_apply_edge_pairs_vert(verts, edges, n, true)
+
+
+## 上側(y<=0)は維持し、下側(y>0)を上の鏡像で上書き（▼）
+static func mirror_copy_top_to_bottom(verts: Array[Vector2], edges: Array[Dictionary]) -> void:
+	var n: int = verts.size()
+	if n < 3:
+		return
+	var top_idx: Array[int] = []
+	var bot_idx: Array[int] = []
+	for i in range(n):
+		if verts[i].y <= 0.0:
+			top_idx.append(i)
+		else:
+			bot_idx.append(i)
+	_apply_vertex_pairs_vert(verts, top_idx, bot_idx)
+	_apply_edge_pairs_vert(verts, edges, n, false)
+
+
+## src の各頂点を y 軸鏡映し dst に書く（件数が違うときは y でソートして対応）
+static func _apply_vertex_pairs_horiz(verts: Array[Vector2], src_idx: Array[int], dst_idx: Array[int]) -> void:
+	if src_idx.is_empty() or dst_idx.is_empty():
+		return
+	var src: Array[int] = src_idx.duplicate()
+	var dst: Array[int] = dst_idx.duplicate()
+	if src.size() != dst.size():
+		_sort_indices_by_key(src, verts, true)
+		_sort_indices_by_key(dst, verts, true)
+	var m: int = mini(src.size(), dst.size())
+	for k in range(m):
+		var s: Vector2 = verts[src[k]]
+		verts[dst[k]] = Vector2(-s.x, s.y)
+
+
+static func _apply_vertex_pairs_vert(verts: Array[Vector2], src_idx: Array[int], dst_idx: Array[int]) -> void:
+	if src_idx.is_empty() or dst_idx.is_empty():
+		return
+	var src: Array[int] = src_idx.duplicate()
+	var dst: Array[int] = dst_idx.duplicate()
+	if src.size() != dst.size():
+		_sort_indices_by_key(src, verts, false)
+		_sort_indices_by_key(dst, verts, false)
+	var m: int = mini(src.size(), dst.size())
+	for k in range(m):
+		var s: Vector2 = verts[src[k]]
+		verts[dst[k]] = Vector2(s.x, -s.y)
+
+
+static func _sort_indices_by_key(indices: Array[int], verts: Array[Vector2], use_y: bool) -> void:
+	# 単純な挿入ソート（件数は頂点数程度）
+	for a in range(1, indices.size()):
+		var key_i: int = indices[a]
+		var key_v: float = verts[key_i].y if use_y else verts[key_i].x
+		var b: int = a - 1
+		while b >= 0:
+			var cv: float = verts[indices[b]].y if use_y else verts[indices[b]].x
+			if cv <= key_v:
+				break
+			indices[b + 1] = indices[b]
+			b -= 1
+		indices[b + 1] = key_i
+
+
+static func _edge_mid_y(verts: Array[Vector2], n: int, ei: int) -> float:
+	var a: Vector2 = verts[ei]
+	var b: Vector2 = verts[(ei + 1) % n]
+	return (a.y + b.y) * 0.5
+
+
+static func _edge_mid_x(verts: Array[Vector2], n: int, ei: int) -> float:
+	var a: Vector2 = verts[ei]
+	var b: Vector2 = verts[(ei + 1) % n]
+	return (a.x + b.x) * 0.5
+
+
+static func _apply_edge_pairs_horiz(verts: Array[Vector2], edges: Array[Dictionary], n: int, left_to_right: bool) -> void:
+	var left_e: Array[int] = []
+	var right_e: Array[int] = []
+	for ei in range(n):
+		var ax: float = verts[ei].x
+		var bx: float = verts[(ei + 1) % n].x
+		if ax <= 0.0 and bx <= 0.0:
+			left_e.append(ei)
+		elif ax > 0.0 and bx > 0.0:
+			right_e.append(ei)
+	if left_e.is_empty() or right_e.is_empty():
+		return
+	var src_e: Array[int] = left_e.duplicate()
+	var dst_e: Array[int] = right_e.duplicate()
+	if not left_to_right:
+		src_e = right_e.duplicate()
+		dst_e = left_e.duplicate()
+	if src_e.size() != dst_e.size():
+		_sort_edge_indices_by_mid(src_e, verts, n, true)
+		_sort_edge_indices_by_mid(dst_e, verts, n, true)
+	var m: int = mini(src_e.size(), dst_e.size())
+	for k in range(m):
+		_copy_edge_mirrored_h(edges, src_e[k], dst_e[k])
+
+
+static func _copy_edge_mirrored_h(edges: Array[Dictionary], src_ei: int, dst_ei: int) -> void:
+	var s: Dictionary = (edges[src_ei] as Dictionary).duplicate()
+	if s.get("type", "line") == "arc" and s.has("arc_control"):
+		var ac: Vector2 = s["arc_control"] as Vector2
+		s["arc_control"] = Vector2(-ac.x, ac.y)
+	edges[dst_ei] = s
+
+
+static func _apply_edge_pairs_vert(verts: Array[Vector2], edges: Array[Dictionary], n: int, bottom_to_top: bool) -> void:
+	var bot_e: Array[int] = []
+	var top_e: Array[int] = []
+	for ei in range(n):
+		var ay: float = verts[ei].y
+		var by: float = verts[(ei + 1) % n].y
+		if ay >= 0.0 and by >= 0.0:
+			bot_e.append(ei)
+		elif ay < 0.0 and by < 0.0:
+			top_e.append(ei)
+	if bot_e.is_empty() or top_e.is_empty():
+		return
+	var src_e: Array[int] = bot_e.duplicate()
+	var dst_e: Array[int] = top_e.duplicate()
+	if not bottom_to_top:
+		src_e = top_e.duplicate()
+		dst_e = bot_e.duplicate()
+	if src_e.size() != dst_e.size():
+		_sort_edge_indices_by_mid(src_e, verts, n, false)
+		_sort_edge_indices_by_mid(dst_e, verts, n, false)
+	var m: int = mini(src_e.size(), dst_e.size())
+	for k in range(m):
+		_copy_edge_mirrored_v(edges, src_e[k], dst_e[k])
+
+
+static func _copy_edge_mirrored_v(edges: Array[Dictionary], src_ei: int, dst_ei: int) -> void:
+	var s: Dictionary = (edges[src_ei] as Dictionary).duplicate()
+	if s.get("type", "line") == "arc" and s.has("arc_control"):
+		var ac: Vector2 = s["arc_control"] as Vector2
+		s["arc_control"] = Vector2(ac.x, -ac.y)
+	edges[dst_ei] = s
+
+
+static func _sort_edge_indices_by_mid(eidx: Array[int], verts: Array[Vector2], n: int, use_y: bool) -> void:
+	for a in range(1, eidx.size()):
+		var key_i: int = eidx[a]
+		var key_v: float = _edge_mid_y(verts, n, key_i) if use_y else _edge_mid_x(verts, n, key_i)
+		var b: int = a - 1
+		while b >= 0:
+			var ei: int = eidx[b]
+			var cv: float = _edge_mid_y(verts, n, ei) if use_y else _edge_mid_x(verts, n, ei)
+			if cv <= key_v:
+				break
+			eidx[b + 1] = eidx[b]
+			b -= 1
+		eidx[b + 1] = key_i
+
+
 static func build_arc_controls_for_save(edges: Array[Dictionary]) -> Dictionary:
 	var out: Dictionary = {}
 	for i in range(edges.size()):

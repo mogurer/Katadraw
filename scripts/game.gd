@@ -2819,14 +2819,15 @@ func _stage_edit_apply_redo() -> void:
 	_stage_edit_clear_left_drag_arc_state()
 
 
-## 順に ◀ ▶ ▲ ▼（左右反転×2・上下反転×2。同種は同一の幾何変換）
+## 順に ◀ ▶ ▲ ▼（キャンバス上端中央・右縦並び）。◀=右→左複写 ▶=左→右複写 ▲=下→上 ▼=上→下
 func _stage_edit_mirror_button_rects(vp: Vector2) -> Array[Rect2]:
 	var w: float = STAGE_EDIT_MIRROR_BTN_SZ
-	var g: float = 8.0
-	var cx: float = vp.x * 0.5
-	var y_top: float = STAGE_EDIT_TOP_BAR + 6.0
-	var rx: float = vp.x - w - 20.0
-	var cy: float = vp.y * 0.5
+	var g: float = 6.0
+	var cr: Rect2 = _stage_edit_canvas_rect(vp)
+	var cx: float = cr.position.x + cr.size.x * 0.5
+	var y_top: float = cr.position.y + 4.0
+	var rx: float = cr.position.x + cr.size.x - w - 4.0
+	var cy: float = cr.position.y + cr.size.y * 0.5
 	var out: Array[Rect2] = []
 	out.append(Rect2(cx - w - g * 0.5, y_top, w, w))
 	out.append(Rect2(cx + g * 0.5, y_top, w, w))
@@ -2842,10 +2843,15 @@ func _stage_edit_mirror_by_button_index(mi: int) -> void:
 		return
 	var crect: Rect2 = _stage_edit_canvas_rect(get_viewport_rect().size)
 	_stage_edit_push_undo()
-	if mi <= 1:
-		StageEditPolygonTools.mirror_vertices_edges_horiz(stage_edit_canvas_vertices, stage_edit_canvas_edges)
-	else:
-		StageEditPolygonTools.mirror_vertices_edges_vert(stage_edit_canvas_vertices, stage_edit_canvas_edges)
+	match mi:
+		0:
+			StageEditPolygonTools.mirror_copy_right_to_left(stage_edit_canvas_vertices, stage_edit_canvas_edges)
+		1:
+			StageEditPolygonTools.mirror_copy_left_to_right(stage_edit_canvas_vertices, stage_edit_canvas_edges)
+		2:
+			StageEditPolygonTools.mirror_copy_bottom_to_top(stage_edit_canvas_vertices, stage_edit_canvas_edges)
+		3:
+			StageEditPolygonTools.mirror_copy_top_to_bottom(stage_edit_canvas_vertices, stage_edit_canvas_edges)
 	_stage_edit_snap_canvas_state_to_grid(crect)
 
 
