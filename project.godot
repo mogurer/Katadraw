@@ -24,6 +24,10 @@ window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/stretch/mode="canvas_items"
 
+[editor]
+
+movie_writer/movie_file="D:/works/Godot/KATA-Draw/VIDEO/Test.avi"
+
 [internationalization]
 
 locale/translations=PackedStringArray("res://Resources/Translation/Translation.ja.translation", "res://Resources/Translation/Translation.en.translation", "res://Resources/Translation/Translation.zh_CN.translation", "res://Resources/Translation/Translation.zh_TW.translation")
