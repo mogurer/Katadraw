@@ -55,6 +55,9 @@ var _rs_kata_grab_lock_ref_dir: Vector2 = Vector2.ZERO
 ## L-R 後: 右15°以上動くか次のL-Rまで、自動レイ選択で選択を変えない
 var _rs_lr_selection_lock: bool = false
 var _rs_lr_lock_ref_dir: Vector2 = Vector2.ZERO
+## process_pad 用: ショルダー L/R のエッジ検出（_input より後に process が走るとレイ巡回が自動選択に負けるのを防ぐ）
+var _prev_shoulder_l_pressed: bool = false
+var _prev_shoulder_r_pressed: bool = false
 
 # つかみ状態の判定用（右スティック・A・マウスでポイントを動かせる状態か）
 var grab_input_active: bool = false
@@ -109,6 +112,8 @@ func reset_for_stage() -> void:
 	debug_right_stick_active = false
 	grab_input_active = false
 	_last_input_method = ""
+	_prev_shoulder_l_pressed = false
+	_prev_shoulder_r_pressed = false
 
 
 func handle_mouse_motion(mouse: Vector2) -> void:
@@ -368,8 +373,8 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
 	var right_stick_held: bool = Vector2(rx, ry).length() >= PAD_RIGHT_STICK_DEADZONE
 	var pad_grabbing_modifier: bool = a_held or right_stick_held
-	# L/R 押下の瞬間だけ右スティックがデッドゾーン内と読まれることがある。レイ束巡回には
-	# 「今スティックが倒れている」だけに依存せず、直前まで右レイ選択していた文脈も見る。
+	# レイ束の L/R 巡回は process_pad 内で束構築直後に行う（_process が _input より後だと
+	# 自動レイ選択に上書きされるため）。ここではレイモードでないときだけ多角形順に切り替え。
 	var cur_sel: int = _game.selected_indices[0] if _game.selected_indices.size() > 0 else -1
 	var sel_on_ray_bundle: bool = cur_sel >= 0 and _right_stick_ray_bundle.find(cur_sel) >= 0
 	var use_ray_bundle_for_shoulder: bool = _right_stick_ray_bundle.size() >= 2 and (
@@ -381,14 +386,10 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 	_last_input_method = "pad"
 	match btn:
 		JOY_BUTTON_LEFT_SHOULDER:
-			if use_ray_bundle_for_shoulder:
-				_cycle_ray_bundle(-1)
-			else:
+			if not use_ray_bundle_for_shoulder:
 				_cycle_pad_point(-1)
 		JOY_BUTTON_RIGHT_SHOULDER:
-			if use_ray_bundle_for_shoulder:
-				_cycle_ray_bundle(1)
-			else:
+			if not use_ray_bundle_for_shoulder:
 				_cycle_pad_point(1)
 		JOY_BUTTON_DPAD_UP:
 			if not pad_grabbing_modifier:
@@ -674,11 +675,21 @@ func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> voi
 
 func process_pad(delta: float) -> void:
 	grab_input_active = false
+	var shoulder_l_now: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
+	var shoulder_r_now: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
+	var shoulder_l_edge: bool = shoulder_l_now and not _prev_shoulder_l_pressed
+	var shoulder_r_edge: bool = shoulder_r_now and not _prev_shoulder_r_pressed
 	if _game.game_state != "playing" and _game.game_state != "rules":
+		_prev_shoulder_l_pressed = shoulder_l_now
+		_prev_shoulder_r_pressed = shoulder_r_now
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
+		_prev_shoulder_l_pressed = shoulder_l_now
+		_prev_shoulder_r_pressed = shoulder_r_now
 		return
 	if _game.point_positions.is_empty():
+		_prev_shoulder_l_pressed = shoulder_l_now
+		_prev_shoulder_r_pressed = shoulder_r_now
 		return
 	if not pad_cursor_initialized:
 		pad_cursor = _game.shape_center
@@ -747,6 +758,19 @@ func process_pad(delta: float) -> void:
 			debug_right_stick_center = centroid
 			debug_right_stick_direction = dir_for_ray
 			_right_stick_ray_bundle = _build_ray_collinear_bundle(centroid, dir_for_ray)
+			# レイ束を確定した直後に L/R を処理（入力イベントより後の _process でも自動レイに負けない）
+			var cur_sel_rs: int = _game.selected_indices[0] if _game.selected_indices.size() > 0 else -1
+			var sel_on_ray_bundle_rs: bool = cur_sel_rs >= 0 and _right_stick_ray_bundle.find(cur_sel_rs) >= 0
+			var use_ray_bundle_for_shoulder: bool = _right_stick_ray_bundle.size() >= 2 and (
+				right_active
+				or _right_stick_was_active
+				or _grabbing_from_right_stick
+				or sel_on_ray_bundle_rs
+			)
+			if shoulder_l_edge and use_ray_bundle_for_shoulder:
+				_cycle_ray_bundle(-1)
+			elif shoulder_r_edge and use_ray_bundle_for_shoulder:
+				_cycle_ray_bundle(1)
 			var block_auto: bool = _rs_kata_grab_lock or _rs_lr_selection_lock
 			if block_auto:
 				pass
@@ -839,13 +863,19 @@ func process_pad(delta: float) -> void:
 					_rs_kata_grab_lock = true
 					_rs_kata_grab_lock_ref_dir = _right_stick_last_effective_ray_dir.normalized()
 			if _game.game_state != "playing" and _game.game_state != "rules":
+				_prev_shoulder_l_pressed = shoulder_l_now
+				_prev_shoulder_r_pressed = shoulder_r_now
 				return
 
 	# つかみ状態: 右スティック・A・マウスでポイントを動かせる状態か
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		grab_input_active = false
+		_prev_shoulder_l_pressed = shoulder_l_now
+		_prev_shoulder_r_pressed = shoulder_r_now
 		return
 	grab_input_active = pad_grabbing_modifier or (_game.is_dragging and _last_input_method == "mouse")
+	_prev_shoulder_l_pressed = shoulder_l_now
+	_prev_shoulder_r_pressed = shoulder_r_now
 
 
 # =============================================================================
