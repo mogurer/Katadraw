@@ -123,87 +123,8 @@ const STAGE_INTRO_DURATION := 0.5     # 演出の長さ（秒）
 var _results_anim_time: float = -1.0  # リザルト画面の開始時刻
 const RESULTS_SLIDE_DURATION := 0.7   # スライドイン所要時間（秒）
 
-# --- Title Intro Animation ---
-var _title_intro_time: float = -1.0   # タイトルイントロ開始時刻
-var _title_intro_skip: bool = false    # スキップ中
-var _title_intro_skip_time: float = -1.0  # スキップ開始時刻
-const TITLE_INTRO_SKIP_FADE := 1.0    # スキップ時のクロスフェード秒数
-
-# フェーズタイミング（秒、後から調整しやすいよう定数化）
-const TI_PHASE0_DUR := 1.7   # No.0: 最初の点が出現（0.5秒で縮小 + 1.2秒待機）
-const TI_PHASE1_DUR := 6.0   # No.1: 点が線を描きKを形成
-const TI_PHASE2_DUR := 1.0   # No.2: 右上端が白点に変化
-const TI_PHASE3_DUR := 1.0   # No.3: 白点が右上へ変形
-const TI_PHASE4_DUR := 1.0   # No.4: Kが左上に移動
-const TI_PHASE5_DUR := 3.5   # No.5: ATA-DRAWスライドイン
-const TI_PHASE6_DUR := 0.7   # No.6: ロゴ完成状態で静止
-const TI_PHASE7_DUR := 0.5   # No.7: タイトル画面へクロスフェード
-const TI_TOTAL_DUR := 15.4   # 合計
-const TI_DOT_APPEAR_DUR := 0.5  # 点出現アニメーション（5000%→100%縮小）
-
-# Kの12頂点（K中心を原点とした相対座標）
-# ロゴSVGパスデータから正確に算出。中心=(965.99, 527.00)で原点化。
-# アルファベットKの外周（アウトライン）を一筆書きで描く閉じたポリゴン。
-# 交差する線は無く、12辺で構成される単純な閉路。
-#
-#   V10 --- V11
-#    |        |
-#    |        V0        V1 -- V2 (白点)
-#    |          \      /
-#    |           V3 ←─┘
-#    |          /
-#    |        V6
-#    |         \
-#    |          V7
-#    |          |       V5 -- V4
-#    |          V8        \  /
-#    |          |          \/
-#   V9 ------- +    (V8=V9のx差=44.3)
-#
-# 描画順（一筆書き）:
-#  V0→V1 斜め右上 → V1→V2 水平右 → V2→V3 斜め左下
-#  V3→V4 斜め右下 → V4→V5 水平左 → V5→V6 斜め左上
-#  V6→V7 斜め左下(最短) → V7→V8 真下 → V8→V9 水平左
-#  V9→V10 真上 → V10→V11 水平右 → V11→V0 真下
-#
-var K_VERTICES: Array = [
-	Vector2(-22, -43),    # V0:  バー右辺・上腕下辺の始点（ジャンクション上）
-	Vector2(10, -150),    # V1:  上腕先端・左端
-	Vector2(84, -175),    # V2:  上腕先端・右端（白点）※変形後の最終位置
-	Vector2(18, -26),     # V3:  ジャンクション中央・上腕上辺の終点
-	Vector2(66, 150),     # V4:  下腕先端・右端
-	Vector2(16, 150),     # V5:  下腕先端・左端
-	Vector2(-11, 39),     # V6:  ジャンクション中央・下腕下辺の終点
-	Vector2(-22, 75),     # V7:  バー右辺・ジャンクション下
-	Vector2(-22, 150),    # V8:  バー右下
-	Vector2(-66, 150),    # V9:  バー左下
-	Vector2(-66, -150),   # V10: バー左上
-	Vector2(-22, -150),   # V11: バー右上
-]
-
-# 白点インデックス（上腕右先端）
-const K_WHITE_DOT_IDX := 2
-
-# Kの辺（閉じたポリゴンの12辺、順番に接続）
-var K_EDGES: Array = [
-	[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6],
-	[6, 7], [7, 8], [8, 9], [9, 10], [10, 11], [11, 0],
-]
-
-# 白点の変形前位置（初期K描画時の位置、Phase 5でK_VERTICES[2]へ移動）
-var K_P2_INITIAL := Vector2(59, -150)
-
-# 描画パス（一筆書き: V0→V1→...→V11→V0）
-var K_DRAW_PATH: Array = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0]
-
-# SE用トラッキング
-var _ti_prev_visited_count: int = 0
-var _ti_move_playing: bool = false
-var _ti_catch_played: bool = false
-var _ti_point_played: bool = false  # Phase0: stageclear SE再生済み
-var _ti_dot_landed: bool = false    # Phase0: 縮小完了時point SE再生済み
-var _ti_motion_played: bool = false  # Phase5: motion.mp3再生済み
-const TI_MOTION_FADE_DUR := 1.5  # motion.mp3のフェードアウト秒数
+# --- Title Intro Animation（描画・タイムラインは title_intro_animation.gd）---
+var title_intro: TitleIntroAnimator
 
 # --- game 参照 (Node2D/CanvasItem) ---
 var _game: Node2D
@@ -212,6 +133,7 @@ var _stage_renderer: StageRenderer
 
 func _init(game: Node2D) -> void:
 	_game = game
+	title_intro = TitleIntroAnimator.new(_game, Callable(self, "suppress_hover_sfx"))
 	_stage_renderer = StageRenderer.new(game, self)
 
 
@@ -387,15 +309,7 @@ func on_state_changed(new_state: String) -> void:
 	if new_state == "results":
 		_results_anim_time = Time.get_ticks_msec() / 1000.0
 	if new_state == "title_intro":
-		_title_intro_time = Time.get_ticks_msec() / 1000.0
-		_title_intro_skip = false
-		_title_intro_skip_time = -1.0
-		_ti_prev_visited_count = 0
-		_ti_move_playing = false
-		_ti_catch_played = false
-		_ti_point_played = false
-		_ti_dot_landed = false
-		_ti_motion_played = false
+		title_intro.reset()
 	_prev_state = new_state
 
 
@@ -412,7 +326,7 @@ func draw(state: String, vp: Vector2) -> void:
 		"logo":
 			_draw_logo(vp)
 		"title_intro":
-			_draw_title_intro(vp)
+			title_intro.draw(vp)
 		"title":
 			_draw_title(vp)
 		"menu":
@@ -605,360 +519,19 @@ func _draw_logo(vp: Vector2) -> void:
 
 
 # =============================================================================
-# Title Intro Animation (No.1-8)
+# Title Intro Animation（実装は title_intro_animation.gd）
 # =============================================================================
 
 func start_title_intro_skip() -> void:
-	if _title_intro_skip:
-		return
-	_title_intro_skip = true
-	_title_intro_skip_time = Time.get_ticks_msec() / 1000.0
+	title_intro.start_skip()
+
 
 func is_title_intro_done() -> bool:
-	if _title_intro_time < 0.0:
-		return true
-	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _title_intro_time
-	return elapsed >= TI_TOTAL_DUR
+	return title_intro.is_done()
+
 
 func is_title_intro_skip_done() -> bool:
-	if not _title_intro_skip or _title_intro_skip_time < 0.0:
-		return false
-	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _title_intro_skip_time
-	return elapsed >= TITLE_INTRO_SKIP_FADE
-
-
-func _get_k_center_screen(vp: Vector2) -> Vector2:
-	"""Phase 1-5: K描画時の画面中央位置"""
-	return Vector2(vp.x / 2.0, vp.y / 2.0)
-
-
-func _get_k_logo_position(vp: Vector2) -> Dictionary:
-	"""Phase 6以降: Kがロゴ位置に移動した後の中心とスケール"""
-	var draw_w: float = vp.x * 0.85 * 1.2
-	var tex_w: float = 1456.0  # ロゴ画像のサイズ
-	var tex_h: float = 816.0
-	var scale_f: float = draw_w / tex_w
-	var draw_h: float = tex_h * scale_f
-	var logo_cy: float = vp.y * 0.38 * 0.8
-	var logo_pos := Vector2((vp.x - draw_w) / 2.0, logo_cy - draw_h / 2.0)
-	# K部分のロゴ画像内での中心（ピクセル座標、拡大画像から計測）
-	# x: 195→265 に補正（完成ロゴとの位置ズレを解消: +128-58=+70）
-	var k_img_center := Vector2(275.0, 408.0)
-	var k_screen_center := logo_pos + k_img_center * scale_f
-	# K_VERTICESの座標単位 → ロゴ画像ピクセルへのスケール
-	# 描画時100%に対し完成ロゴは91%サイズなので、0.91倍に縮小
-	var k_scale: float = scale_f * 0.91
-	return {"center": k_screen_center, "scale": k_scale}
-
-
-func _get_k_draw_scale(vp: Vector2) -> float:
-	"""Phase 1-5: 画面中央でのKの描画スケール（Kが画面の45%程度に収まるサイズ）"""
-	var target_h: float = vp.y * 0.45
-	var k_raw_h: float = 325.0  # K_VERTICESのY範囲（-175〜150、変形含む）
-	return target_h / k_raw_h
-
-
-func _draw_title_intro(vp: Vector2) -> void:
-	# 背景（本編と同じBG画像を使用）
-	_draw_bg(vp)
-
-	var now: float = Time.get_ticks_msec() / 1000.0
-	var elapsed: float = now - _title_intro_time
-
-	# スキップ中のクロスフェード
-	var skip_alpha: float = 0.0
-	if _title_intro_skip:
-		var skip_elapsed: float = now - _title_intro_skip_time
-		skip_alpha = clampf(skip_elapsed / TITLE_INTRO_SKIP_FADE, 0.0, 1.0)
-
-	# フェーズ判定
-	var phase0_end: float = TI_PHASE0_DUR
-	var phase1_end: float = phase0_end + TI_PHASE1_DUR
-	var phase2_end: float = phase1_end + TI_PHASE2_DUR
-	var phase3_end: float = phase2_end + TI_PHASE3_DUR
-	var phase4_end: float = phase3_end + TI_PHASE4_DUR
-	var phase5_end: float = phase4_end + TI_PHASE5_DUR
-	var phase6_end: float = phase5_end + TI_PHASE6_DUR
-	var phase7_end: float = phase6_end + TI_PHASE7_DUR
-
-	if not _title_intro_skip:
-		# Phase 0: 最初の点が出現（5000%→100%に縮小、透明→不透明）
-		if elapsed < phase0_end:
-			_draw_ti_dot_appear(vp, elapsed)
-			# SE: 冒頭にui_point
-			if not _ti_point_played:
-				_game._play_sfx(_game.sfx_point)
-				_ti_point_played = true
-		# Phase 1: K描画アニメーション
-		elif elapsed < phase1_end:
-			_draw_ti_k_drawing(vp, (elapsed - phase0_end) / TI_PHASE1_DUR)
-			# SE: 線描画中はsfx_moveをループ再生（途切れたら再開）
-			_game._start_sfx_move()
-			_ti_move_playing = true
-		# Phase 2: 白点変化
-		elif elapsed < phase2_end:
-			_draw_ti_k_white_dot(vp, (elapsed - phase1_end) / TI_PHASE2_DUR)
-			# SE: 描画完了、moveを停止
-			if _ti_move_playing:
-				_game._stop_sfx_move()
-				_ti_move_playing = false
-		# Phase 3: 白点変形
-		elif elapsed < phase3_end:
-			_draw_ti_k_deform(vp, (elapsed - phase2_end) / TI_PHASE3_DUR)
-			# SE: キャッチ音 + ドラッグ音
-			if not _ti_catch_played:
-				_game._play_sfx(_game.sfx_catch)
-				_ti_catch_played = true
-			if not _ti_move_playing:
-				_game._start_sfx_move()
-				_ti_move_playing = true
-		# Phase 4: K移動
-		elif elapsed < phase4_end:
-			_draw_ti_k_move(vp, (elapsed - phase3_end) / TI_PHASE4_DUR)
-			if _ti_move_playing:
-				_game._stop_sfx_move()
-				_ti_move_playing = false
-		# Phase 5: ATA-DRAWスライドイン
-		elif elapsed < phase5_end:
-			var phase5_t: float = (elapsed - phase4_end) / TI_PHASE5_DUR
-			_draw_ti_logo_reveal(vp, phase5_t)
-			# SE: motion.mp3 再生開始
-			if not _ti_motion_played:
-				_game._play_sfx(_game.sfx_motion)
-				_ti_motion_played = true
-			# フェードアウト: Phase5終了の1.0秒前から音量を下げる
-			var remaining: float = phase5_end - elapsed
-			if remaining < TI_MOTION_FADE_DUR and _game.sfx_motion.playing:
-				var fade_t: float = remaining / TI_MOTION_FADE_DUR  # 1.0→0.0
-				_game.sfx_motion.volume_db = -14.5 + linear_to_db(maxf(fade_t, 0.001))
-		# Phase 6: ロゴ完成状態で静止（1.5秒）
-		elif elapsed < phase6_end:
-			_draw_ti_logo_reveal(vp, 1.0)
-			# motion.mp3 停止
-			if _game.sfx_motion.playing:
-				_game.sfx_motion.stop()
-		# Phase 7: タイトル画面へクロスフェード
-		elif elapsed < phase7_end:
-			_draw_ti_logo_reveal(vp, 1.0)
-			var fade_t: float = (elapsed - phase6_end) / TI_PHASE7_DUR
-			suppress_hover_sfx(0.5)  # クロスフェード中のホバーSE抑制
-			_draw_title_content(vp, _ease_in_out_cubic(fade_t))
-		# Phase 8: 完了（タイトル画面）
-		else:
-			_draw_ti_logo_reveal(vp, 1.0)
-			_draw_title_content(vp, 1.0)
-
-	# スキップ時クロスフェード: タイトル画面を重ねてフェードイン
-	if _title_intro_skip:
-		# SE停止
-		if _ti_move_playing:
-			_game._stop_sfx_move()
-			_ti_move_playing = false
-		if _game.sfx_motion.playing:
-			_game.sfx_motion.stop()
-		# 裏でイントロ最終フレームを描画
-		_draw_ti_logo_reveal(vp, 1.0)
-		# タイトル画面をフェードインで重ねる
-		_draw_title_content(vp, skip_alpha)
-
-
-func _get_k_vertex(idx: int, deform_t: float = 0.0) -> Vector2:
-	"""頂点位置を取得（白点P2は変形前後を補間）"""
-	if idx == K_WHITE_DOT_IDX:
-		return K_P2_INITIAL.lerp(K_VERTICES[K_WHITE_DOT_IDX], deform_t)
-	return K_VERTICES[idx]
-
-
-func _draw_ti_dot_appear(vp: Vector2, elapsed: float) -> void:
-	"""Phase 0: 最初の点が出現（1000%→100%に縮小、透明→不透明、0.5秒）"""
-	var center: Vector2 = _get_k_center_screen(vp)
-	var sc: float = _get_k_draw_scale(vp)
-	# 描画開始点（K_DRAW_PATH[0] = V0）の位置
-	var dot_pos: Vector2 = center + _get_k_vertex(K_DRAW_PATH[0]) * sc
-	var dot_radius: float = 7.0
-	var dot_color := Color(0.26, 0.21, 0.28)
-
-	var anim_t: float = clampf(elapsed / TI_DOT_APPEAR_DUR, 0.0, 1.0)
-	var eased: float = _ease_in_out_cubic(anim_t)
-	# スケール: 50.0（5000%）→ 1.0（100%）
-	var scale_mul: float = lerpf(50.0, 1.0, eased)
-	# 透明度: 0.0 → 1.0
-	var alpha: float = eased
-
-	var draw_color := Color(dot_color.r, dot_color.g, dot_color.b, alpha)
-	_game.draw_circle(dot_pos, dot_radius * scale_mul, draw_color)
-
-
-func _draw_ti_k_drawing(vp: Vector2, t: float) -> void:
-	"""Phase 1: 点と線でKを描画するアニメーション"""
-	var center: Vector2 = _get_k_center_screen(vp)
-	var sc: float = _get_k_draw_scale(vp)
-	var path_count: int = K_DRAW_PATH.size() - 1  # セグメント数 = 14
-	var progress: float = t * path_count  # 0.0 〜 14.0
-	var current_seg: int = mini(int(progress), path_count - 1)
-	var seg_t: float = clampf(progress - current_seg, 0.0, 1.0)
-
-	var dot_color := Color(0.26, 0.21, 0.28)
-	var line_color := Color(0.26, 0.21, 0.28)
-	var dot_radius: float = 7.0
-	var line_width: float = 3.0
-
-	# 描画済みの辺を収集
-	var drawn_edges: Dictionary = {}
-	for s in range(current_seg):
-		var a: int = K_DRAW_PATH[s]
-		var b: int = K_DRAW_PATH[s + 1]
-		var key: String = str(mini(a, b)) + "_" + str(maxi(a, b))
-		drawn_edges[key] = true
-
-	# 完了した辺を描画
-	for key in drawn_edges:
-		var parts: PackedStringArray = key.split("_")
-		var a: int = int(parts[0])
-		var b: int = int(parts[1])
-		var pa: Vector2 = center + _get_k_vertex(a) * sc
-		var pb: Vector2 = center + _get_k_vertex(b) * sc
-		_game.draw_line(pa, pb, line_color, line_width, true)
-
-	# 現在描画中のセグメント（部分的な線）
-	var seg_a: int = K_DRAW_PATH[current_seg]
-	var seg_b: int = K_DRAW_PATH[current_seg + 1]
-	var pa: Vector2 = center + _get_k_vertex(seg_a) * sc
-	var pb: Vector2 = center + _get_k_vertex(seg_b) * sc
-	var current_pos: Vector2 = pa.lerp(pb, seg_t)
-	# 既に描画済みの辺でなければ部分線を描く
-	var seg_key: String = str(mini(seg_a, seg_b)) + "_" + str(maxi(seg_a, seg_b))
-	if not drawn_edges.has(seg_key):
-		_game.draw_line(pa, current_pos, line_color, line_width, true)
-
-	# 訪問済み頂点にドットを描画
-	var visited: Dictionary = {}
-	for s in range(current_seg + 1):
-		visited[K_DRAW_PATH[s]] = true
-
-	# SE: 新しい頂点が出現したらsfx_onを再生
-	var visited_count: int = visited.size()
-	if visited_count > _ti_prev_visited_count:
-		_game._play_sfx(_game.sfx_on)
-		_ti_prev_visited_count = visited_count
-
-	for v_idx in visited:
-		var p: Vector2 = center + _get_k_vertex(v_idx) * sc
-		_game.draw_circle(p, dot_radius, dot_color)
-
-	# traveling dot（現在位置）
-	_game.draw_circle(current_pos, dot_radius + 2.0, dot_color)
-
-
-func _draw_ti_k_complete(vp: Vector2, center: Vector2, sc: float, white_dot_t: float, deform_t: float) -> void:
-	"""Kの完成形を描画（白点変化・変形対応）"""
-	var dot_color := Color(0.26, 0.21, 0.28)
-	var line_color := Color(0.26, 0.21, 0.28)
-	var dot_radius: float = 7.0
-	var line_width: float = 3.0
-
-	# P2（右上先端）の変形位置を計算（初期位置→ロゴ最終位置）
-	var p2_deformed: Vector2 = K_P2_INITIAL.lerp(K_VERTICES[K_WHITE_DOT_IDX], deform_t)
-
-	# 全辺を描画
-	for edge in K_EDGES:
-		var a: int = edge[0]
-		var b: int = edge[1]
-		var va: Vector2 = K_VERTICES[a] if a != K_WHITE_DOT_IDX else p2_deformed
-		var vb: Vector2 = K_VERTICES[b] if b != K_WHITE_DOT_IDX else p2_deformed
-		var pa: Vector2 = center + va * sc
-		var pb: Vector2 = center + vb * sc
-		_game.draw_line(pa, pb, line_color, line_width, true)
-
-	# 全頂点にドットを描画
-	for i in range(K_VERTICES.size()):
-		var v: Vector2 = K_VERTICES[i] if i != K_WHITE_DOT_IDX else p2_deformed
-		var p: Vector2 = center + v * sc
-		if i == K_WHITE_DOT_IDX:
-			# P2: 白点への変化アニメーション
-			var white_r: float = dot_radius + 3.0
-			var border_w: float = 2.5
-			var fill_color := dot_color.lerp(Color(1.0, 0.937, 0.89), white_dot_t)
-			_game.draw_circle(p, lerpf(dot_radius, white_r, white_dot_t), dot_color)
-			_game.draw_circle(p, lerpf(dot_radius, white_r - border_w, white_dot_t), fill_color)
-		else:
-			_game.draw_circle(p, dot_radius, dot_color)
-
-
-func _draw_ti_k_white_dot(vp: Vector2, t: float) -> void:
-	"""Phase 4: P4が黒点→白点に変化"""
-	var center: Vector2 = _get_k_center_screen(vp)
-	var sc: float = _get_k_draw_scale(vp)
-	_draw_ti_k_complete(vp, center, sc, _ease_out_cubic(t), 0.0)
-
-
-func _draw_ti_k_deform(vp: Vector2, t: float) -> void:
-	"""Phase 5: 白点P4が右上に移動して変形"""
-	var center: Vector2 = _get_k_center_screen(vp)
-	var sc: float = _get_k_draw_scale(vp)
-	_draw_ti_k_complete(vp, center, sc, 1.0, _ease_out_cubic(t))
-
-
-func _draw_ti_k_move(vp: Vector2, t: float) -> void:
-	"""Phase 6: Kが画面中央からロゴ位置に移動"""
-	var center_start: Vector2 = _get_k_center_screen(vp)
-	var logo_info: Dictionary = _get_k_logo_position(vp)
-	var center_end: Vector2 = logo_info["center"]
-	var sc_start: float = _get_k_draw_scale(vp)
-	var sc_end: float = logo_info["scale"]
-
-	var eased: float = _ease_out_cubic(t)
-	var center: Vector2 = center_start.lerp(center_end, eased)
-	var sc: float = lerpf(sc_start, sc_end, eased)
-	_draw_ti_k_complete(vp, center, sc, 1.0, 1.0)
-
-
-func _draw_ti_logo_reveal(vp: Vector2, t: float) -> void:
-	"""Phase 7: Kをロゴ位置に描画し、ATA-DRAWをマスクスライドで表示"""
-	# ロゴ位置のKを描画
-	var logo_info: Dictionary = _get_k_logo_position(vp)
-	var center: Vector2 = logo_info["center"]
-	var sc: float = logo_info["scale"]
-	_draw_ti_k_complete(vp, center, sc, 1.0, 1.0)
-
-	# ATA-DRAW部分（logo02）をマスクスライドで表示
-	if _game.title_logo02_texture:
-		var tex_size: Vector2 = _game.title_logo02_texture.get_size()
-		var draw_w: float = vp.x * 0.85 * 1.2
-		var logo_scale: float = draw_w / 1456.0
-		var draw_h: float = tex_size.y * (draw_w / tex_size.x)
-		var logo_cy: float = vp.y * 0.38 * 0.8
-		var logo_pos := Vector2((vp.x - draw_w) / 2.0, logo_cy - draw_h / 2.0)
-
-		# マスク: 左端（K部分の右端あたり）から右端へ
-		var eased: float = _ease_out_cubic(t)
-		var mask_x: float = logo_pos.x + draw_w * eased
-		# テクスチャの表示可能範囲をClipで制限
-		# draw_texture_rect_regionを使用してマスク効果を実現
-		var visible_w: float = draw_w * eased
-		if visible_w > 0:
-			var src_w: float = tex_size.x * eased
-			var src_rect := Rect2(0, 0, src_w, tex_size.y)
-			var dst_rect := Rect2(logo_pos, Vector2(visible_w, draw_h))
-			_game.draw_texture_rect_region(_game.title_logo02_texture, dst_rect, src_rect)
-
-
-func _draw_title_content(vp: Vector2, alpha: float) -> void:
-	"""タイトル画面の内容をアルファ付きで描画（クロスフェード用：ロゴとBGのみ）"""
-	# 背景をアルファ付きで重ねる（クロスフェード用）
-	if _game.bg_texture:
-		_game.draw_texture_rect(_game.bg_texture, Rect2(Vector2.ZERO, vp), false, Color(1, 1, 1, alpha))
-	else:
-		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(_game.BG_COLOR.r, _game.BG_COLOR.g, _game.BG_COLOR.b, alpha))
-
-	var cy: float = vp.y * 0.38 * 0.8
-	if _game.title_logo_texture:
-		var tex_size: Vector2 = _game.title_logo_texture.get_size()
-		var draw_w: float = vp.x * 0.85 * 1.2
-		var scale_f: float = draw_w / tex_size.x
-		var draw_h: float = tex_size.y * scale_f
-		var pos := Vector2((vp.x - draw_w) / 2.0, cy - draw_h / 2.0)
-		_game.draw_texture_rect(_game.title_logo_texture, Rect2(pos, Vector2(draw_w, draw_h)), false, Color(1, 1, 1, alpha))
+	return title_intro.is_skip_done()
 
 
 func _draw_title(vp: Vector2) -> void:
