@@ -6,18 +6,22 @@ extends RefCounted
 
 const TITLE_INTRO_SKIP_FADE := 1.0
 # Phase 0〜4: KF 表示〜ロゴへ K 移動。Phase 5〜7 はそのまま。
-# TI_EDITOR_KF3 = エディタのシート2（最終の手前）。その後 TI_PHASE_TO_FINAL_DUR で K_VERTICES（シート1）へ。
-# 頂点モーフセグメント1〜4: 開始で ui_catch、区間中 ui_move、終了で停止。
+# TI_EDITOR_KF3 = エディタのシート2（最終の手前）。その後3段階（通常K→白点色変化→白点移動）を経て Phase 4 へ。
+# 頂点モーフセグメント1〜3: 開始で ui_catch、区間中 ui_move、終了で停止。
 const TI_PHASE0_DUR := 0.7
-const TI_PHASE1_DUR := 1.0
-const TI_PHASE2_DUR := 1.0
-const TI_PHASE3_DUR := 1.0
-const TI_PHASE_TO_FINAL_DUR := 1.0
+const TI_PHASE0_HOLD_DUR := 0.9      # Phase 0 完了後の静止間隔
+const TI_PHASE1_DUR := 0.5
+const TI_PHASE2_DUR := 0.5
+const TI_PHASE3_DUR := 0.5
+const TI_PHASE_TO_NORMAL_DUR := 0.5  # KF3 → 通常K形状（V2 は K_P2_INITIAL 位置）
+const TI_PHASE_NORMAL_HOLD_DUR := 0.4  # 通常K完成後の静止間隔
+const TI_PHASE_DOT_COLOR_DUR := 0.4  # 白点カラー変化（暗色 → クリーム）
+const TI_PHASE_DOT_MOVE_DUR := 0.5   # 白点移動（K_P2_INITIAL → K_VERTICES[2]）
 const TI_PHASE4_DUR := 0.5
-const TI_PHASE5_DUR := 3.5
+const TI_PHASE5_DUR := 3.0
 const TI_PHASE6_DUR := 0.7
 const TI_PHASE7_DUR := 1.0
-const TI_TOTAL_DUR := 10.4
+const TI_TOTAL_DUR := 10.1
 const TI_MOTION_FADE_DUR := 1.5
 
 # 最終 K（_draw_ti_k_move t=0）と同じ AABB へ正規化形状を収める
@@ -121,9 +125,12 @@ var _title_intro_time: float = -1.0
 var _title_intro_skip: bool = false
 var _title_intro_skip_time: float = -1.0
 var _ti_move_playing: bool = false
-# 頂点モーフ区間: 0=なし, 1=KF0→1, 2=KF1→2, 3=KF2→3, 4=KF3→最終K（-1=未初期化）
+# 頂点モーフ区間: 0=なし, 1=KF0→1, 2=KF1→2, 3=KF2→3（-1=未初期化）
 var _ti_prev_vertex_sound_segment: int = -1
 var _ti_motion_played: bool = false
+var _ti_point_played: bool = false      # Phase 0 ポップイン時の ui_point.wav
+var _ti_dot_catch_played: bool = false  # 白点カラー変化開始時の ui_catch.wav
+var _ti_match_played: bool = false      # 白点移動完了時の match.mp3
 
 var _game: Node2D
 var _suppress_hover_sfx: Callable
@@ -139,6 +146,9 @@ func reset() -> void:
 	_ti_move_playing = false
 	_ti_prev_vertex_sound_segment = -1
 	_ti_motion_played = false
+	_ti_point_played = false
+	_ti_dot_catch_played = false
+	_ti_match_played = false
 
 func start_skip() -> void:
 	if _title_intro_skip:
@@ -258,13 +268,12 @@ func _norm_vertices_to_k_bbox(verts_norm: Array) -> Array:
 
 func _vertex_morph_sound_segment(
 	elapsed: float,
-	phase0_end: float,
+	phase0_hold_end: float,
 	phase1_end: float,
 	phase2_end: float,
-	phase3_end: float,
-	phase_final_end: float
+	phase3_end: float
 ) -> int:
-	if elapsed < phase0_end:
+	if elapsed < phase0_hold_end:
 		return 0
 	if elapsed < phase1_end:
 		return 1
@@ -272,8 +281,6 @@ func _vertex_morph_sound_segment(
 		return 2
 	if elapsed < phase3_end:
 		return 3
-	if elapsed < phase_final_end:
-		return 4
 	return 0
 
 
@@ -353,7 +360,7 @@ func _draw_keyframe_phase0_show_kf0(vp: Vector2, t: float) -> void:
 	for v in verts:
 		c += v as Vector2
 	c /= float(verts.size())
-	var pop: float = _ease_out_back(te * 0.85)
+	var pop: float = _ease_out_back(te)
 	var sc_mul: float = lerpf(0.08, 1.0, pop)
 	for i in range(verts.size()):
 		verts[i] = c + (verts[i] as Vector2 - c) * sc_mul
@@ -369,14 +376,23 @@ func _draw_keyframe_segment(vp: Vector2, t_seg: float, kf_a: Array, kf_b: Array)
 	_draw_morph_polygon(vp, center, sc, verts, 0.0, 1.0)
 
 
-func _draw_keyframe_to_final_k(vp: Vector2, t_seg: float) -> void:
+func _draw_keyframe_to_normal_k(vp: Vector2, t_seg: float) -> void:
+	"""Phase遷移 sub1: KF3_bbox → 通常K形状（V2はK_P2_INITIAL、白点は暗色のまま）"""
 	var center: Vector2 = _get_k_center_screen(vp)
 	var sc: float = _get_k_draw_scale(vp)
 	var te: float = _ease_out_cubic(clampf(t_seg, 0.0, 1.0))
 	var from_bbox: Array = _norm_vertices_to_k_bbox(TI_EDITOR_KF3)
-	var k1: Array = _k_vertices_deform_array(1.0)
-	var verts: Array = _vertices_lerp(from_bbox, k1, te)
-	_draw_morph_polygon(vp, center, sc, verts, te, 1.0)
+	var k_normal: Array = _k_vertices_deform_array(0.0)
+	var verts: Array = _vertices_lerp(from_bbox, k_normal, te)
+	_draw_morph_polygon(vp, center, sc, verts, 0.0, 1.0)
+
+
+func _draw_centered_k_dot_anim(vp: Vector2, white_dot_t: float, deform_t: float) -> void:
+	"""Phase遷移 sub2-3: 通常K形状（中央描画）で白点カラー変化・移動アニメ（t値は呼び出し元でeasing済み）"""
+	var center: Vector2 = _get_k_center_screen(vp)
+	var sc: float = _get_k_draw_scale(vp)
+	var verts: Array = _k_vertices_deform_array(deform_t)
+	_draw_morph_polygon(vp, center, sc, verts, white_dot_t, 1.0)
 
 
 func draw(vp: Vector2) -> void:
@@ -394,48 +410,90 @@ func draw(vp: Vector2) -> void:
 
 	# フェーズ判定
 	var phase0_end: float = TI_PHASE0_DUR
-	var phase1_end: float = phase0_end + TI_PHASE1_DUR
+	var phase0_hold_end: float = phase0_end + TI_PHASE0_HOLD_DUR
+	var phase1_end: float = phase0_hold_end + TI_PHASE1_DUR
 	var phase2_end: float = phase1_end + TI_PHASE2_DUR
 	var phase3_end: float = phase2_end + TI_PHASE3_DUR
-	var phase_final_end: float = phase3_end + TI_PHASE_TO_FINAL_DUR
-	var phase4_end: float = phase_final_end + TI_PHASE4_DUR
+	var phase_to_normal_end: float = phase3_end + TI_PHASE_TO_NORMAL_DUR
+	var phase_normal_hold_end: float = phase_to_normal_end + TI_PHASE_NORMAL_HOLD_DUR
+	var phase_dot_color_end: float = phase_normal_hold_end + TI_PHASE_DOT_COLOR_DUR
+	var phase_dot_move_end: float = phase_dot_color_end + TI_PHASE_DOT_MOVE_DUR
+	var phase4_end: float = phase_dot_move_end + TI_PHASE4_DUR
 	var phase5_end: float = phase4_end + TI_PHASE5_DUR
 	var phase6_end: float = phase5_end + TI_PHASE6_DUR
 	var phase7_end: float = phase6_end + TI_PHASE7_DUR
 
 	if not _title_intro_skip:
-		# 頂点モーフ区間ごと: 開始時 ui_catch → ui_move ループ、区間終了で ui_move 停止
+		# Phase 0 ポップイン開始: ui_point.wav
+		if not _ti_point_played:
+			_game._play_sfx(_game.sfx_point)
+			_ti_point_played = true
+
+		# 頂点モーフ区間（Phase 1〜3）: 開始時 ui_catch → ui_move ループ、区間終了で停止
 		var morph_seg: int = _vertex_morph_sound_segment(
-			elapsed, phase0_end, phase1_end, phase2_end, phase3_end, phase_final_end
+			elapsed, phase0_hold_end, phase1_end, phase2_end, phase3_end
 		)
 		if morph_seg != _ti_prev_vertex_sound_segment:
-			if _ti_prev_vertex_sound_segment >= 1 and _ti_prev_vertex_sound_segment <= 4:
+			if _ti_prev_vertex_sound_segment >= 1 and _ti_prev_vertex_sound_segment <= 3:
 				_game._stop_sfx_move()
 				_ti_move_playing = false
-			if morph_seg >= 1 and morph_seg <= 4:
+			if morph_seg >= 1 and morph_seg <= 3:
 				_game._play_sfx(_game.sfx_catch)
 				_game._start_sfx_move()
 				_ti_move_playing = true
 			_ti_prev_vertex_sound_segment = morph_seg
 
-		# Phase 0: 1枚目（エディタ KF0）から開始・フェードイン
+		# 白点カラー変化フェーズ開始: ui_catch.wav
+		if elapsed >= phase_normal_hold_end and not _ti_dot_catch_played:
+			_game._play_sfx(_game.sfx_catch)
+			_ti_dot_catch_played = true
+
+		# 白点移動フェーズ: ui_move.wav ループ（開始・終了管理）
+		if elapsed >= phase_dot_color_end and elapsed < phase_dot_move_end:
+			if not _ti_move_playing:
+				_game._start_sfx_move()
+				_ti_move_playing = true
+		elif elapsed >= phase_dot_move_end and _ti_move_playing:
+			_game._stop_sfx_move()
+			_ti_move_playing = false
+
+		# 白点移動完了: match.mp3
+		if elapsed >= phase_dot_move_end and not _ti_match_played:
+			_game._play_sfx(_game.sfx_clear)
+			_ti_match_played = true
+
+		# Phase 0: KF0 ポップイン
 		if elapsed < phase0_end:
 			_draw_keyframe_phase0_show_kf0(vp, elapsed / TI_PHASE0_DUR)
-		# Phase 1: 1枚目 → 2枚目
+		# Phase 0 Hold: KF0 静止
+		elif elapsed < phase0_hold_end:
+			_draw_keyframe_phase0_show_kf0(vp, 1.0)
+		# Phase 1: KF0 → KF1
 		elif elapsed < phase1_end:
-			_draw_keyframe_segment(vp, (elapsed - phase0_end) / TI_PHASE1_DUR, TI_EDITOR_KF0, TI_EDITOR_KF1)
-		# Phase 2: 2枚目 → 3枚目
+			_draw_keyframe_segment(vp, (elapsed - phase0_hold_end) / TI_PHASE1_DUR, TI_EDITOR_KF0, TI_EDITOR_KF1)
+		# Phase 2: KF1 → KF2
 		elif elapsed < phase2_end:
 			_draw_keyframe_segment(vp, (elapsed - phase1_end) / TI_PHASE2_DUR, TI_EDITOR_KF1, TI_EDITOR_KF2)
-		# Phase 3: 3枚目 → 4枚目（KF2→KF3）
+		# Phase 3: KF2 → KF3
 		elif elapsed < phase3_end:
 			_draw_keyframe_segment(vp, (elapsed - phase2_end) / TI_PHASE3_DUR, TI_EDITOR_KF2, TI_EDITOR_KF3)
-		# 4枚目 → 最終 K（白点＋右上変形。_draw_ti_k_move の t=0 と同じ形）
-		elif elapsed < phase_final_end:
-			_draw_keyframe_to_final_k(vp, (elapsed - phase3_end) / TI_PHASE_TO_FINAL_DUR)
-		# K移動（ロゴ位置へ）— 頂点モーフは終了済み（上で ui_move 停止）
+		# Phase 遷移 sub1: KF3 → 通常K形状（V2 は K_P2_INITIAL 位置、白点は暗色）
+		elif elapsed < phase_to_normal_end:
+			_draw_keyframe_to_normal_k(vp, (elapsed - phase3_end) / TI_PHASE_TO_NORMAL_DUR)
+		# Phase 遷移 sub1 Hold: 通常K完成後の静止
+		elif elapsed < phase_normal_hold_end:
+			_draw_centered_k_dot_anim(vp, 0.0, 0.0)
+		# Phase 遷移 sub2: 白点カラー変化（暗色 → クリーム）
+		elif elapsed < phase_dot_color_end:
+			var raw_t: float = (elapsed - phase_normal_hold_end) / TI_PHASE_DOT_COLOR_DUR
+			_draw_centered_k_dot_anim(vp, _ease_in_out_cubic(raw_t), 0.0)
+		# Phase 遷移 sub3: 白点移動（K_P2_INITIAL → K_VERTICES[2]）
+		elif elapsed < phase_dot_move_end:
+			var raw_t: float = (elapsed - phase_dot_color_end) / TI_PHASE_DOT_MOVE_DUR
+			_draw_centered_k_dot_anim(vp, 1.0, _ease_out_cubic(raw_t))
+		# Phase 4: K移動（ロゴ位置へ）
 		elif elapsed < phase4_end:
-			_draw_ti_k_move(vp, (elapsed - phase_final_end) / TI_PHASE4_DUR)
+			_draw_ti_k_move(vp, (elapsed - phase_dot_move_end) / TI_PHASE4_DUR)
 		# Phase 5: ATA-DRAWスライドイン
 		elif elapsed < phase5_end:
 			var phase5_t: float = (elapsed - phase4_end) / TI_PHASE5_DUR
