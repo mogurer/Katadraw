@@ -350,7 +350,7 @@ func _setup_game_cursor() -> void:
 
 func _setup_audio() -> void:
 	bgm_title = AudioStreamPlayer.new()
-	bgm_title.stream = _load_audio("res://assets/sounds/maintheme_image_01.mp3")
+	bgm_title.stream = _load_audio("res://assets/sounds/k_03_indigo_01.mp3")
 	bgm_title.volume_db = -22.5
 	bgm_title.autoplay = false
 	if bgm_title.stream is AudioStreamMP3:
