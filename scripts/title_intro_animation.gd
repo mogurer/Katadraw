@@ -9,10 +9,10 @@ const TITLE_INTRO_SKIP_FADE := 1.0
 # TI_EDITOR_KF3 = エディタのシート2（最終の手前）。その後 TI_PHASE_TO_FINAL_DUR で K_VERTICES（シート1）へ。
 # 頂点モーフセグメント1〜4: 開始で ui_catch、区間中 ui_move、終了で停止。
 const TI_PHASE0_DUR := 0.7
-const TI_PHASE1_DUR := 0.5
-const TI_PHASE2_DUR := 0.5
-const TI_PHASE3_DUR := 0.5
-const TI_PHASE_TO_FINAL_DUR := 0.5
+const TI_PHASE1_DUR := 1.0
+const TI_PHASE2_DUR := 1.0
+const TI_PHASE3_DUR := 1.0
+const TI_PHASE_TO_FINAL_DUR := 1.0
 const TI_PHASE4_DUR := 0.5
 const TI_PHASE5_DUR := 3.5
 const TI_PHASE6_DUR := 0.7
