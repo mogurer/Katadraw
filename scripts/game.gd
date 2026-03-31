@@ -251,7 +251,7 @@ var title_start_time: float = 0.0
 
 # --- Audio ---
 # 一時: BGM を聞こえないようにする。通常に戻すときは false にして _apply_bgm_volume() の通常分岐を有効にする。
-const BGM_TEMPORARILY_SILENT := true
+const BGM_TEMPORARILY_SILENT := false
 var bgm_title: AudioStreamPlayer
 var bgm_game: AudioStreamPlayer
 var bgm_result: AudioStreamPlayer
@@ -358,7 +358,7 @@ func _setup_audio() -> void:
 	add_child(bgm_title)
 
 	bgm_game = AudioStreamPlayer.new()
-	bgm_game.stream = _load_audio("res://assets/sounds/audiostock_1544483_sample.mp3")
+	bgm_game.stream = _load_audio("res://assets/sounds/audiostock_1544483.mp3")
 	bgm_game.volume_db = -16.5
 	bgm_game.autoplay = false
 	if bgm_game.stream is AudioStreamMP3:
