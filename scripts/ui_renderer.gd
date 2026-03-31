@@ -2057,8 +2057,29 @@ func _draw_grab_state_effect(center: Vector2) -> void:
 	_game.draw_arc(center, radius, 0, TAU, 32, c, 3.0)
 
 
+func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
+	"""L/R 候補コリドー（円錐帯）を薄い赤で表示。InputHandler の CONE_HALF_ANGLE と一致させる。"""
+	if not _game.input_handler.debug_right_stick_active:
+		return
+	var dir: Vector2 = _game.input_handler.debug_right_stick_direction
+	if dir.length_squared() < 0.0001:
+		return
+	var center: Vector2 = _game.input_handler.debug_right_stick_center
+	var dir_n: Vector2 = dir.normalized()
+	var line_len: float = maxf(vp.x, vp.y) * 0.6
+	var half_rad: float = deg_to_rad(InputHandler.RIGHT_STICK_RAY_SHOULDER_CONE_HALF_ANGLE_DEG)
+	var p_left: Vector2 = center + dir_n.rotated(half_rad) * line_len
+	var p_right: Vector2 = center + dir_n.rotated(-half_rad) * line_len
+	var poly: PackedVector2Array = PackedVector2Array([center, p_left, p_right])
+	var fill_col: Color = Color(0.95, 0.42, 0.44, 0.13)
+	_game.draw_colored_polygon(poly, fill_col)
+	var edge_col: Color = Color(0.95, 0.50, 0.52, 0.32)
+	_game.draw_line(center, p_left, edge_col, 1.25, true)
+	_game.draw_line(center, p_right, edge_col, 1.25, true)
+
+
 func _draw_right_stick_debug_line(vp: Vector2) -> void:
-	"""右スティック倒し中: 放電エフェクトで描画"""
+	"""右スティック倒し中: コリドー帯 → 放電エフェクトで描画"""
 	if not _game.input_handler.debug_right_stick_active:
 		return
 	var ih: InputHandler = _game.input_handler
@@ -2066,6 +2087,7 @@ func _draw_right_stick_debug_line(vp: Vector2) -> void:
 	var dir: Vector2 = ih.debug_right_stick_direction
 	if dir.length_squared() < 0.0001:
 		return
+	_draw_right_stick_shoulder_corridor_guide(vp)
 	var line_len: float = maxf(vp.x, vp.y) * 0.6
 	var end_pos: Vector2 = center + dir * line_len
 	var perpendicular: Vector2 = Vector2(-dir.y, dir.x)  # 法線（ジグザグ用）
