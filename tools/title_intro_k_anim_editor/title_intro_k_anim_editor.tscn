@@ -1,9 +1,9 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://drd7v2s20gp3p"]
 
-[ext_resource type="Script" path="res://tools/title_intro_k_anim_editor/title_intro_k_anim_editor.gd" id="1_editor"]
-[ext_resource type="Script" path="res://tools/title_intro_k_anim_editor/title_intro_k_anim_canvas.gd" id="2_canvas"]
+[ext_resource type="Script" uid="uid://nfbp6rdgncy" path="res://tools/title_intro_k_anim_editor/title_intro_k_anim_editor.gd" id="1_editor"]
+[ext_resource type="Script" uid="uid://dmb7qwlj6ntx" path="res://tools/title_intro_k_anim_editor/title_intro_k_anim_canvas.gd" id="2_canvas"]
 
-[node name="TitleIntroKAnimEditor" type="Control"]
+[node name="TitleIntroKAnimEditor" type="Control" unique_id=1579256407]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -12,7 +12,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_editor")
 
-[node name="VBox" type="VBoxContainer" parent="."]
+[node name="VBox" type="VBoxContainer" parent="." unique_id=1812417239]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,26 +21,26 @@ offset_left = 12.0
 offset_top = 12.0
 offset_right = -12.0
 offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
 theme_override_constants/separation = 8
 
-[node name="TopBar" type="HBoxContainer" parent="VBox"]
+[node name="TopBar" type="HBoxContainer" parent="VBox" unique_id=242442565]
 layout_mode = 2
 size_flags_vertical = 0
 
-[node name="BtnDone" type="Button" parent="VBox/TopBar"]
+[node name="BtnDone" type="Button" parent="VBox/TopBar" unique_id=800567797]
 unique_name_in_owner = true
 layout_mode = 2
 text = "完成"
 
-[node name="TabBar" type="TabBar" parent="VBox"]
+[node name="TabBar" type="TabBar" parent="VBox" unique_id=803154711]
 unique_name_in_owner = true
 layout_mode = 2
-current_tab = 0
 
-[node name="Canvas" type="Control" parent="VBox"]
+[node name="Canvas" type="Control" parent="VBox" unique_id=2071549014]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 400)
 layout_mode = 2
 size_flags_vertical = 3
-mouse_filter = 0
 script = ExtResource("2_canvas")

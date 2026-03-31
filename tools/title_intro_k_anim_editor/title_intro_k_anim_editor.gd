@@ -1,8 +1,13 @@
 # =============================================================================
-# タイトルイントロ用 K キーフレーム編集ツール（4シート・再生・クリップボード出力）
+# タイトルイントロ用 K キーフレーム編集ツール（5シート・再生・クリップボード出力）
+# シート1=最終（編集不可）。プレビューは 5→4→3→2→1 の順（各2秒）。
 # 実行: このシーンを開いて F6（またはメインから別ウィンドウで起動）
 # =============================================================================
 extends Control
+
+const SHEET_COUNT := 5
+# 5→4→3→2→1 の区間数（各2秒）
+const PREVIEW_SEGMENT_COUNT := SHEET_COUNT - 1
 
 const PREVIEW_STEP_SEC := 2.0
 const VERTEX_HIT_PX := 14.0
@@ -21,7 +26,7 @@ const K_EDGES: Array = [
 
 const K_WHITE_DOT_IDX := 2
 
-# シート1（最終・編集不可）— title_intro_animation.gd の TI_EDITOR_KF3 と一致
+# シート1（最終・編集不可）— title_intro_animation.gd の K_VERTICES と一致。TI_EDITOR_KF3 はシート2。
 const SHEET1_FINAL_EDITOR: Array[Vector2] = [
 	Vector2(-22.0000, -43.0000),
 	Vector2(10.0000, -150.0000),
@@ -54,13 +59,13 @@ func _ready() -> void:
 	_cache_grid_axes_from_reference()
 	_reset_sheets_from_final()
 	_lock_sheet1()
-	_btn_done.tooltip_text = "シート4→3→2→1を各2秒でプレビュー再生し、終了後に Cursor 用の指示と TI_EDITOR_KF 定義をクリップボードへコピーします。"
+	_btn_done.tooltip_text = "シート5→4→3→2→1を各2秒でプレビュー再生し、終了後に Cursor 用の指示と TI_EDITOR_KF 定義をクリップボードへコピーします。"
 	_btn_done.pressed.connect(_on_done_pressed)
 	_tab_bar.tab_changed.connect(_on_tab_changed)
 	_canvas.gui_input.connect(_on_canvas_gui_input)
-	_canvas.tooltip_text = "シート2〜4で頂点をドラッグ。Shift 押しながらでグリッドにスナップしません（微調整）。"
-	_tab_bar.tab_count = 4
-	for i in range(4):
+	_canvas.tooltip_text = "シート2〜5で頂点をドラッグ。Shift 押しながらでグリッドにスナップしません（微調整）。"
+	_tab_bar.tab_count = SHEET_COUNT
+	for i in range(SHEET_COUNT):
 		_tab_bar.set_tab_title(i, "シート%d" % (i + 1))
 	_tab_bar.current_tab = 0
 	queue_redraw_canvas()
@@ -131,7 +136,7 @@ func _draw_reference_grid(
 func _reset_sheets_from_final() -> void:
 	var base: Array = SHEET1_FINAL_EDITOR.duplicate()
 	_sheets.clear()
-	for i in range(4):
+	for i in range(SHEET_COUNT):
 		var copy: Array = []
 		for v in base:
 			copy.append(v as Vector2)
@@ -148,7 +153,7 @@ func _on_tab_changed(tab: int) -> void:
 
 
 func _sheet_editable(sheet_index: int) -> bool:
-	return sheet_index >= 1 and sheet_index <= 3
+	return sheet_index >= 1 and sheet_index <= SHEET_COUNT - 1
 
 
 func _current_vertices() -> Array:
@@ -295,15 +300,18 @@ func _process(delta: float) -> void:
 	if _preview_elapsed >= PREVIEW_STEP_SEC:
 		_preview_elapsed = 0.0
 		_preview_segment += 1
-		if _preview_segment >= 3:
+		if _preview_segment >= PREVIEW_SEGMENT_COUNT:
 			_preview_playing = false
 			_btn_done.disabled = false
 			_tab_bar.mouse_filter = Control.MOUSE_FILTER_STOP
 			_copy_clipboard_and_notify()
 			queue_redraw_canvas()
 			return
-		_preview_from = (_sheets[3 - _preview_segment] as Array).duplicate()
-		_preview_to = (_sheets[2 - _preview_segment] as Array).duplicate()
+		# 5→4→3→2→1: from = SHEET_COUNT-1 - seg, to = SHEET_COUNT-2 - seg
+		var hi: int = SHEET_COUNT - 1 - _preview_segment
+		var lo: int = SHEET_COUNT - 2 - _preview_segment
+		_preview_from = (_sheets[hi] as Array).duplicate()
+		_preview_to = (_sheets[lo] as Array).duplicate()
 	queue_redraw_canvas()
 
 
@@ -313,8 +321,8 @@ func _on_done_pressed() -> void:
 	_preview_playing = true
 	_preview_segment = 0
 	_preview_elapsed = 0.0
-	_preview_from = (_sheets[3] as Array).duplicate()
-	_preview_to = (_sheets[2] as Array).duplicate()
+	_preview_from = (_sheets[SHEET_COUNT - 1] as Array).duplicate()
+	_preview_to = (_sheets[SHEET_COUNT - 2] as Array).duplicate()
 	_btn_done.disabled = true
 	_tab_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	queue_redraw_canvas()
@@ -331,16 +339,16 @@ func _build_cursor_instruction() -> String:
 	lines.append("# title_intro_animation.gd への反映（Cursor 用指示）")
 	lines.append("#")
 	lines.append("# 次の const TI_EDITOR_KF0〜TI_EDITOR_KF3 を、scripts/title_intro_animation.gd 内の同名定義と置き換えてください。")
-	lines.append("# 対応: TI_EDITOR_KF0=シート4、KF1=シート3、KF2=シート2、KF3=シート1（最終・編集不可の参照形状）")
+	lines.append("# 対応: TI_EDITOR_KF0=シート5、KF1=シート4、KF2=シート3、KF3=シート2（その後 K_VERTICES＝シート1 へモーフ）")
 	lines.append("# アニメーションの流れは title_intro_animation.gd の Phase 0〜3 と一致（KF0→KF1→KF2→KF3→最終Kモーフ）。")
 	lines.append("")
-	lines.append(_format_kf_const("TI_EDITOR_KF0", _sheets[3]))
+	lines.append(_format_kf_const("TI_EDITOR_KF0", _sheets[4]))
 	lines.append("")
-	lines.append(_format_kf_const("TI_EDITOR_KF1", _sheets[2]))
+	lines.append(_format_kf_const("TI_EDITOR_KF1", _sheets[3]))
 	lines.append("")
-	lines.append(_format_kf_const("TI_EDITOR_KF2", _sheets[1]))
+	lines.append(_format_kf_const("TI_EDITOR_KF2", _sheets[2]))
 	lines.append("")
-	lines.append(_format_kf_const("TI_EDITOR_KF3", SHEET1_FINAL_EDITOR.duplicate()))
+	lines.append(_format_kf_const("TI_EDITOR_KF3", _sheets[1]))
 	lines.append("")
 	return "\n".join(lines)
 

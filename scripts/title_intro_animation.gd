@@ -6,17 +6,18 @@ extends RefCounted
 
 const TITLE_INTRO_SKIP_FADE := 1.0
 # Phase 0〜4: KF 表示〜ロゴへ K 移動。Phase 5〜7 はそのまま。
-# セグメント4（KF3→最終K）は効果音なし。セグメント3（KF2→KF3）は catch + ui_move あり。
+# TI_EDITOR_KF3 = エディタのシート2（最終の手前）。その後 TI_PHASE_TO_FINAL_DUR で K_VERTICES（シート1）へ。
+# 頂点モーフセグメント1〜4: 開始で ui_catch、区間中 ui_move、終了で停止。
 const TI_PHASE0_DUR := 0.7
-const TI_PHASE1_DUR := 1.0
-const TI_PHASE2_DUR := 1.0
-const TI_PHASE3_DUR := 1.0
-const TI_PHASE_TO_FINAL_DUR := 0.2
+const TI_PHASE1_DUR := 0.5
+const TI_PHASE2_DUR := 0.5
+const TI_PHASE3_DUR := 0.5
+const TI_PHASE_TO_FINAL_DUR := 0.5
 const TI_PHASE4_DUR := 0.5
 const TI_PHASE5_DUR := 3.5
 const TI_PHASE6_DUR := 0.7
 const TI_PHASE7_DUR := 1.0
-const TI_TOTAL_DUR := 9.6
+const TI_TOTAL_DUR := 10.4
 const TI_MOTION_FADE_DUR := 1.5
 
 # 最終 K（_draw_ti_k_move t=0）と同じ AABB へ正規化形状を収める
@@ -25,13 +26,13 @@ const K_SHAPE_BBOX_MAX := Vector2(84.0, 150.0)
 # ベクトル K のスケールをロゴ PNG 上の K と揃える係数（まだズレる場合はここだけ微調整）
 const K_LOGO_VECTOR_SCALE_MULT := 0.91
 
-# Shape Grid Editor 出力（添付 1〜4 枚目、頂点 0〜11 は K_EDGES 順）
-# K キーフレーム（K_EDGES 順）。KF3 = 最終 K（K_VERTICES と一致）
+# Shape Grid Editor 出力（頂点 0〜11 は K_EDGES 順）
+# TI_EDITOR_KF0..2 = シート5..3、TI_EDITOR_KF3 = シート2。K_VERTICES = シート1（完成・KF3→最終モーフの終点）
 const TI_EDITOR_KF0: Array[Vector2] = [
 	Vector2(-22.0000, -150.0000),
 	Vector2(10.0000, -150.0000),
-	Vector2(84.0000, -175.0000),
-	Vector2(84.0000, -26.0000),
+	Vector2(66.0000, -150.0000),
+	Vector2(66.0000, -26.0000),
 	Vector2(66.0000, 150.0000),
 	Vector2(16.0000, 150.0000),
 	Vector2(-11.0000, 150.0000),
@@ -44,8 +45,8 @@ const TI_EDITOR_KF0: Array[Vector2] = [
 const TI_EDITOR_KF1: Array[Vector2] = [
 	Vector2(-22.0000, -43.0000),
 	Vector2(10.0000, -150.0000),
-	Vector2(84.0000, -175.0000),
-	Vector2(84.0000, -26.0000),
+	Vector2(66.0000, -150.0000),
+	Vector2(66.0000, -26.0000),
 	Vector2(66.0000, 150.0000),
 	Vector2(16.0000, 150.0000),
 	Vector2(-11.0000, 150.0000),
@@ -58,8 +59,8 @@ const TI_EDITOR_KF1: Array[Vector2] = [
 const TI_EDITOR_KF2: Array[Vector2] = [
 	Vector2(-22.0000, -43.0000),
 	Vector2(10.0000, -150.0000),
-	Vector2(84.0000, -175.0000),
-	Vector2(84.0000, -26.0000),
+	Vector2(66.0000, -150.0000),
+	Vector2(66.0000, -26.0000),
 	Vector2(66.0000, 150.0000),
 	Vector2(16.0000, 150.0000),
 	Vector2(-11.0000, 39.0000),
@@ -72,7 +73,7 @@ const TI_EDITOR_KF2: Array[Vector2] = [
 const TI_EDITOR_KF3: Array[Vector2] = [
 	Vector2(-22.0000, -43.0000),
 	Vector2(10.0000, -150.0000),
-	Vector2(84.0000, -175.0000),
+	Vector2(66.0000, -150.0000),
 	Vector2(18.0000, -26.0000),
 	Vector2(66.0000, 150.0000),
 	Vector2(16.0000, 150.0000),
@@ -85,20 +86,28 @@ const TI_EDITOR_KF3: Array[Vector2] = [
 ]
 
 const K_WHITE_DOT_IDX := 2
+# 他頂点のドット半径（スクリーンpx）。右上○の基準もこれ（Phase4 まではスケール1）
+const K_VERTEX_DOT_RADIUS_PX := 7.0
+# 白化アニメ時の外側へのはみ出し量（基準スケール時の px）
+const K_WHITE_DOT_WHITE_R_EXTRA_BASE_PX := 3.0
+# 右上「○」の線の太さ（二重 draw_circle のリング幅、基準スケール時の px）
+const K_WHITE_DOT_RING_WIDTH_BASE_PX := 5.0
+# Phase4（K がロゴへ移動する区間）終了時点で右上○の半径をこの倍率まで変化（開始時は1.0）
+const K_WHITE_DOT_RADIUS_SCALE_PHASE4 := 1.5
 
 var K_VERTICES: Array = [
-	Vector2(-22, -43),
-	Vector2(10, -150),
-	Vector2(84, -175),
-	Vector2(18, -26),
-	Vector2(66, 150),
-	Vector2(16, 150),
-	Vector2(-11, 39),
-	Vector2(-22, 75),
-	Vector2(-22, 150),
-	Vector2(-66, 150),
-	Vector2(-66, -150),
-	Vector2(-22, -150),
+	Vector2(-22.0, -43.0),
+	Vector2(10.0, -150.0),
+	Vector2(90.0, -160.0),
+	Vector2(18.0, -26.0),
+	Vector2(66.0, 150.0),
+	Vector2(16.0, 150.0),
+	Vector2(-11.0, 39.0),
+	Vector2(-22.0, 75.0),
+	Vector2(-22.0, 150.0),
+	Vector2(-66.0, 150.0),
+	Vector2(-66.0, -150.0),
+	Vector2(-22.0, -150.0),
 ]
 
 var K_EDGES: Array = [
@@ -275,10 +284,17 @@ func _vertices_lerp(a: Array, b: Array, t: float) -> Array:
 	return out
 
 
-func _draw_morph_polygon(vp: Vector2, center: Vector2, sc: float, verts: Array, white_dot_t: float, fill_alpha: float) -> void:
+func _draw_morph_polygon(
+	vp: Vector2,
+	center: Vector2,
+	sc: float,
+	verts: Array,
+	white_dot_t: float,
+	fill_alpha: float,
+	white_dot_scale: float = 1.0
+) -> void:
 	var dot_color := Color(0.26, 0.21, 0.28)
 	var line_color := Color(0.26, 0.21, 0.28)
-	var dot_radius: float = 7.0
 	var line_width: float = 3.0
 
 	var screen_pts: PackedVector2Array = PackedVector2Array()
@@ -306,13 +322,19 @@ func _draw_morph_polygon(vp: Vector2, center: Vector2, sc: float, verts: Array, 
 	for i in range(verts.size()):
 		var p: Vector2 = center + verts[i] * sc
 		if i == K_WHITE_DOT_IDX:
-			var white_r: float = dot_radius + 3.0
-			var border_w: float = 2.5
+			var wr: float = K_VERTEX_DOT_RADIUS_PX * white_dot_scale
+			var extra: float = K_WHITE_DOT_WHITE_R_EXTRA_BASE_PX * white_dot_scale
+			var ring_w: float = K_WHITE_DOT_RING_WIDTH_BASE_PX * white_dot_scale
+			var white_r: float = wr + extra
 			var fill_color := dot_color.lerp(Color(1.0, 0.937, 0.89), white_dot_t)
-			_game.draw_circle(p, lerpf(dot_radius, white_r, white_dot_t), dot_color)
-			_game.draw_circle(p, lerpf(dot_radius, white_r - border_w, white_dot_t), fill_color)
+			_game.draw_circle(p, lerpf(wr, white_r, white_dot_t), dot_color)
+			_game.draw_circle(
+				p,
+				lerpf(wr, white_r - ring_w, white_dot_t),
+				fill_color
+			)
 		else:
-			_game.draw_circle(p, dot_radius, dot_color)
+			_game.draw_circle(p, K_VERTEX_DOT_RADIUS_PX, dot_color)
 
 
 func _ease_out_back(t: float) -> float:
@@ -391,13 +413,9 @@ func draw(vp: Vector2) -> void:
 				_game._stop_sfx_move()
 				_ti_move_playing = false
 			if morph_seg >= 1 and morph_seg <= 4:
-				if morph_seg == 4:
-					# KF3→最終K: 効果音なし（直前のセグメント3終了で ui_move は停止済み）
-					pass
-				else:
-					_game._play_sfx(_game.sfx_catch)
-					_game._start_sfx_move()
-					_ti_move_playing = true
+				_game._play_sfx(_game.sfx_catch)
+				_game._start_sfx_move()
+				_ti_move_playing = true
 			_ti_prev_vertex_sound_segment = morph_seg
 
 		# Phase 0: 1枚目（エディタ KF0）から開始・フェードイン
@@ -462,11 +480,17 @@ func draw(vp: Vector2) -> void:
 		_draw_title_fade_overlay(vp, skip_alpha)
 
 
-func _draw_ti_k_complete(vp: Vector2, center: Vector2, sc: float, white_dot_t: float, deform_t: float) -> void:
-	"""Kの完成形を描画（白点変化・変形対応）"""
+func _draw_ti_k_complete(
+	vp: Vector2,
+	center: Vector2,
+	sc: float,
+	white_dot_t: float,
+	deform_t: float,
+	white_dot_scale: float = 1.0
+) -> void:
+	"""Kの完成形を描画（白点変化・変形対応）。white_dot_scale は右上○の倍率（Phase4 以降で 1.5 など）。"""
 	var dot_color := Color(0.26, 0.21, 0.28)
 	var line_color := Color(0.26, 0.21, 0.28)
-	var dot_radius: float = 7.0
 	var line_width: float = 3.0
 
 	# P2（右上先端）の変形位置を計算（初期位置→ロゴ最終位置）
@@ -488,13 +512,19 @@ func _draw_ti_k_complete(vp: Vector2, center: Vector2, sc: float, white_dot_t: f
 		var p: Vector2 = center + v * sc
 		if i == K_WHITE_DOT_IDX:
 			# P2: 白点への変化アニメーション
-			var white_r: float = dot_radius + 3.0
-			var border_w: float = 2.5
+			var wr: float = K_VERTEX_DOT_RADIUS_PX * white_dot_scale
+			var extra: float = K_WHITE_DOT_WHITE_R_EXTRA_BASE_PX * white_dot_scale
+			var ring_w: float = K_WHITE_DOT_RING_WIDTH_BASE_PX * white_dot_scale
+			var white_r: float = wr + extra
 			var fill_color := dot_color.lerp(Color(1.0, 0.937, 0.89), white_dot_t)
-			_game.draw_circle(p, lerpf(dot_radius, white_r, white_dot_t), dot_color)
-			_game.draw_circle(p, lerpf(dot_radius, white_r - border_w, white_dot_t), fill_color)
+			_game.draw_circle(p, lerpf(wr, white_r, white_dot_t), dot_color)
+			_game.draw_circle(
+				p,
+				lerpf(wr, white_r - ring_w, white_dot_t),
+				fill_color
+			)
 		else:
-			_game.draw_circle(p, dot_radius, dot_color)
+			_game.draw_circle(p, K_VERTEX_DOT_RADIUS_PX, dot_color)
 
 
 func _draw_ti_k_move(vp: Vector2, t: float) -> void:
@@ -509,7 +539,8 @@ func _draw_ti_k_move(vp: Vector2, t: float) -> void:
 	var eased: float = _ease_out_cubic(t)
 	var center: Vector2 = center_start.lerp(center_end, eased)
 	var sc: float = lerpf(sc_start, sc_end, eased)
-	_draw_ti_k_complete(vp, center, sc, 1.0, 1.0)
+	var dot_scale: float = lerpf(1.0, K_WHITE_DOT_RADIUS_SCALE_PHASE4, eased)
+	_draw_ti_k_complete(vp, center, sc, 1.0, 1.0, dot_scale)
 
 
 func _draw_ti_logo_reveal(vp: Vector2, t: float) -> void:
@@ -518,7 +549,7 @@ func _draw_ti_logo_reveal(vp: Vector2, t: float) -> void:
 	var logo_info: Dictionary = _get_k_logo_position(vp)
 	var center: Vector2 = logo_info["center"]
 	var sc: float = logo_info["scale"]
-	_draw_ti_k_complete(vp, center, sc, 1.0, 1.0)
+	_draw_ti_k_complete(vp, center, sc, 1.0, 1.0, K_WHITE_DOT_RADIUS_SCALE_PHASE4)
 
 	# ATA-DRAW部分（logo02）をマスクスライドで表示
 	if _game.title_logo02_texture:
