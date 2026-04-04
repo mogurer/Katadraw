@@ -1113,7 +1113,7 @@ func _draw_config(vp: Vector2) -> void:
 	var val_fs: int = 34
 	var box_h: float = (_game.font.get_ascent(val_fs) + _game.font.get_descent(val_fs)) * 1.5
 
-	var res_label: String = tr("CONFIG_720P") if _game.current_resolution == 0 else tr("CONFIG_1080P")
+	var res_label: String = _game.get_window_size_config_label()
 	var win_label: String = tr("CONFIG_FULLSCREEN") if _game.is_fullscreen else tr("CONFIG_WINDOW")
 	var _loc: String = TranslationServer.get_locale()
 	var lang_label: String
@@ -1129,7 +1129,7 @@ func _draw_config(vp: Vector2) -> void:
 		lang_label = tr("CONFIG_LANG_JA")
 
 	var item_labels: Array[String] = [
-		tr("CONFIG_RESOLUTION"), tr("CONFIG_WINDOW_MODE"), tr("CONFIG_LANGUAGE"),
+		tr("CONFIG_WINDOW_SIZE"), tr("CONFIG_WINDOW_MODE"), tr("CONFIG_LANGUAGE"),
 		tr("CONFIG_BGM_VOLUME"), tr("CONFIG_SE_VOLUME"), tr("CONFIG_BACK")
 	]
 	var item_values: Array[String] = [res_label, win_label, lang_label, str(_game.bgm_volume), str(_game.se_volume), ""]
@@ -1210,7 +1210,7 @@ func _draw_config(vp: Vector2) -> void:
 
 func _get_config_sub_labels(item_index: int) -> Array[String]:
 	match item_index:
-		0: return [tr("CONFIG_720P"), tr("CONFIG_1080P")]
+		0: return [tr("CONFIG_WIN_1280"), tr("CONFIG_WIN_1600"), tr("CONFIG_WIN_1920")]
 		1: return [tr("CONFIG_FULLSCREEN"), tr("CONFIG_WINDOW")]
 		2: return [tr("CONFIG_LANG_JA"), tr("CONFIG_LANG_EN"), tr("CONFIG_LANG_ZH_CN"), tr("CONFIG_LANG_ZH_TW")]
 	return []

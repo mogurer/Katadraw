@@ -86,14 +86,15 @@ GUIDE_TYPE_HEPTAGRAM,七芒星を作ろう,Make a heptagram (7-pointed star),画
 GUIDE_TYPE_HEPTAGRAM_SILHOUETTE,七芒星のシルエットを作ろう,Make a heptagram silhouette,画一个七芒星轮廓,畫一個七芒星輪廓
 MENU_GAME_START,ゲームスタート,Game Start,开始游戏,開始遊戲
 MENU_CONFIG,コンフィグ,Config,设置,設定
-CONFIG_RESOLUTION,解像度,Resolution,分辨率,解析度
+CONFIG_WINDOW_SIZE,ウィンドウサイズ,Window size,窗口大小,視窗大小
 CONFIG_WINDOW_MODE,画面モード,Window Mode,窗口模式,視窗模式
 CONFIG_LANGUAGE,言語選択,Language,语言选择,語言選擇
 CONFIG_BGM_VOLUME,BGM音量,BGM Volume,BGM音量,BGM音量
 CONFIG_SE_VOLUME,SE音量,SE Volume,SE音量,SE音量
 CONFIG_BACK,タイトルに戻る,Back to Title,返回标题,返回標題
-CONFIG_720P,720P,720P,720P,720P
-CONFIG_1080P,1080P,1080P,1080P,1080P
+CONFIG_WIN_1280,1280,1280,1280,1280
+CONFIG_WIN_1600,1600,1600,1600,1600
+CONFIG_WIN_1920,1920,1920,1920,1920
 CONFIG_FULLSCREEN,フルスクリーン,Fullscreen,全屏,全螢幕
 CONFIG_WINDOW,ウインドウ,Window,窗口,視窗
 CONFIG_LANG_JA,日本語,日本語,日本語,日本語

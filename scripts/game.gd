@@ -124,10 +124,22 @@ var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
 var menu_confirm_quit: bool = false
 var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
 var config_index: int = 0        # 0=Resolution, 1=Window Mode, 2=Language, 3=BGM Vol, 4=SE Vol, 5=Back
-var config_sub: String = ""      # "" or "resolution", "window_mode", "language"
+var config_sub: String = ""      # "" or "window_size", "window_mode", "language"
 var config_sub_index: int = 0    # cursor within sub-menu
+# UI メニュー: 左スティック / D-pad ハット（ボタン型十字と併用。_process でポーリング）
+# JoyAxis の HAT は環境によって JOY_AXIS_LEFT_HAT_* が未定義のため、Enum と同じ番号を直指定する
+const _JOY_AXIS_HAT_X := 6
+const _JOY_AXIS_HAT_Y := 7
+const UI_MENU_STICK_DEADZONE := 0.45
+const UI_MENU_STICK_REPEAT_INITIAL := 0.35
+const UI_MENU_STICK_REPEAT_RATE := 0.12
+var _ui_menu_stick_v_dir: int = 0
+var _ui_menu_stick_v_cd: float = 0.0
+var _ui_menu_stick_h_dir: int = 0
+var _ui_menu_stick_h_cd: float = 0.0
 var is_fullscreen: bool = false
-var current_resolution: int = 1  # 0=720P, 1=1080P
+# ウィンドウ幅の段階: 0=1280px, 1=1600px, 2=1920px（16:9 で高さは 720/900/1080）
+var window_size_index: int = 2
 var bgm_volume: int = 5         # 0(ミュート)〜10(最大), デフォルト5
 var se_volume: int = 5          # 0(ミュート)〜10(最大), デフォルト5
 
@@ -308,8 +320,13 @@ func _ready() -> void:
 	title_logo02_texture = _load_texture("res://assets/UI/kata-draw_logo02.png")
 	bg_texture = _load_texture("res://assets/UI/kata-draw_bg.png")
 	_setup_game_cursor()
+	get_window().size_changed.connect(_on_window_size_changed)
 	game_state = "logo"
 	logo_start_time = Time.get_ticks_msec() / 1000.0
+
+
+func _on_window_size_changed() -> void:
+	queue_redraw()
 
 
 # =============================================================================
@@ -679,6 +696,164 @@ func _force_clear_for_debug() -> void:
 # Input
 # =============================================================================
 
+func _first_joypad_device() -> int:
+	var pads = Input.get_connected_joypads()
+	if pads.is_empty():
+		return -1
+	return int(pads[0])
+
+
+func _ui_menu_stick_combined_axis(dev: int, axis_main: int, axis_hat: int) -> float:
+	if dev < 0:
+		return 0.0
+	var a: float = Input.get_joy_axis(dev, axis_main)
+	var h: float = Input.get_joy_axis(dev, axis_hat)
+	if absf(a) >= absf(h):
+		return a
+	return h
+
+
+func _ui_menu_stick_vertical_step(delta: float) -> int:
+	var dev: int = _first_joypad_device()
+	var ly: float = _ui_menu_stick_combined_axis(dev, JOY_AXIS_LEFT_Y, _JOY_AXIS_HAT_Y)
+	var dir: int = 0
+	if ly < -UI_MENU_STICK_DEADZONE:
+		dir = -1
+	elif ly > UI_MENU_STICK_DEADZONE:
+		dir = 1
+	if dir == 0:
+		_ui_menu_stick_v_dir = 0
+		_ui_menu_stick_v_cd = 0.0
+		return 0
+	if dir != _ui_menu_stick_v_dir:
+		_ui_menu_stick_v_dir = dir
+		_ui_menu_stick_v_cd = UI_MENU_STICK_REPEAT_INITIAL
+		return dir
+	_ui_menu_stick_v_cd -= delta
+	if _ui_menu_stick_v_cd <= 0.0:
+		_ui_menu_stick_v_cd = UI_MENU_STICK_REPEAT_RATE
+		return dir
+	return 0
+
+
+func _ui_menu_stick_horizontal_step(delta: float) -> int:
+	var dev: int = _first_joypad_device()
+	var lx: float = _ui_menu_stick_combined_axis(dev, JOY_AXIS_LEFT_X, _JOY_AXIS_HAT_X)
+	var dir: int = 0
+	if lx < -UI_MENU_STICK_DEADZONE:
+		dir = -1
+	elif lx > UI_MENU_STICK_DEADZONE:
+		dir = 1
+	if dir == 0:
+		_ui_menu_stick_h_dir = 0
+		_ui_menu_stick_h_cd = 0.0
+		return 0
+	if dir != _ui_menu_stick_h_dir:
+		_ui_menu_stick_h_dir = dir
+		_ui_menu_stick_h_cd = UI_MENU_STICK_REPEAT_INITIAL
+		return dir
+	_ui_menu_stick_h_cd -= delta
+	if _ui_menu_stick_h_cd <= 0.0:
+		_ui_menu_stick_h_cd = UI_MENU_STICK_REPEAT_RATE
+		return dir
+	return 0
+
+
+func _ui_menu_stick_nav_vertical_or_horizontal(delta: float) -> Vector2i:
+	var vy: int = _ui_menu_stick_vertical_step(delta)
+	if vy != 0:
+		return Vector2i(0, vy)
+	var hx: int = _ui_menu_stick_horizontal_step(delta)
+	if hx != 0:
+		return Vector2i(hx, 0)
+	return Vector2i(0, 0)
+
+
+func _process_config_stick_navigation(delta: float) -> void:
+	var items_count: int = 6
+	var is_volume_item: bool = config_sub == "" and (config_index == 3 or config_index == 4)
+	if config_sub == "" and is_volume_item:
+		var hx_vol: int = _ui_menu_stick_horizontal_step(delta)
+		if hx_vol != 0:
+			if config_index == 3:
+				bgm_volume = clampi(bgm_volume + hx_vol, 0, 10)
+				_apply_bgm_volume()
+				_play_sfx(sfx_click)
+			elif config_index == 4:
+				se_volume = clampi(se_volume + hx_vol, 0, 10)
+				_apply_se_volume()
+				_play_sfx(sfx_click)
+			queue_redraw()
+		return
+	if config_sub == "":
+		var vy: int = _ui_menu_stick_vertical_step(delta)
+		if vy != 0:
+			config_index = (config_index - vy + items_count) % items_count
+			queue_redraw()
+		return
+	var sub_count: int = _config_sub_count()
+	if sub_count <= 0:
+		return
+	var nav: Vector2i = _ui_menu_stick_nav_vertical_or_horizontal(delta)
+	var sub_step: int = 0
+	if nav.x < 0 or nav.y < 0:
+		sub_step = -1
+	elif nav.x > 0 or nav.y > 0:
+		sub_step = 1
+	if sub_step != 0:
+		config_sub_index = (config_sub_index + sub_step + sub_count) % sub_count
+		queue_redraw()
+
+
+func _process_ui_menu_stick_navigation(delta: float) -> void:
+	if ui_renderer._btn_press_pending:
+		return
+	if pause_active:
+		if pause_confirm_title:
+			var nav_pc: Vector2i = _ui_menu_stick_nav_vertical_or_horizontal(delta)
+			if nav_pc.x < 0 or nav_pc.y < 0:
+				pause_confirm_index = (pause_confirm_index - 1 + 2) % 2
+				queue_redraw()
+			elif nav_pc.x > 0 or nav_pc.y > 0:
+				pause_confirm_index = (pause_confirm_index + 1) % 2
+				queue_redraw()
+		else:
+			var nav_p: Vector2i = _ui_menu_stick_nav_vertical_or_horizontal(delta)
+			if nav_p.x < 0 or nav_p.y < 0:
+				pause_index = (pause_index - 1 + 3) % 3
+				queue_redraw()
+			elif nav_p.x > 0 or nav_p.y > 0:
+				pause_index = (pause_index + 1) % 3
+				queue_redraw()
+		return
+	match game_state:
+		"menu":
+			if menu_confirm_quit:
+				var nav_q: Vector2i = _ui_menu_stick_nav_vertical_or_horizontal(delta)
+				if nav_q.x < 0 or nav_q.y < 0:
+					menu_confirm_index = (menu_confirm_index - 1 + 2) % 2
+					queue_redraw()
+				elif nav_q.x > 0 or nav_q.y > 0:
+					menu_confirm_index = (menu_confirm_index + 1) % 2
+					queue_redraw()
+			else:
+				var vy_m: int = _ui_menu_stick_vertical_step(delta)
+				if vy_m != 0:
+					var menu_count: int = 3
+					menu_index = (menu_index - vy_m + menu_count) % menu_count
+					queue_redraw()
+		"config":
+			_process_config_stick_navigation(delta)
+		"rules_confirm":
+			var nav_rc: Vector2i = _ui_menu_stick_nav_vertical_or_horizontal(delta)
+			if nav_rc.x < 0 or nav_rc.y < 0:
+				rules_confirm_index = (rules_confirm_index - 1 + 2) % 2
+				queue_redraw()
+			elif nav_rc.x > 0 or nav_rc.y > 0:
+				rules_confirm_index = (rules_confirm_index + 1) % 2
+				queue_redraw()
+
+
 func _input(event: InputEvent) -> void:
 	# Helper: 決定操作（Enter/Space/A のみ。Any key は無効）
 	var is_confirm_key: bool = (
@@ -920,6 +1095,7 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			if idx == 0:
 				_enter_rules()
 			elif idx == 1:
+				_sync_fullscreen_from_os()
 				game_state = "config"
 				config_index = 0
 				config_sub = ""
@@ -1005,7 +1181,7 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 
 
 func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
-	var items_count: int = 6  # resolution, window_mode, language, bgm_vol, se_vol, back
+	var items_count: int = 6  # window_size, window_mode, language, bgm_vol, se_vol, back
 	var moved: bool = false
 
 	# ESC / B: back
@@ -1139,8 +1315,8 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		if config_sub == "":
 			match config_index:
 				0:
-					config_sub = "resolution"
-					config_sub_index = current_resolution
+					config_sub = "window_size"
+					config_sub_index = window_size_index
 				1:
 					config_sub = "window_mode"
 					config_sub_index = 0 if is_fullscreen else 1
@@ -1173,15 +1349,39 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 
 func _config_sub_count() -> int:
 	match config_sub:
-		"resolution": return 2
+		"window_size": return 3
 		"window_mode": return 2
 		"language": return 4
 	return 0
 
 
+func window_size_index_to_pixels(idx: int) -> Vector2i:
+	match idx:
+		0:
+			return Vector2i(1280, 720)
+		1:
+			return Vector2i(1600, 900)
+		2:
+			return Vector2i(1920, 1080)
+		_:
+			return Vector2i(1920, 1080)
+
+
+func get_window_size_config_label() -> String:
+	match window_size_index:
+		0:
+			return tr("CONFIG_WIN_1280")
+		1:
+			return tr("CONFIG_WIN_1600")
+		2:
+			return tr("CONFIG_WIN_1920")
+		_:
+			return tr("CONFIG_WIN_1920")
+
+
 func _get_config_sub_labels_for_hit(item_index: int) -> Array[String]:
 	match item_index:
-		0: return [tr("CONFIG_720P"), tr("CONFIG_1080P")]
+		0: return [tr("CONFIG_WIN_1280"), tr("CONFIG_WIN_1600"), tr("CONFIG_WIN_1920")]
 		1: return [tr("CONFIG_FULLSCREEN"), tr("CONFIG_WINDOW")]
 		2: return [tr("CONFIG_LANG_JA"), tr("CONFIG_LANG_EN"), tr("CONFIG_LANG_ZH_CN"), tr("CONFIG_LANG_ZH_TW")]
 	return []
@@ -1189,22 +1389,20 @@ func _get_config_sub_labels_for_hit(item_index: int) -> Array[String]:
 
 func _apply_config_selection() -> void:
 	match config_sub:
-		"resolution":
-			current_resolution = config_sub_index
-			var new_size: Vector2i = Vector2i(1920, 1080) if config_sub_index == 1 else Vector2i(1280, 720)
-			if not is_fullscreen:
-				DisplayServer.window_set_size(new_size)
-				_center_window()
-			get_viewport().size = new_size
+		"window_size":
+			window_size_index = config_sub_index
+			var new_size: Vector2i = window_size_index_to_pixels(config_sub_index)
+			# 入力処理の同一フレームで OS にサイズが反映されないことがあるため次フレームで適用
+			call_deferred("_apply_window_pixel_size_impl", new_size)
 		"window_mode":
 			is_fullscreen = (config_sub_index == 0)
 			if is_fullscreen:
 				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
 			else:
 				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-				var res_size: Vector2i = Vector2i(1920, 1080) if current_resolution == 1 else Vector2i(1280, 720)
-				DisplayServer.window_set_size(res_size)
-				_center_window()
+				var res_size: Vector2i = window_size_index_to_pixels(window_size_index)
+				# ウインドウモード切替直後はサイズ指定が無視されやすいのでモード確定後に適用
+				call_deferred("_apply_window_pixel_size_impl", res_size)
 		"language":
 			var locale: String
 			match config_sub_index:
@@ -1220,6 +1418,33 @@ func _center_window() -> void:
 	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(0)
 	var win_size: Vector2i = get_window().get_size_with_decorations()
 	get_window().position = screen_rect.position + (screen_rect.size / 2 - win_size / 2)
+
+
+func _sync_fullscreen_from_os() -> void:
+	var win: Window = get_window()
+	var wid: int = win.get_window_id()
+	var m := DisplayServer.window_get_mode(wid)
+	is_fullscreen = (
+		m == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+		or m == DisplayServer.WINDOW_MODE_FULLSCREEN
+	)
+
+
+## コンフィグからクライアント領域のピクセルサイズを適用する。
+## DisplayServer と Window / ルート Viewport の両方へ指定する（片方だけでは反映されない環境がある）。
+## フルスクリーン時は枠のリサイズはできない。window_size_index は既に更新済みなので、ウインドウに戻すと反映される。
+func _apply_window_pixel_size_impl(new_size: Vector2i) -> void:
+	_sync_fullscreen_from_os()
+	if is_fullscreen:
+		return
+	var win: Window = get_window()
+	var wid: int = win.get_window_id()
+	DisplayServer.window_set_size(new_size, wid)
+	win.size = new_size
+	var vp: Viewport = get_viewport()
+	if vp:
+		vp.size = new_size
+	call_deferred("_center_window")
 
 
 func _apply_bgm_volume() -> void:
@@ -3475,6 +3700,7 @@ func _process_pad(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	ui_renderer.update_animations(delta)
+	_process_ui_menu_stick_navigation(delta)
 	if pause_active:
 		queue_redraw()
 		return
