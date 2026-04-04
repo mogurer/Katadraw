@@ -1345,6 +1345,72 @@ func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> floa
 	return alpha
 
 
+func _hint_ideal_draw_scale(scale: float) -> float:
+	"""StageRenderer._draw_ideal_points_outline と同じスケール解決（ヒントガイドと一致）"""
+	var draw_scale: float = scale
+	if not guide_follows_player_radius and draw_scale < 10.0:
+		draw_scale = guide_radius_val
+	return draw_scale
+
+
+func _world_polyline_from_ideal(center: Vector2, ideal_pts: Array, scale: float, rotation: float) -> Array:
+	if ideal_pts.is_empty():
+		return []
+	var draw_scale: float = _hint_ideal_draw_scale(scale)
+	var cos_r: float = cos(rotation)
+	var sin_r: float = sin(rotation)
+	var verts: Array = []
+	for pt in ideal_pts:
+		var tx: float = (pt.x * cos_r - pt.y * sin_r) * draw_scale
+		var ty: float = (pt.x * sin_r + pt.y * cos_r) * draw_scale
+		verts.append(center + Vector2(tx, ty))
+	return verts
+
+
+func _distance_point_to_regular_polygon_outline(
+	p: Vector2, center: Vector2, radius: float, n_sides: int, rotation: float
+) -> float:
+	if n_sides < 2 or radius <= 0.0:
+		return INF
+	var verts: Array = []
+	for k in range(n_sides):
+		var a: float = rotation + TAU * k / float(n_sides)
+		verts.append(center + Vector2(cos(a), sin(a)) * radius)
+	return _distance_to_polyline(p, verts)
+
+
+func _distance_point_to_circle_ring_outline(p: Vector2, center: Vector2, r: float) -> float:
+	if r <= 0.0:
+		return INF
+	return absf(p.distance_to(center) - r)
+
+
+## プレイ中ヒントガイド（draw_hint_shape）と同じ形状への最短距離（画面座標・px）
+func get_distance_to_hint_guide_outline(p: Vector2) -> float:
+	match stage_type:
+		"triangle":
+			return _distance_point_to_regular_polygon_outline(
+				p, current_centroid, ideal_display_radius, 3, polygon_rotation
+			)
+		"square":
+			var verts: Array = _world_polyline_from_ideal(
+				current_centroid, ideal_points, correspondence_scale, correspondence_rotation
+			)
+			return _distance_to_polyline(p, verts) if verts.size() >= 2 else INF
+		"circle", "star", "cat_face", "fish":
+			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
+			var verts2: Array = _world_polyline_from_ideal(
+				current_centroid, pts, correspondence_scale, correspondence_rotation
+			)
+			return _distance_to_polyline(p, verts2) if verts2.size() >= 2 else INF
+		"two_circles":
+			var d1: float = _distance_point_to_circle_ring_outline(p, current_centroid, ideal_display_radius)
+			var d2: float = _distance_point_to_circle_ring_outline(p, current_centroid_2, ideal_display_radius_2)
+			return minf(d1, d2)
+		_:
+			return _distance_point_to_circle_ring_outline(p, current_centroid, ideal_display_radius)
+
+
 func is_locked(idx: int) -> bool:
 	if stage_type != "two_circles":
 		return false

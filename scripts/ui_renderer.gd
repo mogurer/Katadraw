@@ -64,6 +64,10 @@ const POINT_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_RADIUS := 9.0
 const POINT_RADIUS_HOVER := 13.0
 const LINE_WIDTH := 4.0
+# 仮実装: ガイド線から遠いほど大きい円（px 半径）。距離は get_distance_to_hint_guide_outline 基準
+const POINT_RADIUS_GUIDE_NEAR_MIN := 5.0
+const POINT_RADIUS_GUIDE_FAR_MAX := 25.0
+const POINT_RADIUS_GUIDE_DIST_FULL_PX := 120.0  # この距離以上で最大半径
 
 # --- 選択ポイント（白円 + 黒の同心円）---
 const SELECTED_POINT_WHITE := Color(1.0, 0.937, 0.89, 1.0)
@@ -1397,6 +1401,18 @@ func _draw_rules(vp: Vector2) -> void:
 	_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, vp.y - 48.0 - shift_up), tr("BTN_NEXT"), BTN_FONT_SIZE, alpha * btn_highlight, false, rules_btn_w)
 
 
+func _radius_from_guide_distance_provisional(dist: float) -> float:
+	var t: float = clampf(dist / POINT_RADIUS_GUIDE_DIST_FULL_PX, 0.0, 1.0)
+	return lerpf(POINT_RADIUS_GUIDE_NEAR_MIN, POINT_RADIUS_GUIDE_FAR_MAX, t)
+
+
+func _point_radius_by_guide(idx: int) -> float:
+	if _game.game_state != "playing" or idx < 0 or idx >= _game.point_positions.size():
+		return POINT_RADIUS
+	var d: float = _game.stage_manager.get_distance_to_hint_guide_outline(_game.point_positions[idx])
+	return _radius_from_guide_distance_provisional(d)
+
+
 func _draw_rules_demo_shape(vp: Vector2) -> void:
 	"""rules画面の中央にデモ図形を描画（操作可能）"""
 	var n: int = _game.point_positions.size()
@@ -1412,13 +1428,15 @@ func _draw_rules_demo_shape(vp: Vector2) -> void:
 		var radius: float
 		if _game.input_handler.grab_input_active and _game._is_selected(i):
 			# つかみ状態: 白円 + 黒の同心円（1.2倍、外へ透過）
-			_draw_selected_point(pos)
-			_draw_grab_state_effect(pos)
+			radius = _point_radius_by_guide(i)
+			_draw_selected_point(pos, radius)
+			_draw_grab_state_effect(pos, radius)
 			continue
 		elif _game._is_selected(i):
 			# 選択中: 白円 + 黒の同心円（1.2倍、外へ透過）
-			_draw_selected_point(pos)
-			_draw_point_position_effect(pos)
+			radius = _point_radius_by_guide(i)
+			_draw_selected_point(pos, radius)
+			_draw_point_position_effect(pos, radius)
 			continue
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
@@ -1472,30 +1490,31 @@ func _draw_game(vp: Vector2) -> void:
 		var pos: Vector2 = _game.point_positions[i]
 		var color: Color
 		var radius: float
+		var r_guide: float = _point_radius_by_guide(i)
 		if _game._is_locked(i):
 			color = Color(0.40, 0.33, 0.38, 0.5)
-			radius = POINT_RADIUS
+			radius = r_guide
 		elif _game.input_handler.grab_input_active and _game._is_selected(i):
 			# つかみ状態: 白円 + 黒の同心円（1.2倍、外へ透過）
-			_draw_selected_point(pos)
-			_draw_grab_state_effect(pos)
+			_draw_selected_point(pos, r_guide)
+			_draw_grab_state_effect(pos, r_guide)
 			continue
 		elif _game._is_selected(i):
 			# 選択中: 白円 + 黒の同心円（1.2倍、外へ透過）
-			_draw_selected_point(pos)
-			_draw_point_position_effect(pos)
+			_draw_selected_point(pos, r_guide)
+			_draw_point_position_effect(pos, r_guide)
 			continue
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
 			var alpha: float = _game._point_accuracy_alpha(i)
 			var base_c: Color = _stage_renderer.get_point_base_color(i)
 			color = Color(base_c.r, base_c.g, base_c.b, alpha)
-			radius = POINT_RADIUS
+			radius = r_guide
 		else:
 			var alpha: float = _game._point_accuracy_alpha(i)
 			var base_c: Color = _stage_renderer.get_point_base_color(i)
 			color = Color(base_c.r, base_c.g, base_c.b, alpha)
-			radius = POINT_RADIUS
+			radius = r_guide
 		_game.draw_circle(pos, radius, color)
 
 	_draw_laser_effect()
@@ -1601,9 +1620,9 @@ func _draw_laser_effect() -> void:
 			_game.draw_line(p0, p1, white_c, LASER_WHITE_WIDTH, true)
 
 
-func _draw_selected_point(center: Vector2) -> void:
+func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:
 	"""選択ポイント: 白の円 + 半径1.2倍の黒の円（中心から離れるほど透過）"""
-	var r: float = POINT_RADIUS
+	var r: float = base_r
 	for layer in SELECTED_POINT_BLACK_LAYERS:
 		var radius: float = r * (layer[0] as float)
 		var a: float = layer[1] as float
@@ -1612,26 +1631,46 @@ func _draw_selected_point(center: Vector2) -> void:
 	_game.draw_circle(center, r, SELECTED_POINT_WHITE)
 
 
-func _draw_point_position_effect(center: Vector2) -> void:
+func _effect_hover_base(base_r: float) -> float:
+	return base_r + (POINT_RADIUS_HOVER - POINT_RADIUS)
+
+
+func _draw_point_position_effect(center: Vector2, base_r: float = POINT_RADIUS) -> void:
 	"""ポイント位置: 水色のサークルが1秒ごとに拡散しながら消えていくエフェクト"""
 	var t: float = fmod(Time.get_ticks_msec() / 1000.0, 1.0)  # 0..1 を1秒周期で繰り返し
-	var radius: float = POINT_RADIUS_HOVER + t * 25.0   # 拡散
+	var radius: float = _effect_hover_base(base_r) + t * 25.0   # 拡散
 	var alpha: float = 1.0 - t                                 # 消えていく
 	var c: Color = Color(_game.POINT_POSITION_EFFECT_COLOR.r, _game.POINT_POSITION_EFFECT_COLOR.g, _game.POINT_POSITION_EFFECT_COLOR.b, alpha * 0.6)
 	_game.draw_arc(center, radius, 0, TAU, 32, c, 2.5)
 
 
-func _draw_grab_state_effect(center: Vector2) -> void:
+func _draw_grab_state_effect(center: Vector2, base_r: float = POINT_RADIUS) -> void:
 	"""つかみ状態: 青色のサークルが0.5秒ごとに透明からだんだん色濃く収束してくるエフェクト"""
 	var t: float = fmod(Time.get_ticks_msec() / 500.0, 1.0)   # 0..1 を0.5秒周期で繰り返し
 	var alpha: float = t                                      # 透明→濃く
-	var radius: float = POINT_RADIUS_HOVER + (1.0 - t) * 8.0  # 収束（大きい→小さい）
+	var radius: float = _effect_hover_base(base_r) + (1.0 - t) * 8.0  # 収束（大きい→小さい）
 	var c: Color = Color(_game.GRAB_STATE_EFFECT_COLOR.r, _game.GRAB_STATE_EFFECT_COLOR.g, _game.GRAB_STATE_EFFECT_COLOR.b, alpha * 0.85)
 	_game.draw_arc(center, radius, 0, TAU, 32, c, 3.0)
 
 
+func _smoothstep01(t: float) -> float:
+	var x: float = clampf(t, 0.0, 1.0)
+	return x * x * (3.0 - 2.0 * x)
+
+
+## 扇形コリドー: u=0 が左境界、u=1 が右境界（中心線は u=0.5）
+func _rs_corridor_dir_at_u(dir_n: Vector2, half_rad: float, u: float) -> Vector2:
+	return dir_n.rotated(half_rad * (1.0 - 2.0 * clampf(u, 0.0, 1.0)))
+
+
+## 中心線に近いほど 1.0、左右外周に近いほど RS_CORRIDOR_ANGULAR_EDGE_MUL に近づく
+func _rs_corridor_angular_alpha_mul(u: float, edge_mul: float) -> float:
+	var d: float = absf(u - 0.5) * 2.0
+	return lerpf(1.0, edge_mul, _smoothstep01(d))
+
+
 func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
-	"""L/R 候補コリドー（円錐帯）を薄い赤で表示。InputHandler の CONE_HALF_ANGLE と一致させる。"""
+	"""L/R 候補コリドー（扇形）。半径方向＋中心核（角度方向）の二重グラデーション。CONE_HALF_ANGLE と一致。"""
 	if not _game.input_handler.debug_right_stick_active:
 		return
 	var dir: Vector2 = _game.input_handler.debug_right_stick_direction
@@ -1641,14 +1680,44 @@ func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
 	var dir_n: Vector2 = dir.normalized()
 	var line_len: float = maxf(vp.x, vp.y) * 0.6
 	var half_rad: float = deg_to_rad(InputHandler.RIGHT_STICK_RAY_SHOULDER_CONE_HALF_ANGLE_DEG)
-	var p_left: Vector2 = center + dir_n.rotated(half_rad) * line_len
-	var p_right: Vector2 = center + dir_n.rotated(-half_rad) * line_len
-	var poly: PackedVector2Array = PackedVector2Array([center, p_left, p_right])
-	var fill_col: Color = Color(0.95, 0.42, 0.44, 0.13)
-	_game.draw_colored_polygon(poly, fill_col)
-	var edge_col: Color = Color(0.95, 0.50, 0.52, 0.32)
-	_game.draw_line(center, p_left, edge_col, 1.25, true)
-	_game.draw_line(center, p_right, edge_col, 1.25, true)
+	var fill_rgb: Color = Color(0.95, 0.42, 0.44)
+	var alpha_inner: float = 0.24
+	var alpha_outer: float = 0.0
+	var n_radial: int = 32
+	var n_angular: int = 14
+	var angular_edge_mul: float = 0.14
+	for i in range(n_radial):
+		var t0: float = float(i) / float(n_radial)
+		var t1: float = float(i + 1) / float(n_radial)
+		var su0: float = _smoothstep01(t0)
+		var su1: float = _smoothstep01(t1)
+		var base_a0: float = lerpf(alpha_inner, alpha_outer, su0)
+		var base_a1: float = lerpf(alpha_inner, alpha_outer, su1)
+		var r0: float = t0 * line_len
+		var r1: float = t1 * line_len
+		for j in range(n_angular):
+			var u0: float = float(j) / float(n_angular)
+			var u1: float = float(j + 1) / float(n_angular)
+			var d0: Vector2 = _rs_corridor_dir_at_u(dir_n, half_rad, u0)
+			var d1: Vector2 = _rs_corridor_dir_at_u(dir_n, half_rad, u1)
+			var m0: float = _rs_corridor_angular_alpha_mul(u0, angular_edge_mul)
+			var m1: float = _rs_corridor_angular_alpha_mul(u1, angular_edge_mul)
+			var a00: float = base_a0 * m0
+			var a01: float = base_a1 * m0
+			var a11: float = base_a1 * m1
+			var a10: float = base_a0 * m1
+			var p00: Vector2 = center + d0 * r0
+			var p01: Vector2 = center + d0 * r1
+			var p11: Vector2 = center + d1 * r1
+			var p10: Vector2 = center + d1 * r0
+			var pts: PackedVector2Array = PackedVector2Array([p00, p01, p11, p10])
+			var cols: PackedColorArray = PackedColorArray([
+				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a00),
+				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a01),
+				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a11),
+				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a10),
+			])
+			_game.draw_polygon(pts, cols)
 
 
 func _draw_right_stick_debug_line(vp: Vector2) -> void:
