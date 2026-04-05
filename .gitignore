@@ -6,6 +6,7 @@
 
 # Imported textures, models and other resources
 .import/
+*.import
 
 # Exported builds
 export/
