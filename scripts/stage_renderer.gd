@@ -21,7 +21,7 @@ func _init(game: Node2D, renderer: UIRenderer) -> void:
 func draw_stage_lines() -> void:
 	var n: int = _game.point_positions.size()
 	match _game.stage_type:
-		"triangle", "square", "circle", "star", "cat_face", "fish":
+		"triangle", "square", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			for i in range(n):
 				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
 		"two_circles":
@@ -69,7 +69,7 @@ func draw_ideal_shape() -> void:
 		"two_circles":
 			_draw_ring(_game.current_centroid, _game.ideal_display_radius, _game.IDEAL_CIRCLE_COLOR, 2.5)
 			_draw_ring(_game.current_centroid_2, _game.ideal_display_radius_2, _game.IDEAL_CIRCLE_COLOR, 2.5)
-		"star":
+		"star", "heptagram", "heptagram_silhouette":
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			_draw_ideal_points_outline(_game.current_centroid, pts, _game.correspondence_scale, _game.correspondence_rotation, _game.IDEAL_STAR_COLOR, 2.5)
 		_:
@@ -210,7 +210,7 @@ func draw_hint_shape(alpha: float) -> void:
 			_draw_ring(_game.current_centroid, _game.ideal_display_radius, col, width)
 			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
 			_draw_ring(_game.current_centroid_2, _game.ideal_display_radius_2, col2, width)
-		"star":
+		"star", "heptagram", "heptagram_silhouette":
 			var col := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			_draw_ideal_points_outline(_game.current_centroid, pts, _game.correspondence_scale, _game.correspondence_rotation, col, width)
@@ -235,6 +235,10 @@ func get_type_description() -> String:
 			return _game.tr("GUIDE_TYPE_TWO_CIRCLES")
 		"star":
 			return _game.tr("GUIDE_TYPE_STAR")
+		"heptagram":
+			return _game.tr("GUIDE_TYPE_HEPTAGRAM")
+		"heptagram_silhouette":
+			return _game.tr("GUIDE_TYPE_HEPTAGRAM_SILHOUETTE")
 		_:
 			return ""
 

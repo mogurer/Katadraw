@@ -23,6 +23,13 @@ const REF_R_PERCENTILE := REF_R_PERCENTILE_95
 # guide_follows_player_radius が true のとき代表半径に追従（cfg で 0/1、デフォルトは fish のみ 1）
 const GUIDE_USE_FIXED_SIZE := true
 
+## 組み込みステージの七芒星・シルエット図形（katadraw_custom_stage 形式）
+const STAGEDATA_HEPTAGRAM_JSON := "res://Resources/Stagedata/heptagram_m.json"
+const STAGEDATA_HEPTAGRAM_SILHOUETTE_JSON := "res://Resources/Stagedata/heptagramsil_j.json"
+static var _stagedata_shape_cache: Dictionary = {}
+static var _warned_heptagram_stagedata_fallback: bool = false
+static var _warned_heptagram_silhouette_stagedata_fallback: bool = false
+
 # --- Stage state ---
 var current_stage: int = 0
 var stage_type: String = "circle"
@@ -298,7 +305,7 @@ func _generate_square_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 		pts.append(center + (ideal + noise) * base_r)
 
 
-func _parse_vec2_item(v: Variant) -> Variant:
+static func _parse_vec2_item_static(v: Variant) -> Variant:
 	if typeof(v) == TYPE_VECTOR2:
 		return v
 	if typeof(v) == TYPE_ARRAY:
@@ -314,6 +321,10 @@ func _parse_vec2_item(v: Variant) -> Variant:
 	return null
 
 
+func _parse_vec2_item(v: Variant) -> Variant:
+	return _parse_vec2_item_static(v)
+
+
 func _parse_polygon_vertices_from_cfg(v: Variant) -> Array:
 	var out: Array = []
 	if typeof(v) != TYPE_ARRAY:
@@ -325,17 +336,60 @@ func _parse_polygon_vertices_from_cfg(v: Variant) -> Array:
 	return out
 
 
-func _parse_arc_controls_from_cfg(v: Variant) -> Dictionary:
+static func _parse_arc_controls_from_cfg_static(v: Variant) -> Dictionary:
 	var out: Dictionary = {}
 	if typeof(v) != TYPE_DICTIONARY:
 		return out
 	for k in v as Dictionary:
-		var p: Variant = _parse_vec2_item((v as Dictionary)[k])
+		var p: Variant = _parse_vec2_item_static((v as Dictionary)[k])
 		if p == null:
 			continue
 		var ki: int = int(k) if str(k).is_valid_int() else int(k)
 		out[ki] = p
 	return out
+
+
+func _parse_arc_controls_from_cfg(v: Variant) -> Dictionary:
+	return _parse_arc_controls_from_cfg_static(v)
+
+
+## Stagedata の JSON（shape.polygon_vertices / shape.arc_controls）を読み込みキャッシュする
+static func _load_stagedata_shape(path: String) -> Dictionary:
+	if _stagedata_shape_cache.has(path):
+		return _stagedata_shape_cache[path] as Dictionary
+	var empty: Dictionary = {"polygon": [], "arc": {}}
+	if not FileAccess.file_exists(path):
+		push_warning("StageManager: Stagedata が見つかりません: %s" % path)
+		_stagedata_shape_cache[path] = empty
+		return empty
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		push_warning("StageManager: Stagedata のオープンに失敗: %s" % path)
+		_stagedata_shape_cache[path] = empty
+		return empty
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		push_warning("StageManager: Stagedata の JSON が不正: %s" % path)
+		_stagedata_shape_cache[path] = empty
+		return empty
+	var shape: Variant = (parsed as Dictionary).get("shape", {})
+	if typeof(shape) != TYPE_DICTIONARY:
+		_stagedata_shape_cache[path] = empty
+		return empty
+	var pv: Variant = (shape as Dictionary).get("polygon_vertices")
+	var poly: Array = []
+	if typeof(pv) == TYPE_ARRAY:
+		for item in pv as Array:
+			var p: Variant = _parse_vec2_item_static(item)
+			if p != null:
+				poly.append(p)
+	var arc: Dictionary = {}
+	var ac: Variant = (shape as Dictionary).get("arc_controls")
+	if ac != null and typeof(ac) == TYPE_DICTIONARY:
+		arc = _parse_arc_controls_from_cfg_static(ac)
+	var result: Dictionary = {"polygon": poly, "arc": arc}
+	_stagedata_shape_cache[path] = result
+	return result
 
 
 func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
@@ -409,8 +463,43 @@ static func get_star_arc_controls() -> Dictionary:
 	return {}
 
 
-## 七芒星（heptagram）の輪郭頂点（7頂点・全辺直線。Shape Grid Editor で編集）
+## 七芒星（heptagram）の輪郭頂点。Resources/Stagedata/heptagram_m.json を優先し、失敗時は埋め込み
 static func get_heptagram_polygon_vertices() -> Array:
+	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_JSON)
+	var verts: Array = data.get("polygon", []) as Array
+	if verts.size() >= 3:
+		return verts
+	if not _warned_heptagram_stagedata_fallback:
+		push_warning("StageManager: heptagram_m.json が無効のため埋め込み七芒星頂点を使用します")
+		_warned_heptagram_stagedata_fallback = true
+	return _heptagram_polygon_vertices_embedded()
+
+
+static func get_heptagram_arc_controls() -> Dictionary:
+	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_JSON)
+	var arc: Dictionary = data.get("arc", {}) as Dictionary
+	return arc
+
+
+## 七芒星のシルエット。Resources/Stagedata/heptagramsil_j.json を優先し、失敗時は埋め込み
+static func get_heptagram_silhouette_polygon_vertices() -> Array:
+	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_SILHOUETTE_JSON)
+	var verts: Array = data.get("polygon", []) as Array
+	if verts.size() >= 3:
+		return verts
+	if not _warned_heptagram_silhouette_stagedata_fallback:
+		push_warning("StageManager: heptagramsil_j.json が無効のため埋め込みシルエット頂点を使用します")
+		_warned_heptagram_silhouette_stagedata_fallback = true
+	return _heptagram_silhouette_polygon_vertices_embedded()
+
+
+static func get_heptagram_silhouette_arc_controls() -> Dictionary:
+	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_SILHOUETTE_JSON)
+	var arc: Dictionary = data.get("arc", {}) as Dictionary
+	return arc
+
+
+static func _heptagram_polygon_vertices_embedded() -> Array:
 	var v: Array = []
 	v.append(Vector2(0.0000, -0.9701))
 	v.append(Vector2(0.9701, 0.2425))
@@ -422,12 +511,7 @@ static func get_heptagram_polygon_vertices() -> Array:
 	return v
 
 
-static func get_heptagram_arc_controls() -> Dictionary:
-	return {}
-
-
-## 七芒星のシルエット（14頂点・全辺直線。Shape Grid Editor で編集）
-static func get_heptagram_silhouette_polygon_vertices() -> Array:
+static func _heptagram_silhouette_polygon_vertices_embedded() -> Array:
 	var v: Array = []
 	v.append(Vector2(0.0000, -0.9701))
 	v.append(Vector2(0.3032, -0.6063))
@@ -444,10 +528,6 @@ static func get_heptagram_silhouette_polygon_vertices() -> Array:
 	v.append(Vector2(-0.7882, -0.6063))
 	v.append(Vector2(-0.3032, -0.6063))
 	return v
-
-
-static func get_heptagram_silhouette_arc_controls() -> Dictionary:
-	return {}
 
 
 ## ねこの顔の輪郭頂点（Shape Grid Editor 別プロジェクトで編集し出力した頂点を貼り付け）

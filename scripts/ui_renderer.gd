@@ -2595,12 +2595,12 @@ func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: fl
 	const LINE_W: float = 2.0 * 3.0
 	_game.draw_rect(rect, Color(1.0, 0.99, 0.97, alpha))
 	_game.draw_rect(rect, Color(0.12, 0.12, 0.14, alpha), false, LINE_W)
-	var path_rect := Rect2(rect.position.x + LINE_W * 0.5, rect.position.y + LINE_W * 0.5, rect.size.x - LINE_W, rect.size.y - LINE_W)
-	var per: float = 2.0 * path_rect.size.x + 2.0 * path_rect.size.y
+	# 枠線は rect の辺を中心に描かれるため、● の中心も同じ周辺（rect の周長）上に乗せる
+	var per: float = 2.0 * rect.size.x + 2.0 * rect.size.y
 	var t_sec: float = Time.get_ticks_msec() / 1000.0
 	var dist: float = fmod(t_sec * 88.0, per)
-	var dot_center: Vector2 = _results_rect_perimeter_point(path_rect, dist)
-	var dot_r: float = LINE_W
+	var dot_center: Vector2 = _results_rect_perimeter_point(rect, dist)
+	var dot_r: float = LINE_W * 2.0
 	_game.draw_circle(dot_center, dot_r, Color(0.12, 0.12, 0.14, alpha))
 	var ascent: float = _game.font.get_ascent(fs)
 	var descent: float = _game.font.get_descent(fs)
