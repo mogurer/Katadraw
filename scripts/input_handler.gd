@@ -14,8 +14,10 @@ const BB_ANCHOR_SIZE := 10.0
 const BB_ANCHOR_HIT := 16.0
 const BB_CENTER_SIZE := 9.0
 const PAD_CURSOR_SPEED := 600.0
-const PAD_RIGHT_STICK_SPEED := 400.0  # A+左スティックのポイント移動速度
-const PAD_A_DPAD_SPEED := 266.67  # A+十字キー連続移動速度（スティック全倒しの約2/3）
+const PAD_RIGHT_STICK_SPEED := 400.0  # A+左スティックのポイント移動: 全倒し時の速度係数（× pow(倒し量, 下記指数) × delta）
+const PAD_A_DPAD_SPEED := 200.00  # A+十字キー連続移動速度（スティック全倒しの約2/3）
+## 左スティックアナログのみ。速度 ∝ pow(倒し量, この値)。1.0=線形、2.0=半分倒しで約1/4速度、>1 で弱い入力ほど遅く
+const PAD_LEFT_STICK_SPEED_EXPONENT := 4.0
 const PAD_RIGHT_STICK_DEADZONE := 0.5  # 右スティック: 揺り戻し・誤検知防止のデッドゾーン
 const RIGHT_STICK_REDETECT_ANGLE_DEG := 5.0  # 右スティック: 固定時の方向からこの角度以上変化で再検出（ゆっくり操作でも反応）
 ## レイ方向を固定したままにする許容角（これ以上スティックが動くとレイ更新）。KATA / L-R 後のピン解除にも使う
@@ -87,6 +89,20 @@ func _init(game: Node2D) -> void:
 func _log_pad_ray_lr(msg: String) -> void:
 	if DEBUG_PAD_RAY_LR:
 		print("[PadRayLR] ", Time.get_ticks_msec(), " ", msg)
+
+
+func is_bb_dragging() -> bool:
+	return bb_dragging
+
+
+## process_pad 末尾で grab_input_active が立つ前に _notify_points_changed が走るため、つかみ判定に使う
+func is_pad_grabbing_modifier_now() -> bool:
+	if _game.game_state != "playing" and _game.game_state != "rules":
+		return false
+	var rx: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
+	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	var right_active: bool = Vector2(rx, ry).length() >= PAD_RIGHT_STICK_DEADZONE
+	return Input.is_joy_button_pressed(0, JOY_BUTTON_A) or right_active
 
 
 func update_grab_state_for_mouse() -> void:
@@ -939,7 +955,8 @@ func process_pad(delta: float) -> void:
 	if left_vec != Vector2.ZERO:
 		_last_input_method = "pad"
 		if pad_grabbing_modifier and _game.selected_indices.size() >= 1:
-			var speed: float = left_vec.length() * PAD_RIGHT_STICK_SPEED * delta
+			var left_len: float = left_vec.length()
+			var speed: float = pow(left_len, PAD_LEFT_STICK_SPEED_EXPONENT) * PAD_RIGHT_STICK_SPEED * delta
 			var move: Vector2 = left_vec.normalized() * speed
 			for idx in _game.selected_indices:
 				_game.point_positions[idx] += move

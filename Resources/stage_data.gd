@@ -13,9 +13,9 @@ const _StageConfigScript = preload("res://Resources/stage_config.gd")
 static func get_stages() -> Array:
 	var overrides_list: Array = [
 		# チュートリアル: 正三角形（3頂点）
-		# {"type": "triangle", "num_points": 3, "min_radius": 180.0, "max_radius": 260.0, "vertex_range": [3, 3], "variance": 0.20, "zigzag": 0.08, "clear_pct": 98.5},
+		{"type": "triangle", "num_points": 3, "min_radius": 180.0, "max_radius": 260.0, "vertex_range": [3, 3], "variance": 0.20, "zigzag": 0.08, "clear_pct": 98.5},
 		# テスト: 正方形（点対応・弧対応の判定を試す）
-		# {"type": "square", "num_points": 12, "min_radius": 180.0, "max_radius": 260.0, "variance": 0.20, "clear_pct": 97.5},
+		{"type": "square", "num_points": 12, "min_radius": 180.0, "max_radius": 260.0, "variance": 0.20, "clear_pct": 97.5},
 		# circle: 14点、難易度2
 		{"type": "circle", "num_points": 14, "min_radius": 195.0, "max_radius": 360.0, "vertex_range": [4, 6], "variance": 0.45, "zigzag": 0.22, "clear_pct": 93.0},
 		# two_circles: 各12点
@@ -27,9 +27,9 @@ static func get_stages() -> Array:
 		# テスト: ねこの顔（16～20点）
 		{"type": "cat_face", "num_points": 18, "min_radius": 160.0, "max_radius": 280.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.2},
 		# heptagram: 七芒星
-		#{"type": "heptagram", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "vertex_range": [3, 5], "variance": 0.55, "zigzag": 0.35, "clear_pct": 98.0},
+		{"type": "heptagram", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "vertex_range": [3, 5], "variance": 0.55, "zigzag": 0.35, "clear_pct": 98.0},
 		# heptagram_silhouette: 七芒星シルエット
-		#{"type": "heptagram_silhouette", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.0},
+		{"type": "heptagram_silhouette", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.0},
 	]
 	var result: Array = []
 	for ov in overrides_list:

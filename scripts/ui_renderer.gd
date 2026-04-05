@@ -64,10 +64,12 @@ const POINT_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_RADIUS := 9.0
 const POINT_RADIUS_HOVER := 13.0
 const LINE_WIDTH := 4.0
-# 仮実装: ガイド線から遠いほど大きい円（px 半径）。距離は get_distance_to_hint_guide_outline 基準
+# ガイド線から遠いほど大きい円（px 半径）。距離は get_distance_to_hint_guide_outline 基準
 const POINT_RADIUS_GUIDE_NEAR_MIN := 5.0
 const POINT_RADIUS_GUIDE_FAR_MAX := 25.0
 const POINT_RADIUS_GUIDE_DIST_FULL_PX := 120.0  # この距離以上で最大半径
+# 未ロックのポイント同士で比較し、ズレが最大のものほど上記半径をさらに大きく（最小側はやや小さく）
+const POINT_RADIUS_RELATIVE_SPREAD := 0.22  # 最悪点は +(22%)、最良点は −(22%) 相当の倍率
 
 # --- 選択ポイント（白円 + 黒の同心円）---
 const SELECTED_POINT_WHITE := Color(1.0, 0.937, 0.89, 1.0)
@@ -126,6 +128,13 @@ var _stage_intro_time: float = -1.0   # ステージ開始演出の開始時刻
 const STAGE_INTRO_DURATION := 0.5     # 演出の長さ（秒）
 var _results_anim_time: float = -1.0  # リザルト画面の開始時刻
 const RESULTS_SLIDE_DURATION := 0.7   # スライドイン所要時間（秒）
+# Result 画面の見出し・TOTAL ラベル（基準からの倍率）
+const RESULT_SCREEN_TITLE_FS := 120  # 48 * 2.5
+const RESULT_TOTAL_LABEL_FS := 84  # 28 * 3
+# playing 中のポイント描画フレーム用: 未ロック各点のガイド距離の min/max（相対的な円サイズ用）
+var _guide_dist_min: float = 0.0
+var _guide_dist_max: float = 0.0
+var _guide_dist_have_bounds: bool = false
 
 # --- Title Intro Animation（描画・タイムラインは title_intro_animation.gd）---
 var title_intro: TitleIntroAnimator
@@ -139,6 +148,10 @@ func _init(game: Node2D) -> void:
 	_game = game
 	title_intro = TitleIntroAnimator.new(_game, Callable(self, "suppress_hover_sfx"))
 	_stage_renderer = StageRenderer.new(game, self)
+
+
+func capture_stage_result_shapes() -> Dictionary:
+	return _stage_renderer.capture_result_loops()
 
 
 # --- Background ---
@@ -1101,119 +1114,88 @@ func _draw_config(vp: Vector2) -> void:
 	var text_c := Color(0.26, 0.21, 0.28)
 	var sel_c := Color(0.95, 0.19, 0.32)
 	var val_c := Color(0.26, 0.21, 0.28)
-	var sub_sel_c := Color(0.95, 0.19, 0.32)
-	var sub_off_c := Color(0.26, 0.21, 0.28)
 
-	var base_y: float = vp.y * 0.28
-	var spacing: float = 103.5
-	var lx: float = vp.x * 0.28
-	var vx: float = vp.x * 0.42
-	var box_w: float = vp.x * 0.24
+	var base_y: float = vp.y * _game.CONFIG_MENU_BASE_Y_RATIO
+	var spacing: float = _game.CONFIG_MENU_SPACING
+	var lx: float = vp.x * _game.CONFIG_MENU_LX_RATIO
+	var box_w: float = vp.x * _game.CONFIG_MENU_BOX_W_RATIO
 	var label_fs: int = 36
 	var val_fs: int = 34
 	var box_h: float = (_game.font.get_ascent(val_fs) + _game.font.get_descent(val_fs)) * 1.5
 
-	var res_label: String = _game.get_window_size_config_label()
 	var win_label: String = tr("CONFIG_FULLSCREEN") if _game.is_fullscreen else tr("CONFIG_WINDOW")
-	var _loc: String = TranslationServer.get_locale()
-	var lang_label: String
-	if _loc == "ja":
-		lang_label = tr("CONFIG_LANG_JA")
-	elif _loc == "en":
-		lang_label = tr("CONFIG_LANG_EN")
-	elif _loc == "zh_CN":
-		lang_label = tr("CONFIG_LANG_ZH_CN")
-	elif _loc == "zh_TW":
-		lang_label = tr("CONFIG_LANG_ZH_TW")
-	else:
-		lang_label = tr("CONFIG_LANG_JA")
-
 	var item_labels: Array[String] = [
-		tr("CONFIG_WINDOW_SIZE"), tr("CONFIG_WINDOW_MODE"), tr("CONFIG_LANGUAGE"),
+		tr("CONFIG_WINDOW_MODE"), tr("CONFIG_LANGUAGE"),
 		tr("CONFIG_BGM_VOLUME"), tr("CONFIG_SE_VOLUME"), tr("CONFIG_BACK")
 	]
-	var item_values: Array[String] = [res_label, win_label, lang_label, str(_game.bgm_volume), str(_game.se_volume), ""]
+	var item_values: Array[String] = [
+		win_label, _game.config_language_ui_label(), str(_game.bgm_volume), str(_game.se_volume), ""
+	]
 
-	var arrow_w: float = 36.0   # ▼▲ボタンの幅
-	var arrow_fs: int = 28      # ▼▲のフォントサイズ
+	var arrow_fs: int = 28
 
-	for i in range(6):
+	for i in range(5):
 		var item_y: float = base_y + i * spacing
-		var is_sel: bool = (i == _game.config_index) and _game.config_sub == ""
-		var is_active: bool = (i == _game.config_index)
-
-		if i == 5:
-			# 「タイトルに戻る」ボタン — ボックスと同じ幅
+		var is_sel: bool = (i == _game.config_index)
+		if i == 4:
+			# 「タイトルに戻る」— タイトルメニューと同じく is_off=非選択（薄ベージュ＋濃字）、選択時は赤
 			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.15 - 35.0)
-			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, false, box_w)
-		elif i == 3 or i == 4:
-			# --- 音量項目: ボックス + ▼▲ボタン ---
-			var box_rect := Rect2(vx, item_y - 16.0, box_w, box_h)
-			var shadow_offset := Vector2(12.5, 12.5)
-			_game.draw_rect(Rect2(box_rect.position + shadow_offset, box_rect.size), Color(0.26, 0.21, 0.28, 0.30))
-			_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
-			_game.draw_rect(box_rect, Color(0.26, 0.21, 0.28), false, 5.75)
-			var val_baseline_y: float = item_y - 16.0 + (box_h + _game.font.get_ascent(val_fs) - _game.font.get_descent(val_fs)) * 0.5
-			_game.draw_string(_game.font_din, Vector2(vx, val_baseline_y), item_values[i], HORIZONTAL_ALIGNMENT_CENTER, box_w, val_fs, val_c)
-
-			# ラベル
-			var c: Color = sel_c if is_sel else text_c
-			var label_font: Font = _game.font_bold if is_sel else _game.font
-			_game.draw_string(label_font, Vector2(lx, val_baseline_y), item_labels[i], HORIZONTAL_ALIGNMENT_LEFT, vp.x * 0.3, label_fs, c)
-
-			# ▼ボタン（ボックス左）
-			var vol: int = _game.bgm_volume if i == 3 else _game.se_volume
-			var down_x: float = vx - arrow_w - 4.0
-			var down_rect := Rect2(down_x, item_y - 16.0, arrow_w, box_h)
-			var down_enabled: bool = vol > 0
-			var down_c: Color = (sel_c if is_sel else text_c) if down_enabled else Color(0.26, 0.21, 0.28, 0.25)
-			_game.draw_rect(down_rect, Color(0.26, 0.21, 0.28, 0.08))
-			_game.draw_rect(down_rect, Color(0.26, 0.21, 0.28, 0.3), false, 2.0)
-			var down_baseline: float = item_y - 16.0 + (box_h + _game.font.get_ascent(arrow_fs) - _game.font.get_descent(arrow_fs)) * 0.5
-			_game.draw_string(_game.font_bold, Vector2(down_x, down_baseline), "◀", HORIZONTAL_ALIGNMENT_CENTER, arrow_w, arrow_fs, down_c)
-
-			# ▲ボタン（ボックス右）
-			var up_x: float = vx + box_w + 4.0
-			var up_rect := Rect2(up_x, item_y - 16.0, arrow_w, box_h)
-			var up_enabled: bool = vol < 10
-			var up_c: Color = (sel_c if is_sel else text_c) if up_enabled else Color(0.26, 0.21, 0.28, 0.25)
-			_game.draw_rect(up_rect, Color(0.26, 0.21, 0.28, 0.08))
-			_game.draw_rect(up_rect, Color(0.26, 0.21, 0.28, 0.3), false, 2.0)
-			_game.draw_string(_game.font_bold, Vector2(up_x, down_baseline), "▶", HORIZONTAL_ALIGNMENT_CENTER, arrow_w, arrow_fs, up_c)
-		else:
-			# 値ボックス（白塗り、ボタンと同じ枠）
-			var box_rect := Rect2(vx, item_y - 16.0, box_w, box_h)
-			var shadow_offset := Vector2(12.5, 12.5)
-			_game.draw_rect(Rect2(box_rect.position + shadow_offset, box_rect.size), Color(0.26, 0.21, 0.28, 0.30))
-			_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
-			_game.draw_rect(box_rect, Color(0.26, 0.21, 0.28), false, 5.75)
-			var val_baseline_y: float = item_y - 16.0 + (box_h + _game.font.get_ascent(val_fs) - _game.font.get_descent(val_fs)) * 0.5
-			_game.draw_string(_game.font, Vector2(vx, val_baseline_y), item_values[i], HORIZONTAL_ALIGNMENT_CENTER, box_w, val_fs, val_c)
-
-			# ラベル（選択中はBold + 赤）— ボックス内文字と同じベースラインに揃える
-			var c: Color = sel_c if is_sel else text_c
-			var label_font: Font = _game.font_bold if is_sel else _game.font
-			_game.draw_string(label_font, Vector2(lx, val_baseline_y), item_labels[i], HORIZONTAL_ALIGNMENT_LEFT, vp.x * 0.3, label_fs, c)
-
-			# サブメニュー: ボックスの右側に横並びで表示
-			if is_active and _game.config_sub != "":
-				var sub_labels: Array[String] = _get_config_sub_labels(i)
-				var sub_x: float = vx + box_w + 30.0
-				var sx_cursor: float = sub_x
-				for j in range(sub_labels.size()):
-					var is_sub_sel: bool = (j == _game.config_sub_index)
-					var sc: Color = sub_sel_c if is_sub_sel else sub_off_c
-					var sub_font: Font = _game.font_bold if is_sub_sel else _game.font
-					_game.draw_string(sub_font, Vector2(sx_cursor, val_baseline_y), sub_labels[j], HORIZONTAL_ALIGNMENT_LEFT, -1, val_fs, sc)
-					sx_cursor += _game.font.get_string_size(sub_labels[j], HORIZONTAL_ALIGNMENT_LEFT, -1, val_fs).x + 30.0
+			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, box_w)
+			continue
+		# 0〜3: 値行は同一レイアウト（◀ ボックス ▶）。選択行はタイトルメニューと同様のホバー拡大＋シャドウ。
+		var btn_id: String = _game.CONFIG_ROW_BTN_IDS[i]
+		if is_sel:
+			set_btn_hover(btn_id)
+		var geom: Dictionary = _game.config_row_scaled_layout(vp, i)
+		var G: Vector2 = geom["G"]
+		var Lp: Vector2 = geom["Lp"]
+		var Rp: Vector2 = geom["Rp"]
+		var bw: float = geom["bw"]
+		var bh: float = geom["bh"]
+		var aw: float = geom["aw"]
+		var shadow_extra: float = get_btn_shadow_extra(btn_id) if is_sel else 0.0
+		var box_rect := Rect2(G.x - bw * 0.5, G.y - bh * 0.5, bw, bh)
+		var shadow_offset := Vector2(12.5 + shadow_extra, 12.5 + shadow_extra)
+		_game.draw_rect(Rect2(box_rect.position + shadow_offset, box_rect.size), Color(0.26, 0.21, 0.28, 0.30))
+		_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
+		_game.draw_rect(box_rect, Color(0.26, 0.21, 0.28), false, 5.75)
+		var val_baseline_y: float = box_rect.position.y + (bh + _game.font.get_ascent(val_fs) - _game.font.get_descent(val_fs)) * 0.5
+		var val_font: Font = _game.font_din if (i == 2 or i == 3) else _game.font
+		_game.draw_string(val_font, Vector2(box_rect.position.x, val_baseline_y), item_values[i], HORIZONTAL_ALIGNMENT_CENTER, bw, val_fs, val_c)
+		var c: Color = sel_c if is_sel else text_c
+		var label_font: Font = _game.font_bold if is_sel else _game.font
+		var label_col_right: float = Lp.x - aw * 0.5 - _game.CONFIG_MENU_LABEL_GAP_TO_ARROW
+		var label_area_w: float = maxf(0.0, label_col_right - lx)
+		var lbl_fit: String = _config_fit_label_text(label_font, item_labels[i], label_area_w, label_fs)
+		_game.draw_string(label_font, Vector2(lx, val_baseline_y), lbl_fit, HORIZONTAL_ALIGNMENT_RIGHT, label_area_w, label_fs, c)
+		var left_enabled: bool = true
+		var right_enabled: bool = true
+		match i:
+			2:
+				left_enabled = _game.bgm_volume > 0
+				right_enabled = _game.bgm_volume < 10
+			3:
+				left_enabled = _game.se_volume > 0
+				right_enabled = _game.se_volume < 10
+		var down_x: float = Lp.x - aw * 0.5
+		var down_c: Color = (sel_c if is_sel else text_c) if left_enabled else Color(0.26, 0.21, 0.28, 0.25)
+		var down_baseline: float = box_rect.position.y + (bh + _game.font.get_ascent(arrow_fs) - _game.font.get_descent(arrow_fs)) * 0.5
+		_game.draw_string(_game.font_bold, Vector2(down_x, down_baseline), "◀", HORIZONTAL_ALIGNMENT_CENTER, aw, arrow_fs, down_c)
+		var up_x: float = Rp.x - aw * 0.5
+		var up_c: Color = (sel_c if is_sel else text_c) if right_enabled else Color(0.26, 0.21, 0.28, 0.25)
+		_game.draw_string(_game.font_bold, Vector2(up_x, down_baseline), "▶", HORIZONTAL_ALIGNMENT_CENTER, aw, arrow_fs, up_c)
 
 
-func _get_config_sub_labels(item_index: int) -> Array[String]:
-	match item_index:
-		0: return [tr("CONFIG_WIN_1280"), tr("CONFIG_WIN_1600"), tr("CONFIG_WIN_1920")]
-		1: return [tr("CONFIG_FULLSCREEN"), tr("CONFIG_WINDOW")]
-		2: return [tr("CONFIG_LANG_JA"), tr("CONFIG_LANG_EN"), tr("CONFIG_LANG_ZH_CN"), tr("CONFIG_LANG_ZH_TW")]
-	return []
+func _config_fit_label_text(font: Font, text: String, max_w: float, fs: int) -> String:
+	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x <= max_w:
+		return text
+	var ell: String = "…"
+	var t: String = text
+	while t.length() > 1:
+		t = t.substr(0, t.length() - 1)
+		if font.get_string_size(t + ell, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x <= max_w:
+			return t + ell
+	return ell
 
 
 # --- 操作説明の共通定義（rules / ポーズの操作説明で共有） ---
@@ -1406,11 +1388,43 @@ func _radius_from_guide_distance_provisional(dist: float) -> float:
 	return lerpf(POINT_RADIUS_GUIDE_NEAR_MIN, POINT_RADIUS_GUIDE_FAR_MAX, t)
 
 
+func _refresh_guide_point_distance_bounds() -> void:
+	_guide_dist_have_bounds = false
+	if _game.game_state != "playing":
+		return
+	var n: int = _game.point_positions.size()
+	if n == 0:
+		return
+	var first: bool = true
+	for i in range(n):
+		if _game._is_locked(i):
+			continue
+		var d: float = _game.stage_manager.get_distance_to_hint_guide_outline(_game.point_positions[i])
+		if first:
+			_guide_dist_min = d
+			_guide_dist_max = d
+			first = false
+		else:
+			_guide_dist_min = minf(_guide_dist_min, d)
+			_guide_dist_max = maxf(_guide_dist_max, d)
+	_guide_dist_have_bounds = not first
+
+
 func _point_radius_by_guide(idx: int) -> float:
 	if _game.game_state != "playing" or idx < 0 or idx >= _game.point_positions.size():
 		return POINT_RADIUS
 	var d: float = _game.stage_manager.get_distance_to_hint_guide_outline(_game.point_positions[idx])
-	return _radius_from_guide_distance_provisional(d)
+	var base_r: float = _radius_from_guide_distance_provisional(d)
+	# ロック済み・比較対象がいないときは絶対距離のみ
+	if _game._is_locked(idx) or not _guide_dist_have_bounds:
+		return base_r
+	var span: float = _guide_dist_max - _guide_dist_min
+	var rel_t: float = 0.5
+	if span > 1e-5:
+		rel_t = clampf((d - _guide_dist_min) / span, 0.0, 1.0)
+	var mult: float = lerpf(1.0 - POINT_RADIUS_RELATIVE_SPREAD, 1.0 + POINT_RADIUS_RELATIVE_SPREAD, rel_t)
+	var r: float = base_r * mult
+	return clampf(r, POINT_RADIUS_GUIDE_NEAR_MIN * 0.85, POINT_RADIUS_GUIDE_FAR_MAX * (1.0 + POINT_RADIUS_RELATIVE_SPREAD))
 
 
 func _draw_rules_demo_shape(vp: Vector2) -> void:
@@ -1486,6 +1500,7 @@ func _draw_game(vp: Vector2) -> void:
 	_stage_renderer.draw_stage_lines()
 	_stage_renderer.draw_group_cleared_rings()
 
+	_refresh_guide_point_distance_bounds()
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var color: Color
@@ -2238,90 +2253,359 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var shapes_rect := Rect2(x + 24, shapes_top, w - 48, shapes_h)
 	_stage_renderer.draw_clear_shapes(shapes_rect)
 
-	# 所要時間・ボタンはポップアップ下部に配置
-	_draw_monospace_number(_game.font, Vector2(tx, y + h - 24.0 - btn_h_val - 50.0), tr("CLEAR_TIME") % _game.clear_time, HORIZONTAL_ALIGNMENT_CENTER, tw, 37, Color(0.26, 0.21, 0.28))
+	# 所要時間・動かした回数・ボタンはポップアップ下部に配置
+	var time_y: float = y + h - 24.0 - btn_h_val - 50.0
+	_draw_monospace_number(_game.font, Vector2(tx, time_y), tr("CLEAR_TIME") % _game.clear_time, HORIZONTAL_ALIGNMENT_CENTER, tw, 37, Color(0.26, 0.21, 0.28))
+	_game.draw_string(_game.font, Vector2(tx, time_y + 34.0), tr("CLEAR_MOVE_COUNT") % _game.stage_move_count, HORIZONTAL_ALIGNMENT_CENTER, tw, 30, Color(0.26, 0.21, 0.28))
 
-	var btn_center := Vector2(x + w / 2.0, y + h - btn_h_val / 2.0 - 24.0)
+	var btn_center := Vector2(x + w / 2.0, y + h - btn_h_val / 2.0 - 18.0)
 	_draw_auto_button_with_shadow(btn_center, tr("BTN_NEXT"), BTN_FONT_SIZE, 1.0, false, w * 0.6)
+
+
+func _draw_results_sidebar_title_fallback(vp: Vector2, bar_w: float, a: float) -> void:
+	var kata: String = "KATA"
+	var draw_word: String = "DRAW"
+	var fs_kata: int = 22
+	var fs_draw: int = 18
+	var c_kata: Color = Color(0.95, 0.19, 0.32, a)
+	var c_draw: Color = Color(0.06, 0.06, 0.08, a)
+	var w_k: float = _game.font_bold.get_string_size(kata, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_kata).x
+	var gap_block: float = 18.0
+	var asc_k: float = _game.font_bold.get_ascent(fs_kata)
+	var dsc_k: float = _game.font_bold.get_descent(fs_kata)
+	var asc_d: float = _game.font_bold.get_ascent(fs_draw)
+	var dsc_d: float = _game.font_bold.get_descent(fs_draw)
+	var stack_h: float = asc_k + dsc_k + gap_block + asc_d + dsc_d
+	var baseline_k: float = vp.y * 0.5 - stack_h * 0.5 + asc_k
+	var baseline_d: float = baseline_k + dsc_k + gap_block + asc_d
+	var x_k: float = (bar_w - w_k) * 0.5
+	var x_d: float = (bar_w - _game.font_bold.get_string_size(draw_word, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_draw).x) * 0.5
+	_game.draw_string(_game.font_bold, Vector2(x_k, baseline_k), kata, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_kata, c_kata)
+	_game.draw_string(_game.font_bold, Vector2(x_d, baseline_d), draw_word, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_draw, c_draw)
+
+
+func _result_grid_fit_font_size(font: Font, text: String, max_w: float, fs_start: int, fs_min: int) -> int:
+	"""セル幅に収まるまでフォントサイズを下げる（秒・回の単位まで含めて表示）"""
+	var f: int = fs_start
+	while f > fs_min:
+		var sz: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, f)
+		if sz.x <= max_w:
+			return f
+		f -= 1
+	return fs_min
+
+
+func _results_logo_scaled_dims(vp: Vector2, bar_w: float) -> Vector2:
+	"""リザルト左バー用ロゴの描画サイズ（未回転の w×h）。+90° 回転後の横方向の見かけの幅は h に相当。
+	kata-draw_Resultlogo は透過トリム済みを等比でバー幅・縦幅に収める（追加の倍率なし）。"""
+	var tex: Texture2D = _game.result_logo_texture
+	if tex == null:
+		tex = _game.title_logo_texture
+	if tex == null:
+		return Vector2.ZERO
+	var tex_w: float = tex.get_width()
+	var tex_h: float = tex.get_height()
+	const H_PAD: float = 6.0
+	const V_PAD: float = 20.0
+	var s: float = minf((bar_w - H_PAD) / maxf(tex_h, 0.001), (vp.y - V_PAD) / maxf(tex_w, 0.001))
+	var draw_w: float = s * tex_w
+	var draw_h: float = s * tex_h
+	return Vector2(draw_w, draw_h)
+
+
+func _draw_results_sidebar_logo(vp: Vector2, bar_w: float, a: float) -> void:
+	"""res://assets/UI/kata-draw_Resultlogo.png を +90° 回転して左バーに配置（無いときはタイトルロゴで代替）"""
+	var tex: Texture2D = _game.result_logo_texture
+	if tex == null:
+		tex = _game.title_logo_texture
+	if tex == null:
+		_draw_results_sidebar_title_fallback(vp, bar_w, a)
+		return
+	var dims: Vector2 = _results_logo_scaled_dims(vp, bar_w)
+	var draw_w: float = dims.x
+	var draw_h: float = dims.y
+	if draw_w <= 0.0 or draw_h <= 0.0:
+		_draw_results_sidebar_title_fallback(vp, bar_w, a)
+		return
+	var pos := Vector2((bar_w - draw_w) * 0.5, (vp.y - draw_h) * 0.5)
+	var pivot: Vector2 = pos + Vector2(draw_w * 0.5, draw_h * 0.5)
+	var rot: float = PI / 2.0
+	var xf: Transform2D = Transform2D(0.0, pivot) * Transform2D(rot, Vector2.ZERO) * Transform2D(0.0, -pivot)
+	_game.draw_set_transform_matrix(xf)
+	_game.draw_texture_rect(tex, Rect2(pos, Vector2(draw_w, draw_h)), false, Color(1.0, 1.0, 1.0, a))
+	_game.draw_set_transform_matrix(Transform2D())
+
+
+func _compute_results_sidebar_width(vp: Vector2) -> float:
+	"""ロゴを +90° したときに収まる最小幅（上限は従来どおりビュー幅の割合でクランプ）"""
+	const H_PAD: float = 6.0
+	const V_PAD: float = 20.0
+	var tex: Texture2D = _game.result_logo_texture
+	if tex == null:
+		tex = _game.title_logo_texture
+	if tex == null:
+		return 108.0
+	var tex_w: float = tex.get_width()
+	var tex_h: float = tex.get_height()
+	var max_bar: float = clampf(vp.x * 0.22, 140.0, 300.0)
+	var s: float = minf((max_bar - H_PAD) / maxf(tex_h, 0.001), (vp.y - V_PAD) / maxf(tex_w, 0.001))
+	return s * tex_h + H_PAD
+
+
+func _compute_results_layout(vp: Vector2) -> Dictionary:
+	"""Result 画面のブロック位置・NEXT 座標（描画とヒット判定で共通）"""
+	const RESULTS_MARGIN: float = 20.0
+	const TOP_Y: float = 32.0
+	const BLOCK_W_RATIO: float = 0.8
+	const GAP_GRID_TOTAL: float = 14.0
+	var sidebar_w: float = _compute_results_sidebar_width(vp)
+	var content_x0: float = sidebar_w + RESULTS_MARGIN
+	var content_w: float = vp.x - content_x0 - RESULTS_MARGIN
+	var block_w: float = content_w * BLOCK_W_RATIO
+	var block_x: float = content_x0
+	var btn_res_h: float = 120.0
+	var next_s: float = 88.0
+	var grid_top: float = TOP_Y + _game.font_din.get_ascent(RESULT_SCREEN_TITLE_FS) + _game.font_din.get_descent(RESULT_SCREEN_TITLE_FS) + 28.0
+	var bottom_reserve: float = btn_res_h + RESULTS_MARGIN * 2.0 + GAP_GRID_TOTAL
+	var grid_h: float = maxf(160.0, vp.y - grid_top - bottom_reserve)
+	var total_bar_y: float = grid_top + grid_h + GAP_GRID_TOTAL
+	var gap_x0: float = block_x + block_w
+	var gap_w: float = content_w - block_w
+	var btn_cx: float = gap_x0 + gap_w * 0.5
+	var btn_cy: float = total_bar_y + btn_res_h * 0.5 + 10.0
+	return {
+		"content_x0": content_x0,
+		"content_w": content_w,
+		"block_x": block_x,
+		"block_w": block_w,
+		"grid_top": grid_top,
+		"grid_h": grid_h,
+		"total_bar_y": total_bar_y,
+		"btn_res_h": btn_res_h,
+		"next_cx": btn_cx,
+		"next_cy": btn_cy,
+		"next_s": next_s,
+	}
+
+
+func get_results_next_button_rect(vp: Vector2) -> Rect2:
+	var lay: Dictionary = _compute_results_layout(vp)
+	var s: float = lay["next_s"]
+	var cx: float = lay["next_cx"]
+	var cy: float = lay["next_cy"]
+	return Rect2(cx - s * 0.5, cy - s * 0.5, s, s)
+
+
+func _draw_results_title_justified(block_x: float, top_y: float, span_w: float, fs: int, color: Color) -> void:
+	"""メイングリッド左端〜右端に RESULT_TITLE を字間均等で収める（カーニング込みの累進幅で字送り）"""
+	var font: Font = _game.font_din
+	var text: String = tr("RESULT_TITLE")
+	var n: int = text.length()
+	if n == 0:
+		return
+	var total_adv: float = 0.0
+	var advances: Array = []
+	for i in range(n):
+		var w0: float = font.get_string_size(text.substr(0, i), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var w1: float = font.get_string_size(text.substr(0, i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		advances.append(w1 - w0)
+		total_adv += advances[i]
+	var gap_extra: float = 0.0
+	if n > 1:
+		gap_extra = (span_w - total_adv) / float(n - 1)
+	var x: float = block_x
+	var baseline_y: float = top_y + font.get_ascent(fs)
+	for i in range(n):
+		var ch: String = text.substr(i, 1)
+		_game.draw_string(font, Vector2(x, baseline_y), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
+		x += advances[i]
+		if i < n - 1:
+			x += gap_extra
 
 
 func _draw_results(vp: Vector2) -> void:
 	_draw_bg(vp)
 
-	# --- スライドイン演出: 上から落ちてくる ---
-	var slide_t: float = 1.0
+	var fade_t: float = 1.0
 	if _results_anim_time >= 0.0:
-		slide_t = clampf((Time.get_ticks_msec() / 1000.0 - _results_anim_time) / RESULTS_SLIDE_DURATION, 0.0, 1.0)
-	var slide_ease: float = _ease_out_cubic(slide_t)
-	var cx: float = vp.x / 2.0
-	var cy: float = vp.y / 2.0
-	var w: float = 780.0
-	var h: float = 710.0
-	var x: float = cx - w / 2.0
-	var target_y: float = cy - h / 2.0
-	var start_y: float = -h  # 画面上部の外
-	var y: float = lerpf(start_y, target_y, slide_ease)
+		fade_t = clampf((Time.get_ticks_msec() / 1000.0 - _results_anim_time) / RESULTS_SLIDE_DURATION, 0.0, 1.0)
+	var fade_ease: float = _ease_out_cubic(fade_t)
+	var a: float = fade_ease
 
-	var dlg_rect := Rect2(Vector2(x, y), Vector2(w, h))
-	# 白背景・太枠・統一シャドウ
-	var dlg_shadow := Vector2(15.0, 15.0)
-	_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(0.26, 0.21, 0.28, 0.25))
-	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
-	_game.draw_rect(dlg_rect, Color(0.26, 0.21, 0.28), false, 5.75)
+	var lay: Dictionary = _compute_results_layout(vp)
+	var RESULTS_SIDEBAR_W: float = _compute_results_sidebar_width(vp)
+	var content_x0: float = lay["content_x0"]
+	var content_w: float = lay["content_w"]
+	var block_x: float = lay["block_x"]
+	var block_w: float = lay["block_w"]
+	var grid_top: float = lay["grid_top"]
+	var grid_h: float = lay["grid_h"]
+	var total_bar_y: float = lay["total_bar_y"]
+	var btn_res_h: float = lay["btn_res_h"]
+	var next_cx: float = lay["next_cx"]
+	var next_cy: float = lay["next_cy"]
+	var next_s: float = lay["next_s"]
 
-	var tx: float = x + 30
-	var tw: float = w - 60
+	var c_text: Color = Color(0.26, 0.21, 0.28, a)
+	var c_red: Color = Color(0.95, 0.19, 0.32, a)
+	var c_blue_tint: Color = Color(0.72, 0.84, 0.94, a)
+	var c_beige_mix: Color = Color(0.96, 0.93, 0.86, a)
+	var c_white_mix: Color = Color(1.0, 1.0, 1.0, a)
+	var c_sidebar_bg: Color = Color(
+		c_blue_tint.r * 0.05 + c_beige_mix.r * 0.6 + c_white_mix.r * 0.35,
+		c_blue_tint.g * 0.05 + c_beige_mix.g * 0.6 + c_white_mix.g * 0.35,
+		c_blue_tint.b * 0.05 + c_beige_mix.b * 0.6 + c_white_mix.b * 0.35,
+		a
+	)
+	var c_total_label_bg: Color = Color(0.42, 0.35, 0.58, a)
 
-	# タイトル（10%アップ: 54→59、上部20px隙間）
-	_game.draw_string(_game.font_din, Vector2(tx, y + 20.0 + 72), tr("RESULT_TITLE"), HORIZONTAL_ALIGNMENT_CENTER, tw, 59, Color(0.95, 0.19, 0.32))
+	_game.draw_rect(Rect2(0, 0, RESULTS_SIDEBAR_W, vp.y), c_sidebar_bg)
+	_draw_results_sidebar_logo(vp, RESULTS_SIDEBAR_W, a)
 
-	_game.draw_line(Vector2(x + 45, y + 20.0 + 102), Vector2(x + w - 45, y + 20.0 + 102), Color(0.26, 0.21, 0.28, 0.3), 1.5, true)
+	var top_y: float = 32.0
+	var title_fs: int = RESULT_SCREEN_TITLE_FS
+	_draw_results_title_justified(block_x, top_y, block_w, title_fs, c_red)
 
-	# ステージ一覧（中央寄せで空白を詰める）
-	var row_y: float = y + 20.0 + 150
-	var row_fs: int = 33
-	var col_gap: float = 40.0  # ステージ名と秒数の間隔
-	# 最長のステージ名の幅を取得
-	var max_label_w: float = 0.0
-	for i in range(_game.stage_times.size()):
-		var lw: float = _game.font_din.get_string_size(tr("RESULT_STAGE") % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, row_fs).x
-		if lw > max_label_w:
-			max_label_w = lw
-	# 最長の秒数の幅を取得（等幅基準）
-	var max_time_w: float = 0.0
-	for i in range(_game.stage_times.size()):
-		var tw2: float = _get_monospace_number_width(_game.font_din, "%.1fs" % _game.stage_times[i], row_fs)
-		if tw2 > max_time_w:
-			max_time_w = tw2
-	var row_total_w: float = max_label_w + col_gap + max_time_w
-	var row_start_x: float = cx - row_total_w / 2.0
-	var row_time_x: float = row_start_x + max_label_w + col_gap
+	var n_stages: int = _game.stage_times.size()
+	var row_h: float = grid_h / 5.0
+	var col_gap: float = 14.0
+	var col_w: float = (block_w - col_gap) * 0.5
+	const GRID_BORDER_W: float = 1.75 * 3.0
+	const CELL_BORDER_W: float = 1.25 * 3.0
+	var stat_fs: int = mini(76, maxi(24, int(19 * 4)))
+	stat_fs = mini(stat_fs, int(row_h * 0.42))
+	stat_fs = maxi(1, int(round(float(stat_fs) * 0.9 * 0.82)))
+	var grid_frame := Rect2(block_x, grid_top, block_w, grid_h)
+	_game.draw_rect(grid_frame, Color(1.0, 1.0, 1.0, 0.97 * a))
+	_game.draw_rect(grid_frame, Color(0.12, 0.1, 0.14, 0.55 * a), false, GRID_BORDER_W)
 
-	for i in range(_game.stage_times.size()):
-		var stage_label: String = tr("RESULT_STAGE") % (i + 1)
-		var time_str: String = "%.1fs" % _game.stage_times[i]
-		_draw_monospace_number(_game.font_din, Vector2(row_start_x, row_y), stage_label, HORIZONTAL_ALIGNMENT_LEFT, -1, row_fs, Color(0.26, 0.21, 0.28))
-		_draw_monospace_number(_game.font_din, Vector2(row_time_x, row_y), time_str, HORIZONTAL_ALIGNMENT_RIGHT, max_time_w, row_fs, Color(0.26, 0.21, 0.28))
-		row_y += 48
+	for row in range(5):
+		for col in range(2):
+			var idx: int = row + col * 5
+			var cx: float = block_x + float(col) * (col_w + col_gap)
+			var cy: float = grid_top + float(row) * row_h
+			var cell_rect := Rect2(cx, cy, col_w, row_h - 6.0)
+			if idx >= n_stages:
+				_game.draw_rect(cell_rect, Color(1.0, 1.0, 1.0, 0.05 * a))
+				_game.draw_rect(cell_rect, Color(0.26, 0.21, 0.28, 0.2 * a), false, CELL_BORDER_W)
+				continue
+			var cw: float = cell_rect.size.x
+			var ch: float = cell_rect.size.y
+			var pad: float = 4.0
+			var thumb_col_w: float = cw * 0.36
+			var mid_col_w: float = cw * 0.32
+			var right_col_w: float = cw - thumb_col_w - mid_col_w - pad * 2.0
+			var side: float = minf(thumb_col_w - pad * 2.0, ch - pad * 2.0)
+			var thumb_x: float = cell_rect.position.x + (thumb_col_w - side) * 0.5
+			var thumb_y: float = cell_rect.position.y + (ch - side) * 0.5
+			var thumb_rect := Rect2(thumb_x, thumb_y, side, side)
+			var shape_dat: Dictionary = {}
+			if idx < _game.stage_result_shapes.size():
+				shape_dat = _game.stage_result_shapes[idx] as Dictionary
+			var ideal_l: Array = shape_dat.get("ideal", [])
+			var player_l: Array = shape_dat.get("player", [])
+			if not ideal_l.is_empty() or not player_l.is_empty():
+				_stage_renderer.draw_result_thumbnail(thumb_rect, ideal_l, player_l)
+			else:
+				_game.draw_rect(thumb_rect, Color(1.0, 1.0, 1.0, 0.1 * a))
+			var t_s: float = _game.stage_times[idx]
+			var mv: int = _game.stage_move_counts[idx] if idx < _game.stage_move_counts.size() else 0
+			var time_str: String = tr("RESULT_TIME_UNIT") % t_s
+			var move_str: String = tr("RESULT_MOVE_UNIT") % mv
+			var mid_x: float = cell_rect.position.x + thumb_col_w + pad
+			var right_x: float = mid_x + mid_col_w + pad
+			var fs_t: int = _result_grid_fit_font_size(_game.font, time_str, mid_col_w * 0.97, stat_fs, 8)
+			var fs_m: int = _result_grid_fit_font_size(_game.font, move_str, right_col_w * 0.97, stat_fs, 8)
+			var fs_cell: int = mini(fs_t, fs_m)
+			var row_baseline: float = cell_rect.position.y + (ch + _game.font.get_ascent(fs_cell) - _game.font.get_descent(fs_cell)) * 0.5
+			_game.draw_string(_game.font, Vector2(mid_x, row_baseline), time_str, HORIZONTAL_ALIGNMENT_CENTER, mid_col_w, fs_cell, c_text)
+			_game.draw_string(_game.font, Vector2(right_x, row_baseline), move_str, HORIZONTAL_ALIGNMENT_CENTER, right_col_w, fs_cell, c_text)
 
-	_game.draw_line(Vector2(x + 45, row_y - 12), Vector2(x + w - 45, row_y - 12), Color(0.26, 0.21, 0.28, 0.3), 1.5, true)
+	const TOTAL_BORDER_W: float = 2.0 * 3.0
+	var total_bar_rect := Rect2(block_x, total_bar_y, block_w, btn_res_h)
+	_game.draw_rect(total_bar_rect, Color(1.0, 1.0, 1.0, 0.96 * a))
+	_game.draw_rect(total_bar_rect, Color(0.26, 0.21, 0.28, 0.35 * a), false, TOTAL_BORDER_W)
+	var total_label_w: float = minf(160.0 * 2.0, block_w * 0.22 * 2.0)
+	total_label_w = minf(total_label_w, block_w * 0.48 - 8.0)
+	var tl_rect := Rect2(total_bar_rect.position, Vector2(total_label_w, btn_res_h))
+	_game.draw_rect(tl_rect, c_total_label_bg)
+	var total_lbl_fs: int = RESULT_TOTAL_LABEL_FS
+	var total_lbl_y: float = tl_rect.position.y + (btn_res_h + _game.font_bold.get_ascent(total_lbl_fs) - _game.font_bold.get_descent(total_lbl_fs)) * 0.5
+	_game.draw_string(_game.font_bold, Vector2(tl_rect.position.x, total_lbl_y), tr("RESULT_TOTAL"), HORIZONTAL_ALIGNMENT_CENTER, total_label_w, total_lbl_fs, Color(1.0, 1.0, 1.0, a))
 
 	var total_time: float = 0.0
 	for t in _game.stage_times:
 		total_time += t
+	var total_moves: int = 0
+	for m in _game.stage_move_counts:
+		total_moves += m
+	var tot_area_x: float = total_bar_rect.position.x + total_label_w + 12.0
+	var tot_area_w: float = total_bar_rect.position.x + total_bar_rect.size.x - tot_area_x - 12.0
+	var tot_time_str: String = tr("RESULT_TIME_UNIT") % total_time
+	var tot_move_str: String = tr("RESULT_MOVE_UNIT") % total_moves
+	var fs_tim: int = 28 * 2
+	var fs_mov: int = 28 * 2
+	fs_tim = mini(fs_tim, int(btn_res_h * 0.55))
+	fs_mov = fs_tim
+	var half_val: float = tot_area_w * 0.5
+	var bl_tot: float = total_bar_rect.position.y + (btn_res_h + _game.font.get_ascent(fs_tim) - _game.font.get_descent(fs_tim)) * 0.5
+	_game.draw_string(_game.font, Vector2(tot_area_x, bl_tot), tot_time_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_tim, c_red)
+	_game.draw_string(_game.font, Vector2(tot_area_x + half_val, bl_tot), tot_move_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_mov, c_red)
 
-	# TOTAL行（フォントが大きいので専用の幅を計算）
-	row_y += 32
-	var total_fs: int = 39
-	var total_time_str: String = "%.1fs" % total_time
-	var total_time_w: float = _get_monospace_number_width(_game.font_din, total_time_str, total_fs)
-	var total_display_w: float = maxf(max_time_w, total_time_w)
-	_draw_monospace_number(_game.font_din, Vector2(row_start_x, row_y), tr("RESULT_TOTAL"), HORIZONTAL_ALIGNMENT_LEFT, -1, total_fs, Color(0.26, 0.21, 0.28))
-	_draw_monospace_number(_game.font_din, Vector2(row_time_x, row_y), total_time_str, HORIZONTAL_ALIGNMENT_RIGHT, total_display_w, total_fs, Color(0.95, 0.19, 0.32))
+	_draw_results_next_button(Vector2(next_cx, next_cy), tr("RESULT_BTN_NEXT"), 26, a, next_s)
 
-	# ボタン（下部に40px隙間）
-	var btn_h_val: float = (_game.font.get_ascent(BTN_FONT_SIZE) + _game.font.get_descent(BTN_FONT_SIZE)) * 1.5
-	_draw_auto_button_with_shadow(Vector2(x + w / 2.0, y + h - btn_h_val / 2.0 - 40.0), tr("BTN_TO_TITLE"), BTN_FONT_SIZE, 1.0, false, w * 0.6)
+
+func _results_rect_perimeter_point(r: Rect2, dist: float) -> Vector2:
+	"""矩形の周上を時計回り（上辺左→右、右辺上→下、…）。dist は周長上の距離"""
+	var w: float = r.size.x
+	var h: float = r.size.y
+	var x0: float = r.position.x
+	var y0: float = r.position.y
+	var per: float = 2.0 * w + 2.0 * h
+	var d: float = fmod(dist, per)
+	if d < 0.0:
+		d += per
+	if d < w:
+		return Vector2(x0 + d, y0)
+	d -= w
+	if d < h:
+		return Vector2(x0 + w, y0 + d)
+	d -= w
+	if d < w:
+		return Vector2(x0 + w - d, y0 + h)
+	d -= h
+	return Vector2(x0, y0 + h - d)
+
+
+func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: float, side: float = 88.0) -> void:
+	"""Result 専用: 正方形・太枠・黒文字・枠上を移動する ●"""
+	var btn_w: float = side
+	var btn_h: float = side
+	var btn_id: String = text
+	set_btn_hover(btn_id)
+	var sc: float = get_btn_scale(btn_id)
+	if _btn_press_timers.has(btn_id) and _btn_press_timers[btn_id] >= 0.0:
+		var press_t: float = _ease_in_out_cubic(_btn_press_timers[btn_id])
+		alpha *= (1.0 - press_t)
+	var draw_w: float = btn_w * sc
+	var draw_h: float = btn_h * sc
+	if sc < 0.001 or alpha < 0.001:
+		return
+	var rect := Rect2(center.x - draw_w * 0.5, center.y - draw_h * 0.5, draw_w, draw_h)
+	const LINE_W: float = 2.0 * 3.0
+	_game.draw_rect(rect, Color(1.0, 0.99, 0.97, alpha))
+	_game.draw_rect(rect, Color(0.12, 0.12, 0.14, alpha), false, LINE_W)
+	var path_rect := Rect2(rect.position.x + LINE_W * 0.5, rect.position.y + LINE_W * 0.5, rect.size.x - LINE_W, rect.size.y - LINE_W)
+	var per: float = 2.0 * path_rect.size.x + 2.0 * path_rect.size.y
+	var t_sec: float = Time.get_ticks_msec() / 1000.0
+	var dist: float = fmod(t_sec * 88.0, per)
+	var dot_center: Vector2 = _results_rect_perimeter_point(path_rect, dist)
+	var dot_r: float = LINE_W
+	_game.draw_circle(dot_center, dot_r, Color(0.12, 0.12, 0.14, alpha))
+	var ascent: float = _game.font.get_ascent(fs)
+	var descent: float = _game.font.get_descent(fs)
+	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5
+	_game.draw_string(_game.font, Vector2(rect.position.x, baseline_y), text, HORIZONTAL_ALIGNMENT_CENTER, draw_w, fs, Color(0.2, 0.2, 0.22, alpha))
 
 
 func _draw_pause_overlay(vp: Vector2) -> void:
@@ -2454,5 +2738,3 @@ func _draw_bounding_box() -> void:
 	])
 	_game.draw_colored_polygon(diamond, anchor_fill)
 	_game.draw_polyline(PackedVector2Array([diamond[0], diamond[1], diamond[2], diamond[3], diamond[0]]), anchor_border, 3.0, true)
-
-

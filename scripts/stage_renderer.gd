@@ -345,10 +345,32 @@ func _draw_star_outline(center: Vector2, rotation: float, outer_r: float, inner_
 
 # --- ステージクリア画面用: 目標ガイドと実現図形を指定矩形内にスケールして重ねて描画 ---
 
+func _duplicate_vertex_loops(loops: Array) -> Array:
+	var out: Array = []
+	for loop in loops:
+		var loop_arr: Array = loop
+		var inner: Array[Vector2] = []
+		for v in loop_arr:
+			inner.append(v as Vector2)
+		out.append(inner)
+	return out
+
+
+## クリア直後に呼び、リザルト一覧用にガイド／プレイヤー輪郭をコピーして返す
+func capture_result_loops() -> Dictionary:
+	return {
+		"ideal": _duplicate_vertex_loops(_get_ideal_vertex_loops()),
+		"player": _duplicate_vertex_loops(_get_player_vertex_loops()),
+	}
+
+
 func draw_clear_shapes(rect: Rect2) -> void:
 	"""ステージクリア画面に目標ガイドと最終形を rect 内に収めて重ねて描画"""
-	var ideal_loops: Array = _get_ideal_vertex_loops()
-	var player_loops: Array = _get_player_vertex_loops()
+	draw_result_thumbnail(rect, _get_ideal_vertex_loops(), _get_player_vertex_loops())
+
+
+## 保存済みループを rect 内にスケールして重ね描き（リザルト一覧サムネイル用）
+func draw_result_thumbnail(rect: Rect2, ideal_loops: Array, player_loops: Array) -> void:
 	if ideal_loops.is_empty() and player_loops.is_empty():
 		return
 	var all: Array[Vector2] = []
@@ -371,13 +393,14 @@ func draw_clear_shapes(rect: Rect2) -> void:
 		size.x = 1.0
 	if size.y < 1.0:
 		size.y = 1.0
-	var margin: float = 20.0
+	var margin: float = 8.0
 	var avail_w: float = rect.size.x - margin * 2.0
 	var avail_h: float = rect.size.y - margin * 2.0
+	if avail_w < 1.0 or avail_h < 1.0:
+		return
 	var scale: float = minf(avail_w / size.x, avail_h / size.y)
 	var center_dst: Vector2 = rect.position + rect.size * 0.5
 
-	# 目標ガイド（下層）: 黒系ベース
 	var guide_color: Color = Color(0.35, 0.28, 0.35)
 	for loop in ideal_loops:
 		var verts: Array = loop
@@ -386,7 +409,6 @@ func draw_clear_shapes(rect: Rect2) -> void:
 			var b: Vector2 = (verts[(i + 1) % verts.size()] - center_src) * scale + center_dst
 			_game.draw_line(a, b, guide_color, 2.0, true)
 
-	# 実現図形（上層）: 赤系
 	var player_color: Color = Color(0.95, 0.19, 0.32)
 	for loop in player_loops:
 		var verts: Array = loop

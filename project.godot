@@ -22,7 +22,9 @@ config/windows_native_icon="res://kataicon256.ico"
 
 window/size/viewport_width=1920
 window/size/viewport_height=1080
-window/size/resizable=true
+window/size/resizable=false
+window/size/window_width_override=1280
+window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 
 [editor]
@@ -31,5 +33,4 @@ movie_writer/movie_file="D:/works/Godot/KATA-Draw/VIDEO/Test.avi"
 
 [internationalization]
 
-locale/translations=PackedStringArray("res://Resources/Translation/Translation.ja.translation", "res://Resources/Translation/Translation.en.translation", "res://Resources/Translation/Translation.zh_CN.translation", "res://Resources/Translation/Translation.zh_TW.translation")
 locale/locale_filter_mode=1
