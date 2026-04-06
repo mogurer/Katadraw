@@ -1807,13 +1807,13 @@ func _hit_cleared_button(pos: Vector2) -> bool:
 	var cx: float = vp.x / 2.0
 	var cy: float = vp.y / 2.0
 	var w: float = 850.0 * 1.2
-	var h: float = 520.0 * 1.2
+	var h: float = 650.0 * 1.2
 	var x: float = cx - w / 2.0
 	var y: float = cy - h / 2.0
 	var btn_w: float = w * 0.6
 	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
 	var btn_cx: float = x + w / 2.0
-	var btn_cy: float = y + h - btn_h / 2.0 - 24.0
+	var btn_cy: float = y + h - btn_h / 2.0 - 26.0
 	var rect := Rect2(btn_cx - btn_w / 2.0, btn_cy - btn_h / 2.0, btn_w, btn_h)
 	return rect.has_point(pos)
 

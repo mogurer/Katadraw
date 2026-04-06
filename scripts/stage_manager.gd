@@ -199,9 +199,13 @@ func _generate_two_circles(cfg: Dictionary, pts: Array[Vector2], vp: Vector2) ->
 	group_split = sizes[0]
 
 	var right_x: float = vp.x * GameConfig.UI_WIDTH_RATIO
-	var right_w: float = vp.x * 0.75
-	var center1 := Vector2(right_x + right_w * 0.35, vp.y * 0.35)
-	var center2 := Vector2(right_x + right_w * 0.65, vp.y * 0.65)
+	# プレイエリア中央を基準にセンタリング
+	var play_cx: float = right_x + (vp.x - right_x) * 0.5
+	var play_cy: float = vp.y * 0.5
+	# 現状の半間隔（right_w*0.15）に7.5px加算して両側合計+15px
+	var half_gap: float = vp.x * 0.75 * 0.15 + 7.5
+	var center1 := Vector2(play_cx - half_gap, play_cy)
+	var center2 := Vector2(play_cx + half_gap, play_cy)
 	guide_center_1 = center1
 	guide_center_2 = center2
 

@@ -64,7 +64,7 @@ HUD_HINT_MULTI_2,一括移動,move together,一起移动,一起移動
 HUD_HINT_BASIC_1,点をクリックしてドラッグ,Drag points by click,点击并拖拽点,點擊並拖曳點
 HUD_HINT_BASIC_2,空白クリックで選択解除,Click empty area to deselect,点击空白区域取消选择,點擊空白區域取消選擇
 CLEAR_TITLE,STAGE CLEAR!,STAGE CLEAR!,STAGE CLEAR!,STAGE CLEAR!
-CLEAR_TIME,所要時間: %.2f 秒,Time: %.2f s,用时: %.2f 秒,用時: %.2f 秒
+CLEAR_TIME,所要時間 : %.2f 秒,Time : %.2f s,用时 : %.2f 秒,用時 : %.2f 秒
 CLEAR_MOVE_COUNT,動かした回数：%d回,Moves: %d,移动次数：%d次,移動次數：%d次
 CLEAR_CIRC_SMOOTH,実現率: %.1f%%  滑らかさ: %.1f%%,Accuracy: %.1f%%  Smoothness: %.1f%%,准确率: %.1f%%  平滑度: %.1f%%,準確率: %.1f%%  平滑度: %.1f%%
 CLEAR_C1,円1  実現率: %.1f%%  滑: %.1f%%,C1 Accuracy: %.1f%%  Smooth: %.1f%%,圆1 准确率: %.1f%%  平滑: %.1f%%,圓1 準確率: %.1f%%  平滑: %.1f%%

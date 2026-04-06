@@ -2228,7 +2228,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var cx: float = vp.x / 2.0
 	var cy: float = vp.y / 2.0
 	var w: float = 850.0 * 1.2 * clear_scale
-	var h: float = 520.0 * 1.2 * clear_scale
+	var h: float = 650.0 * 1.2 * clear_scale
 	var x: float = cx - w / 2.0
 	var y: float = cy - h / 2.0
 
@@ -2236,7 +2236,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	# 白背景・太枠・統一シャドウ
 	var dlg_shadow := Vector2(15.0, 15.0)
 	_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(0.26, 0.21, 0.28, 0.25))
-	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0, 0.8))
+	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0, 1.0))
 	_game.draw_rect(dlg_rect, Color(0.26, 0.21, 0.28), false, 5.75)
 
 	var tx: float = x + 17
@@ -2246,19 +2246,19 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 
 	# 目標ガイドと実現図形の表示エリア
 	var btn_h_val: float = (_game.font.get_ascent(BTN_FONT_SIZE) + _game.font.get_descent(BTN_FONT_SIZE)) * 1.5
-	var bottom_pad: float = 24.0 + 50.0 + btn_h_val + 24.0
+	var bottom_pad: float = 55.0 + 100.0 + btn_h_val + 55.0
 	var shapes_top: float = y + 110
 	var shapes_bottom: float = y + h - bottom_pad
 	var shapes_h: float = shapes_bottom - shapes_top
 	var shapes_rect := Rect2(x + 24, shapes_top, w - 48, shapes_h)
 	_stage_renderer.draw_clear_shapes(shapes_rect)
 
-	# 所要時間・動かした回数・ボタンはポップアップ下部に配置
-	var time_y: float = y + h - 24.0 - btn_h_val - 50.0
+	# 所要時間・動かした回数：図形の下端から視覚ギャップ分だけ下に配置
+	var time_y: float = shapes_bottom + 30.0 + _game.font.get_ascent(37)
 	_draw_monospace_number(_game.font, Vector2(tx, time_y), tr("CLEAR_TIME") % _game.clear_time, HORIZONTAL_ALIGNMENT_CENTER, tw, 37, Color(0.26, 0.21, 0.28))
-	_game.draw_string(_game.font, Vector2(tx, time_y + 34.0), tr("CLEAR_MOVE_COUNT") % _game.stage_move_count, HORIZONTAL_ALIGNMENT_CENTER, tw, 30, Color(0.26, 0.21, 0.28))
+	_game.draw_string(_game.font, Vector2(tx, time_y + 48.0), tr("CLEAR_MOVE_COUNT") % _game.stage_move_count, HORIZONTAL_ALIGNMENT_CENTER, tw, 30, Color(0.26, 0.21, 0.28))
 
-	var btn_center := Vector2(x + w / 2.0, y + h - btn_h_val / 2.0 - 18.0)
+	var btn_center := Vector2(x + w / 2.0, y + h - btn_h_val / 2.0 - 26.0)
 	_draw_auto_button_with_shadow(btn_center, tr("BTN_NEXT"), BTN_FONT_SIZE, 1.0, false, w * 0.6)
 
 
@@ -2357,15 +2357,15 @@ func _compute_results_layout(vp: Vector2) -> Dictionary:
 	const RESULTS_MARGIN: float = 20.0
 	const TOP_Y: float = 32.0
 	const BLOCK_W_RATIO: float = 0.8
-	const GAP_GRID_TOTAL: float = 14.0
-	var sidebar_w: float = _compute_results_sidebar_width(vp)
+	const GAP_GRID_TOTAL: float = 24.0
+	var sidebar_w: float = _compute_results_sidebar_width(vp)  # サイドバー空間は保持（ロゴ描画のみ削除）
 	var content_x0: float = sidebar_w + RESULTS_MARGIN
 	var content_w: float = vp.x - content_x0 - RESULTS_MARGIN
 	var block_w: float = content_w * BLOCK_W_RATIO
 	var block_x: float = content_x0
 	var btn_res_h: float = 120.0
 	var next_s: float = 88.0
-	var grid_top: float = TOP_Y + _game.font_din.get_ascent(RESULT_SCREEN_TITLE_FS) + _game.font_din.get_descent(RESULT_SCREEN_TITLE_FS) + 28.0
+	var grid_top: float = TOP_Y + _game.font_din.get_ascent(RESULT_SCREEN_TITLE_FS) + _game.font_din.get_descent(RESULT_SCREEN_TITLE_FS) + 42.0
 	var bottom_reserve: float = btn_res_h + RESULTS_MARGIN * 2.0 + GAP_GRID_TOTAL
 	var grid_h: float = maxf(160.0, vp.y - grid_top - bottom_reserve)
 	var total_bar_y: float = grid_top + grid_h + GAP_GRID_TOTAL
@@ -2433,7 +2433,6 @@ func _draw_results(vp: Vector2) -> void:
 	var a: float = fade_ease
 
 	var lay: Dictionary = _compute_results_layout(vp)
-	var RESULTS_SIDEBAR_W: float = _compute_results_sidebar_width(vp)
 	var content_x0: float = lay["content_x0"]
 	var content_w: float = lay["content_w"]
 	var block_x: float = lay["block_x"]
@@ -2457,27 +2456,35 @@ func _draw_results(vp: Vector2) -> void:
 		c_blue_tint.b * 0.05 + c_beige_mix.b * 0.6 + c_white_mix.b * 0.35,
 		a
 	)
-	var c_total_label_bg: Color = Color(0.42, 0.35, 0.58, a)
+	var c_total_label_bg: Color = Color(0.26, 0.21, 0.28, a)  # システム基本色（濃いグレー）
 
-	_game.draw_rect(Rect2(0, 0, RESULTS_SIDEBAR_W, vp.y), c_sidebar_bg)
-	_draw_results_sidebar_logo(vp, RESULTS_SIDEBAR_W, a)
-
+	# コンテンツ全体を80%に縮小し、画面中央に配置
+	const CONTENT_SCALE: float = 0.8
 	var top_y: float = 32.0
+	var layout_cx: float = block_x + block_w * 0.5
+	var layout_cy: float = top_y + (total_bar_y + btn_res_h - top_y) * 0.5
+	var offset_x: float = vp.x * 0.5 - layout_cx * CONTENT_SCALE
+	var offset_y: float = vp.y * 0.5 - layout_cy * CONTENT_SCALE - 20.0
+	_game.draw_set_transform(Vector2(offset_x, offset_y), 0.0, Vector2(CONTENT_SCALE, CONTENT_SCALE))
 	var title_fs: int = RESULT_SCREEN_TITLE_FS
 	_draw_results_title_justified(block_x, top_y, block_w, title_fs, c_red)
+
+	# タイトル行はそのまま、グリッド以下を10px上に移動
+	grid_top -= 10.0
+	total_bar_y -= 10.0
 
 	var n_stages: int = _game.stage_times.size()
 	var row_h: float = grid_h / 5.0
 	var col_gap: float = 14.0
 	var col_w: float = (block_w - col_gap) * 0.5
-	const GRID_BORDER_W: float = 1.75 * 3.0
+	const GRID_BORDER_W: float = 5.75
 	const CELL_BORDER_W: float = 1.25 * 3.0
 	var stat_fs: int = mini(76, maxi(24, int(19 * 4)))
 	stat_fs = mini(stat_fs, int(row_h * 0.42))
 	stat_fs = maxi(1, int(round(float(stat_fs) * 0.9 * 0.82)))
 	var grid_frame := Rect2(block_x, grid_top, block_w, grid_h)
 	_game.draw_rect(grid_frame, Color(1.0, 1.0, 1.0, 0.97 * a))
-	_game.draw_rect(grid_frame, Color(0.12, 0.1, 0.14, 0.55 * a), false, GRID_BORDER_W)
+	_game.draw_rect(grid_frame, Color(0.26, 0.21, 0.28, a), false, GRID_BORDER_W)
 
 	for row in range(5):
 		for col in range(2):
@@ -2521,17 +2528,17 @@ func _draw_results(vp: Vector2) -> void:
 			_game.draw_string(_game.font, Vector2(mid_x, row_baseline), time_str, HORIZONTAL_ALIGNMENT_CENTER, mid_col_w, fs_cell, c_text)
 			_game.draw_string(_game.font, Vector2(right_x, row_baseline), move_str, HORIZONTAL_ALIGNMENT_CENTER, right_col_w, fs_cell, c_text)
 
-	const TOTAL_BORDER_W: float = 2.0 * 3.0
+	const TOTAL_BORDER_W: float = 5.75
 	var total_bar_rect := Rect2(block_x, total_bar_y, block_w, btn_res_h)
 	_game.draw_rect(total_bar_rect, Color(1.0, 1.0, 1.0, 0.96 * a))
-	_game.draw_rect(total_bar_rect, Color(0.26, 0.21, 0.28, 0.35 * a), false, TOTAL_BORDER_W)
+	_game.draw_rect(total_bar_rect, Color(0.26, 0.21, 0.28, a), false, TOTAL_BORDER_W)
 	var total_label_w: float = minf(160.0 * 2.0, block_w * 0.22 * 2.0)
 	total_label_w = minf(total_label_w, block_w * 0.48 - 8.0)
 	var tl_rect := Rect2(total_bar_rect.position, Vector2(total_label_w, btn_res_h))
 	_game.draw_rect(tl_rect, c_total_label_bg)
 	var total_lbl_fs: int = RESULT_TOTAL_LABEL_FS
-	var total_lbl_y: float = tl_rect.position.y + (btn_res_h + _game.font_bold.get_ascent(total_lbl_fs) - _game.font_bold.get_descent(total_lbl_fs)) * 0.5
-	_game.draw_string(_game.font_bold, Vector2(tl_rect.position.x, total_lbl_y), tr("RESULT_TOTAL"), HORIZONTAL_ALIGNMENT_CENTER, total_label_w, total_lbl_fs, Color(1.0, 1.0, 1.0, a))
+	var total_lbl_y: float = tl_rect.position.y + (btn_res_h + _game.font_din.get_ascent(total_lbl_fs) - _game.font_din.get_descent(total_lbl_fs)) * 0.5 - 5.0
+	_game.draw_string(_game.font_din, Vector2(tl_rect.position.x, total_lbl_y), tr("RESULT_TOTAL"), HORIZONTAL_ALIGNMENT_CENTER, total_label_w, total_lbl_fs, Color(1.0, 1.0, 1.0, a))
 
 	var total_time: float = 0.0
 	for t in _game.stage_times:
@@ -2552,6 +2559,8 @@ func _draw_results(vp: Vector2) -> void:
 	_game.draw_string(_game.font, Vector2(tot_area_x, bl_tot), tot_time_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_tim, c_red)
 	_game.draw_string(_game.font, Vector2(tot_area_x + half_val, bl_tot), tot_move_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_mov, c_red)
 
+	# 80%スケールここまで。NEXTボタンはスケール外で描画
+	_game.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	_draw_results_next_button(Vector2(next_cx, next_cy), tr("RESULT_BTN_NEXT"), 26, a, next_s)
 
 
