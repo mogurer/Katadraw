@@ -297,6 +297,10 @@ var logo_texture: Texture2D
 var title_logo_texture: Texture2D
 var title_logo02_texture: Texture2D
 var result_logo_texture: Texture2D
+var result_icon01_off_texture: Texture2D
+var result_icon01_on_texture: Texture2D
+var result_icon02_off_texture: Texture2D
+var result_icon02_on_texture: Texture2D
 var bg_texture: Texture2D
 var logo_start_time: float = 0.0
 var title_start_time: float = 0.0
@@ -360,6 +364,10 @@ func _ready() -> void:
 	title_logo_texture = _load_texture("res://assets/UI/kata-draw_logo.png")
 	title_logo02_texture = _load_texture("res://assets/UI/kata-draw_logo02.png")
 	result_logo_texture = _load_texture("res://assets/UI/kata-draw_Resultlogo.png")
+	result_icon01_off_texture = _load_texture("res://assets/UI/result_icon01_off.png")
+	result_icon01_on_texture  = _load_texture("res://assets/UI/result_icon01_on.png")
+	result_icon02_off_texture = _load_texture("res://assets/UI/result_icon02_off.png")
+	result_icon02_on_texture  = _load_texture("res://assets/UI/result_icon02_on.png")
 	bg_texture = _load_texture("res://assets/UI/kata-draw_bg.png")
 	_setup_game_cursor()
 	get_window().size_changed.connect(_on_window_size_changed)
