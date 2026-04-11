@@ -15,8 +15,8 @@ run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.6")
 boot_splash/bg_color=Color(1, 1, 1, 1)
 boot_splash/show_image=false
-config/icon="res://icon.svg"
-config/windows_native_icon="res://kataicon256.ico"
+config/icon="res://assets/icons/icon.svg"
+config/windows_native_icon="res://assets/icons/kataicon256.ico"
 
 [display]
 
