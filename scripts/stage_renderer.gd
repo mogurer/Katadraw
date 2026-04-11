@@ -220,6 +220,9 @@ func draw_hint_shape(alpha: float) -> void:
 
 
 func get_type_description() -> String:
+	var gtl: String = str(_game.stage_effective_cfg.get("guide_type_label", "")).strip_edges()
+	if gtl != "":
+		return gtl
 	match _game.stage_type:
 		"triangle":
 			return _game.tr("GUIDE_TYPE_TRIANGLE")

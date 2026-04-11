@@ -833,9 +833,9 @@ func _draw_stage_debug(vp: Vector2) -> void:
 					drew_preview = true
 		if not drew_preview:
 			_draw_stage_debug_type_icon(Vector2(icx, icy), icon_r, tname, accent if sel else text_c)
-	# ボタン（テスト・保存・図形編集・設定リセット | 右上 全リセット・戻る）
+	# ボタン（テスト・保存・図形編集・設定リセット・フォルダを開く | 右上 全リセット・戻る）
 	var rects: Array[Rect2] = _game._stage_debug_button_rects(vp)
-	var bl: Array[String] = ["テスト", "保存", "図形編集", "設定リセット", "全リセット", "戻る"]
+	var bl: Array[String] = ["テスト", "保存", "図形編集", "設定リセット", "フォルダを開く", "全リセット", "戻る"]
 	for bi in range(rects.size()):
 		var r: Rect2 = rects[bi]
 		_game.draw_rect(r, Color(0.95, 0.19, 0.32, 0.18))

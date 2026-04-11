@@ -31,6 +31,8 @@ const RULES_DEMO_POINTS := 7
 # --- Game State ---
 var current_stage: int = 0
 var stage_type: String = "circle"
+## StageDebugOverrides マージ後の現在ステージ設定（guide_type_label など）
+var stage_effective_cfg: Dictionary = {}
 var shape_center: Vector2
 var point_positions: Array[Vector2] = []
 var hovered_index: int = -1
@@ -665,6 +667,13 @@ func _is_move_grab_active_for_count() -> bool:
 func _reset_stage_move_track_internal() -> void:
 	_move_grab_was_active = false
 	_move_count_track_valid = false
+
+
+func _finalize_move_count() -> void:
+	"""クリア確定前に呼ぶ。つかみ中に動いていた場合、その1回を加算してフラグをリセットする"""
+	if _move_count_track_valid:
+		stage_move_count += 1
+		_move_count_track_valid = false
 	_move_count_accum = 0.0
 
 
@@ -681,19 +690,9 @@ func _on_input_points_changed() -> void:
 	if game_state == "rules":
 		queue_redraw()
 		return
-	# プレイ中かつつかみ中のみ、選択重心の移動距離を閾値で「動かした回数」に加算
+	# プレイ中かつつかみ中のみ、「動いた」フラグを立てる（カウントは離した時点で行う）
 	if game_state == "playing" and _is_move_grab_active_for_count() and selected_indices.size() > 0:
-		if not _move_count_track_valid:
-			_move_count_track_prev_centroid = _selection_centroid()
-			_move_count_track_valid = true
-		else:
-			var c: Vector2 = _selection_centroid()
-			var leg: float = c.distance_to(_move_count_track_prev_centroid)
-			_move_count_track_prev_centroid = c
-			_move_count_accum += leg
-			while _move_count_accum >= STAGE_MOVE_COUNT_PIXEL_THRESHOLD:
-				stage_move_count += 1
-				_move_count_accum -= STAGE_MOVE_COUNT_PIXEL_THRESHOLD
+		_move_count_track_valid = true
 	_calculate_metrics()
 	_check_clear()
 
@@ -736,6 +735,7 @@ func _sync_stage_vars() -> void:
 	ideal_display_radius = stage_manager.ideal_display_radius
 	ideal_display_radius_2 = stage_manager.ideal_display_radius_2
 	guide_follows_player_radius = stage_manager.guide_follows_player_radius
+	stage_effective_cfg = StageDebugOverrides.build_config_for_index(current_stage)
 
 
 func _start_stage(idx: int) -> void:
@@ -807,6 +807,7 @@ func _check_clear() -> void:
 			_stop_sfx_move()
 			clear_time = Time.get_ticks_msec() / 1000.0 - start_time
 			stage_times.append(clear_time)
+			_finalize_move_count()
 			stage_move_counts.append(stage_move_count)
 			_append_stage_result_snapshot()
 			ui_renderer.clear_spore_particles()
@@ -822,6 +823,7 @@ func _check_clear() -> void:
 		_stop_sfx_move()
 		clear_time = Time.get_ticks_msec() / 1000.0 - start_time
 		stage_times.append(clear_time)
+		_finalize_move_count()
 		stage_move_counts.append(stage_move_count)
 		_append_stage_result_snapshot()
 		ui_renderer.clear_spore_particles()
@@ -842,6 +844,7 @@ func _force_clear_for_debug() -> void:
 	_stop_sfx_move()
 	clear_time = Time.get_ticks_msec() / 1000.0 - start_time
 	stage_times.append(clear_time)
+	_finalize_move_count()
 	stage_move_counts.append(stage_move_count)
 	_append_stage_result_snapshot()
 	ui_renderer.clear_spore_particles()
@@ -2550,11 +2553,12 @@ func _stage_debug_button_rects(vp: Vector2) -> Array[Rect2]:
 	var y_top: float = STAGE_DEBUG_TOP_BTN_Y
 	var out: Array[Rect2] = []
 	var right_w: float = vp.x - split - 24.0
-	var bw4: float = minf(100.0, (right_w - 3.0 * gap) / 4.0)
-	bw4 = maxf(48.0, bw4)
+	var n_action: int = 5
+	var bw_act: float = minf(100.0, (right_w - float(n_action - 1) * gap) / float(n_action))
+	bw_act = maxf(40.0, bw_act)
 	var rx: float = split + 12.0
-	for k in range(4):
-		out.append(Rect2(rx + float(k) * (bw4 + gap), y_actions, bw4, bh))
+	for k in range(n_action):
+		out.append(Rect2(rx + float(k) * (bw_act + gap), y_actions, bw_act, bh))
 	var tw: float = minf(96.0, (vp.x - split - 48.0) / 2.0 - gap * 0.5)
 	tw = maxf(72.0, tw)
 	var tr_x: float = vp.x - 12.0 - 2.0 * tw - gap
@@ -3619,8 +3623,10 @@ func _input_stage_debug(event: InputEvent) -> void:
 					3:
 						_stage_debug_reset_selected_row()
 					4:
-						_stage_debug_reset_all_files()
+						_stage_debug_open_saved_stages_folder()
 					5:
+						_stage_debug_reset_all_files()
+					6:
 						stage_debug_field_focus_idx = -1
 						_stage_debug_sync_ime_for_field_focus()
 						game_state = "title"
@@ -3852,11 +3858,25 @@ func _stage_debug_reset_all_files() -> void:
 	queue_redraw()
 
 
+func _stage_debug_open_saved_stages_folder() -> void:
+	CustomStageFile.ensure_custom_stage_dir()
+	var abs_path: String = ProjectSettings.globalize_path(CustomStageFile.CUSTOM_STAGE_DIR)
+	var err: Error = OS.shell_open(abs_path)
+	if err != OK:
+		stage_debug_last_error = "フォルダを開けませんでした: %s（%d）" % [abs_path, err]
+	else:
+		stage_debug_last_error = ""
+	queue_redraw()
+
+
 func _stage_debug_list_row_label(row: int) -> String:
 	if row < 0 or row >= _stage_debug_total_rows():
 		return "?"
 	if row < _stage_debug_master_count():
 		var cfg: Dictionary = StageDebugOverrides.build_config_for_index(row, stage_debug_pending.get(row, {}))
+		var gtl: String = str(cfg.get("guide_type_label", "")).strip_edges()
+		if gtl != "":
+			return gtl
 		return str(cfg.get("type", "?"))
 	var path: String = _stage_debug_custom_path_at(row)
 	var fn: String = path.get_file().get_basename()
@@ -3916,10 +3936,12 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	_process_pad(delta)
-	# つかみ終了時に移動距離の累積リセット（次のつかみで基準を取り直す）
+	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":
 		var cur_move_grab: bool = _is_move_grab_active_for_count()
 		if _move_grab_was_active and not cur_move_grab:
+			if _move_count_track_valid:
+				stage_move_count += 1
 			_move_count_track_valid = false
 			_move_count_accum = 0.0
 		_move_grab_was_active = cur_move_grab
