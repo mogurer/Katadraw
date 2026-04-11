@@ -302,6 +302,7 @@ var result_icon01_on_texture: Texture2D
 var result_icon02_off_texture: Texture2D
 var result_icon02_on_texture: Texture2D
 var bg_texture: Texture2D
+var _screenshot_folder_opened: bool = false  # リザルト画面中にフォルダを開いたか
 var logo_start_time: float = 0.0
 var title_start_time: float = 0.0
 
@@ -1185,6 +1186,9 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "results":
+		if event is InputEventMouseMotion:
+			ui_renderer.update_result_mouse_pos(event.position)
+			queue_redraw()
 		var is_start_pad: bool = (
 			event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START
 		)
@@ -1202,6 +1206,10 @@ func _input(event: InputEvent) -> void:
 				queue_redraw()
 			)
 			queue_redraw()
+		elif is_confirm_click and _hit_results_camera_button(event.position):
+			_take_screenshot()
+		elif is_confirm_click and _hit_results_twitter_button(event.position):
+			_open_twitter_post()
 		return
 
 	if game_state == "cleared":
@@ -1831,6 +1839,55 @@ func _hit_results_button(pos: Vector2) -> bool:
 	return ui_renderer.get_results_next_button_rect(vp).has_point(pos)
 
 
+func _hit_results_camera_button(pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	return ui_renderer.get_results_camera_button_rect(vp).has_point(pos)
+
+
+func _hit_results_twitter_button(pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	return ui_renderer.get_results_twitter_button_rect(vp).has_point(pos)
+
+
+func _open_twitter_post() -> void:
+	# Twitter.txt の文面を読み込む
+	const TWITTER_TEXT_PATH: String = "C:/Users/krtek/OneDrive/ドキュメント/GitHub/Katadraw/Resources/Text/Twitter.txt"
+	var tweet_text: String = ""
+	var f: FileAccess = FileAccess.open(TWITTER_TEXT_PATH, FileAccess.READ)
+	if f:
+		tweet_text = f.get_as_text().strip_edges()
+		f.close()
+
+	# URL エンコードして Twitter 投稿フォームを開く
+	var encoded: String = tweet_text.uri_encode()
+	OS.shell_open("https://twitter.com/intent/tweet?text=" + encoded)
+
+
+func _take_screenshot() -> void:
+	_play_sfx(sfx_catch)
+	var img: Image = get_viewport().get_texture().get_image()
+
+	# 保存先フォルダ: Pictures/KATA-DRAW/
+	var pictures_dir: String = OS.get_system_dir(OS.SYSTEM_DIR_PICTURES)
+	var save_dir: String = pictures_dir + "/KATA-DRAW"
+	if not DirAccess.dir_exists_absolute(save_dir):
+		DirAccess.make_dir_absolute(save_dir)
+
+	# ファイル名: KATADRAW_YYYYMMDD_HHMMSS.png
+	var dt: Dictionary = Time.get_datetime_dict_from_system()
+	var filename: String = "KATADRAW_%04d%02d%02d_%02d%02d%02d.png" % [
+		dt["year"], dt["month"], dt["day"],
+		dt["hour"], dt["minute"], dt["second"]
+	]
+	var save_path: String = save_dir + "/" + filename
+	img.save_png(save_path)
+
+	# フォルダを開く（初回のみ）
+	if not _screenshot_folder_opened:
+		OS.shell_open(save_dir)
+		_screenshot_folder_opened = true
+
+
 func _hit_menu_item(pos: Vector2) -> int:
 	var vp: Vector2 = get_viewport_rect().size
 	var menu_count: int = 3
@@ -2142,6 +2199,7 @@ func _enter_results_screen_debug() -> void:
 
 
 func _return_to_title_or_stage_debug_from_test() -> void:
+	_screenshot_folder_opened = false
 	var back_to_stage_debug: bool = debug_stage_test_mode and _debug_tools_enabled()
 	debug_stage_test_mode = false
 	debug_stage_test_meta_stage_name = ""

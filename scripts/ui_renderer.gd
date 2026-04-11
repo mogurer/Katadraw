@@ -107,6 +107,8 @@ var _transition_dir: int = 0          # 0=なし, 1=フェードイン, -1=フ�
 var _transition_speed: float = 4.0    # 1/秒（0.25秒で完了）
 var _pending_state: String = ""       # フェードアウト完了後に切り替えるステート
 
+var _result_mouse_pos: Vector2 = Vector2(-1.0, -1.0)  # リザルト画面のマウス座標
+
 var _btn_hover_scales: Dictionary = {}  # ボタンID → 現在のスケール（1.0〜1.05）
 var _btn_hover_shadows: Dictionary = {} # ボタンID → 現在のシャドウ追加量
 var _btn_hover_targets: Dictionary = {} # ボタンID → スケールの目標値（ホバー中は1.05）
@@ -251,6 +253,9 @@ func update_animations(delta: float) -> void:
 	# フレーム終了時にホバーフラグをリセット（次フレームの set_btn_hover で再設定される）
 	for key in _btn_hover_active.keys():
 		_btn_hover_active[key] = false
+
+func update_result_mouse_pos(pos: Vector2) -> void:
+	_result_mouse_pos = pos
 
 func set_btn_hover(btn_id: String) -> void:
 	"""ボタンがホバー/選択状態であることを通知（毎フレーム _draw 内から呼ばれる）"""
@@ -2378,6 +2383,31 @@ func get_results_next_button_rect(vp: Vector2) -> Rect2:
 	return Rect2(cx - NEXT_BTN_S * 0.5, cy - NEXT_BTN_S * 0.5, NEXT_BTN_S, NEXT_BTN_S)
 
 
+func get_results_camera_button_rect(vp: Vector2) -> Rect2:
+	# _draw_results() 内のカメラボタン描画と同じ座標計算
+	const NEXT_BTN_S: float = 128.0
+	const IG_GAP: float = 120.0
+	var ig_size: float = 88.0  # next_s と同値
+	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
+	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
+	var tw_cx: float = next_cx_new - ig_size - IG_GAP
+	var cam_cx: float = tw_cx - ig_size - IG_GAP
+	var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
+	return Rect2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5, icon_draw_size, icon_draw_size)
+
+
+func get_results_twitter_button_rect(vp: Vector2) -> Rect2:
+	# _draw_results() 内のTwitterボタン描画と同じ座標計算
+	const NEXT_BTN_S: float = 128.0
+	const IG_GAP: float = 120.0
+	var ig_size: float = 88.0
+	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
+	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
+	var tw_cx: float = next_cx_new - ig_size - IG_GAP
+	var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
+	return Rect2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5, icon_draw_size, icon_draw_size)
+
+
 func _draw_results_title_justified(block_x: float, top_y: float, span_w: float, fs: int, color: Color, spacing_ratio: float = 1.0) -> void:
 	"""メイングリッド左端〜右端に RESULT_TITLE を字間均等で収める（カーニング込みの累進幅で字送り）"""
 	var font: Font = _game.font_din
@@ -2631,8 +2661,9 @@ func _draw_results(vp: Vector2) -> void:
 
 
 func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float) -> void:
-	"""カメラアイコンボタン: result_icon01_off.png を使用"""
-	var tex: Texture2D = _game.result_icon01_off_texture
+	"""カメラアイコンボタン: ホバー中は result_icon01_on.png、通常は result_icon01_off.png"""
+	var hovered: bool = Rect2(pos, Vector2(size, size)).has_point(_result_mouse_pos)
+	var tex: Texture2D = _game.result_icon01_on_texture if hovered else _game.result_icon01_off_texture
 	if tex:
 		_game.draw_texture_rect(tex, Rect2(pos, Vector2(size, size)), false, Color(1, 1, 1, alpha))
 	else:
@@ -2641,8 +2672,9 @@ func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float) -> void:
 
 
 func _draw_result_twitter_btn(pos: Vector2, size: float, alpha: float) -> void:
-	"""Twitterアイコンボタン: result_icon02_off.png を使用"""
-	var tex: Texture2D = _game.result_icon02_off_texture
+	"""Twitterアイコンボタン: ホバー中は result_icon02_on.png、通常は result_icon02_off.png"""
+	var hovered: bool = Rect2(pos, Vector2(size, size)).has_point(_result_mouse_pos)
+	var tex: Texture2D = _game.result_icon02_on_texture if hovered else _game.result_icon02_off_texture
 	if tex:
 		_game.draw_texture_rect(tex, Rect2(pos, Vector2(size, size)), false, Color(1, 1, 1, alpha))
 	else:
@@ -2673,7 +2705,7 @@ func _results_rect_perimeter_point(r: Rect2, dist: float) -> Vector2:
 
 
 func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: float, side: float = 88.0) -> void:
-	"""Result 専用: 正方形・太枠・黒文字・枠上を移動する ●"""
+	"""Result 専用: 正方形・太枠・黒文字・枠上を移動する ●。ホバー時は白黒反転"""
 	var btn_w: float = side
 	var btn_h: float = side
 	var btn_id: String = text
@@ -2687,20 +2719,24 @@ func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: fl
 	if sc < 0.001 or alpha < 0.001:
 		return
 	var rect := Rect2(center.x - draw_w * 0.5, center.y - draw_h * 0.5, draw_w, draw_h)
+	var hovered: bool = rect.has_point(_result_mouse_pos)
+	var c_fill: Color  = Color(0.12, 0.12, 0.14, alpha) if hovered else Color(1.0, 0.99, 0.97, alpha)
+	var c_dark: Color  = Color(1.0, 0.99, 0.97, alpha)  if hovered else Color(0.12, 0.12, 0.14, alpha)
+	var c_text: Color  = Color(1.0, 1.0,  1.0,  alpha)  if hovered else Color(0.2,  0.2,  0.22, alpha)
 	const LINE_W: float = 2.0 * 3.0
-	_game.draw_rect(rect, Color(1.0, 0.99, 0.97, alpha))
-	_game.draw_rect(rect, Color(0.12, 0.12, 0.14, alpha), false, LINE_W)
+	_game.draw_rect(rect, c_fill)
+	_game.draw_rect(rect, c_dark, false, LINE_W)
 	# 枠線は rect の辺を中心に描かれるため、● の中心も同じ周辺（rect の周長）上に乗せる
 	var per: float = 2.0 * rect.size.x + 2.0 * rect.size.y
 	var t_sec: float = Time.get_ticks_msec() / 1000.0
 	var dist: float = fmod(t_sec * 88.0, per)
 	var dot_center: Vector2 = _results_rect_perimeter_point(rect, dist)
 	var dot_r: float = LINE_W * 2.0
-	_game.draw_circle(dot_center, dot_r, Color(0.12, 0.12, 0.14, alpha))
+	_game.draw_circle(dot_center, dot_r, c_dark)
 	var ascent: float = _game.font_bold.get_ascent(fs)
 	var descent: float = _game.font_bold.get_descent(fs)
 	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5
-	_game.draw_string(_game.font_bold, Vector2(rect.position.x, baseline_y), text, HORIZONTAL_ALIGNMENT_CENTER, draw_w, fs, Color(0.2, 0.2, 0.22, alpha))
+	_game.draw_string(_game.font_bold, Vector2(rect.position.x, baseline_y), text, HORIZONTAL_ALIGNMENT_CENTER, draw_w, fs, c_text)
 
 
 func _draw_pause_overlay(vp: Vector2) -> void:
