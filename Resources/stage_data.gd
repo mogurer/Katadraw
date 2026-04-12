@@ -10,8 +10,10 @@ class_name StageData
 
 const _StageConfigScript = preload("res://Resources/stage_config.gd")
 const MBUS_STAGE_JSON := "res://Resources/Stagedata/mbus.json"
+const MUG_STAGE_JSON := "res://Resources/Stagedata/mug.json"
 
 static var _mbus_master_row: Dictionary = {}
+static var _mug_master_row: Dictionary = {}
 
 ## Resources/Stagedata/mbus.json をマスタ1行分に変換（キャッシュ）
 static func _mbus_row() -> Dictionary:
@@ -36,6 +38,29 @@ static func _mbus_row() -> Dictionary:
 	return _mbus_master_row.duplicate(true)
 
 
+## Resources/Stagedata/mug.json をマスタ1行分に変換（キャッシュ）
+static func _mug_row() -> Dictionary:
+	if not _mug_master_row.is_empty():
+		return _mug_master_row.duplicate(true)
+	var pr: Dictionary = CustomStageFile.parse_file(MUG_STAGE_JSON)
+	if not pr.get("ok", false):
+		push_error("StageData: mug.json を読めません: %s" % str(pr.get("error", "")))
+		_mug_master_row = _StageConfigScript.merge_config({"type": "fish", "num_points": 12, "min_radius": 200.0, "max_radius": 400.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 99.0, "guide_follows_player_radius": 0})
+		_mug_master_row["guide_type_label"] = "マグカップ"
+		return _mug_master_row.duplicate(true)
+	var raw: Dictionary = pr["raw"] as Dictionary
+	var play_err: String = CustomStageFile.validate_for_play(raw)
+	if play_err != "":
+		push_error("StageData: mug.json が無効です: %s" % play_err)
+		_mug_master_row = _StageConfigScript.merge_config({"type": "fish", "num_points": 12, "min_radius": 200.0, "max_radius": 400.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 99.0, "guide_follows_player_radius": 0})
+		_mug_master_row["guide_type_label"] = "マグカップ"
+		return _mug_master_row.duplicate(true)
+	var cfg: Dictionary = CustomStageFile.effective_config_with_shape(raw)
+	cfg["guide_type_label"] = "マグカップ"
+	_mug_master_row = cfg
+	return _mug_master_row.duplicate(true)
+
+
 static func get_stages() -> Array:
 	var overrides_list: Array = [
 		# チュートリアル: 正三角形（3頂点）
@@ -52,6 +77,8 @@ static func get_stages() -> Array:
 		{"type": "fish", "num_points": 7, "min_radius": 320.0, "max_radius": 560.0, "variance": 0.30, "display_rate_min_pct": 82.0, "clear_pct": 99.0},
 		# テスト: ねこの顔（16～20点）
 		{"type": "cat_face", "num_points": 18, "min_radius": 160.0, "max_radius": 280.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.2},
+		# マグカップ（Stagedata/mug.json）
+		_mug_row(),
 		# heptagram_silhouette: 七芒星シルエット 
 		{"type": "heptagram_silhouette", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.0},
 		# heptagram: 七芒星

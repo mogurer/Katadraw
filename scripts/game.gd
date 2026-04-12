@@ -344,7 +344,8 @@ var sfx_motion: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 
 # --- Debug ---
-var debug_mode: bool = true  # デバッグ用: ヒントガイドを常時表示。false で [K] on title でトグル
+## プレイ中のヒント表示など（コード上で固定。タイトルではタイトルBGMを鳴らさない用途にも使用）
+var debug_mode: bool = true
 
 
 func _ready() -> void:
@@ -587,6 +588,15 @@ func _play_bgm(player: AudioStreamPlayer) -> void:
 func _stop_bgm(player: AudioStreamPlayer) -> void:
 	if player and player.playing:
 		player.stop()
+
+
+## debug_mode が true のときはタイトルBGMを鳴らさない（STAGE DEBUG から戻ったときも同様）。
+func _apply_title_bgm_for_debug_mode() -> void:
+	if debug_mode:
+		_stop_bgm(bgm_title)
+	else:
+		_play_bgm(bgm_title)
+
 
 func _play_sfx(player: AudioStreamPlayer) -> void:
 	if player and player.stream:
@@ -1150,10 +1160,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "title":
-		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_K:
-			debug_mode = not debug_mode
-			queue_redraw()
-		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
 			_enter_stage_debug_screen()
 		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
 			_enter_results_screen_debug()
@@ -2238,10 +2245,14 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		game_state = "title"
 	preferred_input_method = ""
 	title_start_time = Time.get_ticks_msec() / 1000.0
-	_play_bgm(bgm_title)
+	if back_to_stage_debug:
+		_stop_bgm(bgm_title)
+	else:
+		_apply_title_bgm_for_debug_mode()
 
 
 func _enter_stage_debug_screen() -> void:
+	_stop_bgm(bgm_title)
 	_refresh_stage_debug_custom_paths()
 	stage_debug_scroll = 0.0
 	stage_debug_scroll_vel = 0.0
@@ -3652,6 +3663,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 		stage_debug_field_focus_idx = -1
 		_stage_debug_sync_ime_for_field_focus()
 		game_state = "title"
+		_apply_title_bgm_for_debug_mode()
 		queue_redraw()
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
@@ -3766,6 +3778,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 						stage_debug_field_focus_idx = -1
 						_stage_debug_sync_ime_for_field_focus()
 						game_state = "title"
+						_apply_title_bgm_for_debug_mode()
 				queue_redraw()
 				return
 		if _stage_debug_is_custom_row(stage_debug_selected):
@@ -4104,13 +4117,13 @@ func _process(delta: float) -> void:
 			ui_renderer.suppress_hover_sfx(1.0)
 			game_state = "title"
 			title_start_time = Time.get_ticks_msec() / 1000.0
-			_play_bgm(bgm_title)
+			_apply_title_bgm_for_debug_mode()
 			_play_sfx(sfx_stageclear)
 		elif ui_renderer.is_title_intro_done():
 			ui_renderer.suppress_hover_sfx(1.0)
 			game_state = "title"
 			title_start_time = Time.get_ticks_msec() / 1000.0
-			_play_bgm(bgm_title)
+			_apply_title_bgm_for_debug_mode()
 			_play_sfx(sfx_stageclear)
 		queue_redraw()
 		return
