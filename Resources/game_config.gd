@@ -21,6 +21,10 @@ static func get_stage_count() -> int:
 # --- レイアウト ---
 # 左側UIパネルの幅（画面幅に対する比率 0.0〜1.0）。0=パネルなし
 const UI_WIDTH_RATIO := 0.0
+# Playing guide: margin on each side of playfield; shape fits in inner (1-2*M) box, centered.
+const HUD_GUIDE_MARGIN_FRAC := 0.15
+# Guide drawn as fixed HUD; scoring uses the same on-screen outline (world px).
+const USE_SCREEN_HUD_GUIDE := true
 
 # --- ヒント ---
 const HINT_TIMES := [60.0, 90.0]

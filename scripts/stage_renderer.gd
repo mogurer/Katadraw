@@ -134,6 +134,36 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 			_draw_ring(center + offset1, r_scaled, col, width)
 
 
+## Playing: fixed HUD outline. Uses the same `hud_guide_outline_world` data as scoring.
+func draw_hud_overlay_guide(alpha: float) -> void:
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return
+	var sm = _game.stage_manager
+	var width: float = 3.5
+	match _game.stage_type:
+		"two_circles":
+			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
+			_draw_ring(sm.hud_two_circle_c1, sm.hud_two_circle_r, col, width)
+			_draw_ring(sm.hud_two_circle_c2, sm.hud_two_circle_r, col2, width)
+		"star", "heptagram", "heptagram_silhouette":
+			var col_s := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
+			_draw_hud_polyline_world(sm.hud_guide_outline_world, col_s, width)
+		_:
+			var col_g := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
+
+
+func _draw_hud_polyline_world(verts: Array, color: Color, width: float) -> void:
+	if verts.size() < 2:
+		return
+	var n: int = verts.size()
+	for i in range(n):
+		var a: Vector2 = verts[i] as Vector2
+		var b: Vector2 = verts[(i + 1) % n] as Vector2
+		_game.draw_line(a, b, color, width, true)
+
+
 func get_object_count() -> int:
 	"""このステージのオブジェクト数を返す"""
 	match _game.stage_type:
@@ -186,6 +216,37 @@ func draw_guide_shape_side_by_side(center: Vector2, available_w: float, availabl
 			var desired_r: float = minf(available_w, available_h) * ratio / 2.0
 			var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
 			draw_guide_shape_at(center, alpha, width_scale, sc)
+
+
+func draw_guide_shape_fit_max(center: Vector2, available_w: float, available_h: float, alpha: float, width_scale: float = 1.0) -> void:
+	"""指定枠いっぱいまで使って最大限フィットさせて描画"""
+	var width: float = 3.5 * width_scale
+	var obj_count: int = get_object_count()
+
+	if obj_count <= 1:
+		var desired_r: float = minf(available_w, available_h) / 2.0
+		var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
+		draw_guide_shape_at(center, alpha, width_scale, sc)
+		return
+
+	var obj_gap: float = 20.0
+	var desired_diameter: float = available_h
+	var max_diameter_w: float = (available_w - obj_gap * (obj_count - 1)) / obj_count
+	var diameter: float = minf(desired_diameter, max_diameter_w)
+	var r: float = diameter / 2.0
+
+	match _game.stage_type:
+		"two_circles":
+			var total_span: float = diameter * obj_count + obj_gap * (obj_count - 1)
+			var start_x: float = center.x - total_span / 2.0 + r
+			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
+			_draw_ring(Vector2(start_x, center.y), r, col, width)
+			_draw_ring(Vector2(start_x + diameter + obj_gap, center.y), r, col2, width)
+		_:
+			var desired_r_single: float = minf(available_w, available_h) / 2.0
+			var sc_single: float = desired_r_single / maxf(_game.guide_radius_val, 1.0)
+			draw_guide_shape_at(center, alpha, width_scale, sc_single)
 
 
 func draw_hint_shape(alpha: float) -> void:

@@ -1487,6 +1487,14 @@ func _draw_rules_demo_shape(vp: Vector2) -> void:
 func _draw_game(vp: Vector2) -> void:
 	_draw_bg(vp)
 
+	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
+		var sc: Vector2 = Vector2(
+			vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5,
+			vp.y * 0.5
+		)
+		_game.shape_center = sc
+		_game.stage_manager.recompute_hud_guide_layout_if_needed(sc, vp)
+
 	# --- イントロ拡大→縮小演出 ---
 	var intro_t: float = get_stage_intro_progress()
 	var intro_scale: float = 1.0
@@ -1504,7 +1512,7 @@ func _draw_game(vp: Vector2) -> void:
 	var n: int = _game.point_positions.size()
 
 	# 1. ガイド（最下層）
-	if _game.game_state == "playing" and _game.hint_alpha > 0.0:
+	if _game.game_state == "playing" and _game.hint_alpha > 0.0 and not GameConfig.USE_SCREEN_HUD_GUIDE:
 		_stage_renderer.draw_hint_shape(_game.hint_alpha)
 
 	# 1.5. 完成済みオブジェクトの塗りつぶし（線の下に描画）
@@ -1567,6 +1575,10 @@ func _draw_game(vp: Vector2) -> void:
 	# イントロ演出のtransformをリセット（HUDはスケーリングしない）
 	if intro_scale != 1.0:
 		_game.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
+		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
+		_stage_renderer.draw_hud_overlay_guide(hud_a)
 
 	if _game.game_state == "cleared":
 		_stage_renderer.draw_ideal_shape()
@@ -1875,10 +1887,17 @@ func _draw_guide_info(vp: Vector2) -> void:
 
 	# --- 図形イメージ（スケール0→1のバウンスアニメ）---
 	var available_h: float = bottom_text_top - top_block_bottom
-	var available_w: float = text_w
 	var shape_cy: float = top_block_bottom + available_h / 2.0
+	var intro_shape_w: float = 600.0
+	var intro_shape_h: float = 360.0
 	if e4 > 0.001:
-		_stage_renderer.draw_guide_shape_side_by_side(Vector2(play_cx, shape_cy), available_w * e4, available_h * e4, e4, 2.5)
+		_stage_renderer.draw_guide_shape_fit_max(
+			Vector2(play_cx, shape_cy),
+			intro_shape_w * e4,
+			intro_shape_h * e4,
+			e4,
+			2.5
+		)
 
 
 func _draw_guide_countdown(vp: Vector2) -> void:

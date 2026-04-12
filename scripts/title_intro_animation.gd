@@ -128,9 +128,9 @@ var _ti_move_playing: bool = false
 # 頂点モーフ区間: 0=なし, 1=KF0→1, 2=KF1→2, 3=KF2→3（-1=未初期化）
 var _ti_prev_vertex_sound_segment: int = -1
 var _ti_motion_played: bool = false
-var _ti_point_played: bool = false      # Phase 0 ポップイン時の ui_point.wav
-var _ti_dot_catch_played: bool = false  # 白点カラー変化開始時の ui_catch.wav
-var _ti_match_played: bool = false      # 白点移動完了時の match.mp3
+var _ti_point_played: bool = false      # Phase 0 ポップイン時の se_point.wav
+var _ti_dot_catch_played: bool = false  # 白点カラー変化開始時の se_catch.wav
+var _ti_match_played: bool = false      # 白点移動完了時の se_match.mp3
 
 var _game: Node2D
 var _suppress_hover_sfx: Callable
@@ -424,7 +424,7 @@ func draw(vp: Vector2) -> void:
 	var phase7_end: float = phase6_end + TI_PHASE7_DUR
 
 	if not _title_intro_skip:
-		# Phase 0 ポップイン開始: ui_point.wav
+		# Phase 0 ポップイン開始: se_point.wav
 		if not _ti_point_played:
 			_game._play_sfx(_game.sfx_point)
 			_ti_point_played = true
@@ -443,12 +443,12 @@ func draw(vp: Vector2) -> void:
 				_ti_move_playing = true
 			_ti_prev_vertex_sound_segment = morph_seg
 
-		# 白点カラー変化フェーズ開始: ui_catch.wav
+		# 白点カラー変化フェーズ開始: se_catch.wav
 		if elapsed >= phase_normal_hold_end and not _ti_dot_catch_played:
 			_game._play_sfx(_game.sfx_catch)
 			_ti_dot_catch_played = true
 
-		# 白点移動フェーズ: ui_move.wav ループ（開始・終了管理）
+		# 白点移動フェーズ: se_move.wav ループ（開始・終了管理）
 		if elapsed >= phase_dot_color_end and elapsed < phase_dot_move_end:
 			if not _ti_move_playing:
 				_game._start_sfx_move()
@@ -457,7 +457,7 @@ func draw(vp: Vector2) -> void:
 			_game._stop_sfx_move()
 			_ti_move_playing = false
 
-		# 白点移動完了: match.mp3
+		# 白点移動完了: se_match.mp3
 		if elapsed >= phase_dot_move_end and not _ti_match_played:
 			_game._play_sfx(_game.sfx_clear)
 			_ti_match_played = true
@@ -498,7 +498,7 @@ func draw(vp: Vector2) -> void:
 		elif elapsed < phase5_end:
 			var phase5_t: float = (elapsed - phase4_end) / TI_PHASE5_DUR
 			_draw_ti_logo_reveal(vp, phase5_t)
-			# SE: motion.mp3 再生開始
+			# SE: se_motion.mp3 再生開始
 			if not _ti_motion_played:
 				_game._play_sfx(_game.sfx_motion)
 				_ti_motion_played = true
@@ -510,7 +510,7 @@ func draw(vp: Vector2) -> void:
 		# Phase 6: ロゴ完成状態で静止（1.5秒）
 		elif elapsed < phase6_end:
 			_draw_ti_logo_reveal(vp, 1.0)
-			# motion.mp3 停止
+			# se_motion.mp3 停止
 			if _game.sfx_motion.playing:
 				_game.sfx_motion.stop()
 		# Phase 7: タイトル画面へクロスフェード

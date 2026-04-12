@@ -86,6 +86,232 @@ var ideal_display_radius_2: float = 0.0  # two_circles 用
 ## start_stage で解決したマージ済み設定（カスタム idx でも game が build_config_for_index に頼らず参照できる）
 var effective_config: Dictionary = {}
 
+# --- HUD 固定ガイド（GameConfig.USE_SCREEN_HUD_GUIDE）---
+var hud_guide_center: Vector2 = Vector2.ZERO
+var hud_guide_scale: float = 1.0
+var hud_guide_ref_px: float = 1.0
+var hud_guide_outline_world: Array = []
+var hud_two_circle_r: float = 0.0
+var hud_two_circle_c1: Vector2 = Vector2.ZERO
+var hud_two_circle_c2: Vector2 = Vector2.ZERO
+var _hud_layout_vp: Vector2 = Vector2(-1.0, -1.0)
+var _hud_layout_sc: Vector2 = Vector2.ZERO
+
+
+func recompute_hud_guide_layout_if_needed(shape_center: Vector2, viewport_size: Vector2) -> void:
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return
+	if viewport_size == _hud_layout_vp and shape_center.distance_to(_hud_layout_sc) < 0.5:
+		return
+	recompute_hud_guide_layout(shape_center, viewport_size)
+
+
+func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -> void:
+	hud_guide_center = shape_center
+	hud_guide_outline_world.clear()
+	hud_two_circle_r = 0.0
+	_hud_layout_vp = viewport_size
+	_hud_layout_sc = shape_center
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return
+
+	var play_w: float = viewport_size.x * (1.0 - GameConfig.UI_WIDTH_RATIO)
+	var play_h: float = viewport_size.y
+	var margin: float = GameConfig.HUD_GUIDE_MARGIN_FRAC
+	var inner_w: float = play_w * (1.0 - 2.0 * margin)
+	var inner_h: float = play_h * (1.0 - 2.0 * margin)
+
+	if stage_type == "two_circles":
+		var ratio: float = 0.65
+		var obj_gap: float = 20.0
+		var desired_diameter: float = inner_h * ratio
+		var max_diameter_w: float = (inner_w - obj_gap) / 2.0
+		var diameter: float = minf(desired_diameter, max_diameter_w)
+		var rr: float = diameter / 2.0
+		var total_span: float = diameter * 2.0 + obj_gap
+		var start_x: float = shape_center.x - total_span / 2.0 + rr
+		hud_two_circle_r = rr
+		hud_two_circle_c1 = Vector2(start_x, shape_center.y)
+		hud_two_circle_c2 = Vector2(start_x + diameter + obj_gap, shape_center.y)
+		hud_guide_ref_px = maxf(rr, 1.0)
+		hud_guide_scale = rr
+		_apply_hud_correspondence_scale()
+		return
+
+	if ideal_outline_points.is_empty():
+		hud_guide_scale = guide_radius_val
+		hud_guide_ref_px = maxf(guide_radius_val, 1.0)
+		_apply_hud_correspondence_scale()
+		return
+
+	var rot: float = _hud_outline_rotation_for_layout()
+	var cos_r: float = cos(rot)
+	var sin_r: float = sin(rot)
+	var rotated: Array = []
+	for p in ideal_outline_points:
+		var pr: Vector2 = p as Vector2
+		rotated.append(
+			Vector2(pr.x * cos_r - pr.y * sin_r, pr.x * sin_r + pr.y * cos_r)
+		)
+	var min_x: float = INF
+	var max_x: float = -INF
+	var min_y: float = INF
+	var max_y: float = -INF
+	for p in rotated:
+		min_x = minf(min_x, p.x)
+		max_x = maxf(max_x, p.x)
+		min_y = minf(min_y, p.y)
+		max_y = maxf(max_y, p.y)
+	var bb_w: float = maxf(max_x - min_x, 0.001)
+	var bb_h: float = maxf(max_y - min_y, 0.001)
+	var s: float = minf(inner_w / bb_w, inner_h / bb_h)
+	hud_guide_scale = s
+	for p in rotated:
+		hud_guide_outline_world.append(shape_center + p * s)
+	hud_guide_ref_px = 0.001
+	for q in hud_guide_outline_world:
+		hud_guide_ref_px = maxf(hud_guide_ref_px, q.distance_to(shape_center))
+	hud_guide_ref_px = maxf(hud_guide_ref_px, 1.0)
+	_apply_hud_correspondence_scale()
+
+
+func _hud_outline_rotation_for_layout() -> float:
+	return 0.0
+
+
+func _apply_hud_correspondence_scale() -> void:
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return
+	if stage_type == "two_circles":
+		correspondence_scale = maxf(hud_two_circle_r, 1.0)
+		ideal_display_radius = hud_two_circle_r
+		ideal_display_radius_2 = hud_two_circle_r
+		return
+	if ideal_outline_points.is_empty():
+		return
+	correspondence_scale = hud_guide_scale
+	if stage_type == "triangle":
+		ideal_display_radius = hud_guide_scale
+
+
+func _resample_closed_polyline_points(polyline: Array, n: int) -> Array:
+	if polyline.is_empty() or n <= 0:
+		return []
+	if polyline.size() == 1:
+		var single: Array = []
+		for _i in range(n):
+			single.append(polyline[0])
+		return single
+
+	var lengths: Array = [0.0]
+	var total_len: float = 0.0
+	for i in range(polyline.size()):
+		var a: Vector2 = polyline[i] as Vector2
+		var b: Vector2 = polyline[(i + 1) % polyline.size()] as Vector2
+		total_len += a.distance_to(b)
+		lengths.append(total_len)
+
+	if total_len <= 0.001:
+		var copy_pts: Array = []
+		for i in range(n):
+			copy_pts.append(polyline[i % polyline.size()])
+		return copy_pts
+
+	var result: Array = []
+	for i in range(n):
+		var target_len: float = total_len * float(i) / float(n)
+		for seg_idx in range(polyline.size()):
+			var seg_start: float = lengths[seg_idx]
+			var seg_end: float = lengths[seg_idx + 1]
+			if target_len <= seg_end or seg_idx == polyline.size() - 1:
+				var a: Vector2 = polyline[seg_idx] as Vector2
+				var b: Vector2 = polyline[(seg_idx + 1) % polyline.size()] as Vector2
+				var denom: float = maxf(seg_end - seg_start, 0.0001)
+				var t: float = clampf((target_len - seg_start) / denom, 0.0, 1.0)
+				result.append(a.lerp(b, t))
+				break
+	return result
+
+
+func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) -> void:
+	if pts.is_empty():
+		return
+	var min_x: float = INF
+	var max_x: float = -INF
+	var min_y: float = INF
+	var max_y: float = -INF
+	for p in pts:
+		min_x = minf(min_x, p.x)
+		max_x = maxf(max_x, p.x)
+		min_y = minf(min_y, p.y)
+		max_y = maxf(max_y, p.y)
+
+	var play_left: float = viewport_size.x * GameConfig.UI_WIDTH_RATIO
+	var play_right: float = viewport_size.x
+	var play_top: float = 0.0
+	var play_bottom: float = viewport_size.y
+	var offset := Vector2.ZERO
+	if min_x < play_left:
+		offset.x = play_left - min_x
+	elif max_x > play_right:
+		offset.x = play_right - max_x
+	if min_y < play_top:
+		offset.y = play_top - min_y
+	elif max_y > play_bottom:
+		offset.y = play_bottom - max_y
+	if offset != Vector2.ZERO:
+		for i in range(pts.size()):
+			pts[i] = pts[i] + offset
+
+	for i in range(pts.size()):
+		var p: Vector2 = pts[i]
+		p.x = clampf(p.x, play_left, play_right)
+		p.y = clampf(p.y, play_top, play_bottom)
+		pts[i] = p
+
+
+func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vector2, point_positions: Array[Vector2]) -> void:
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return
+	point_positions.clear()
+	var variance_factor: float = float(cfg.get("variance", 0.2))
+
+	if stage_type == "two_circles":
+		var sizes: Array = cfg.get("group_sizes", [num_points / 2, num_points - num_points / 2])
+		group_split = int(sizes[0])
+		for i in range(group_split):
+			var ang1: float = TAU * float(i) / float(maxi(group_split, 1))
+			var noise1: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * hud_two_circle_r
+			point_positions.append(hud_two_circle_c1 + Vector2(cos(ang1), sin(ang1)) * hud_two_circle_r + noise1)
+		var g2_size: int = int(sizes[1]) if sizes.size() > 1 else maxi(num_points - group_split, 0)
+		for i in range(g2_size):
+			var ang2: float = TAU * float(i) / float(maxi(g2_size, 1))
+			var noise2: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * hud_two_circle_r
+			point_positions.append(hud_two_circle_c2 + Vector2(cos(ang2), sin(ang2)) * hud_two_circle_r + noise2)
+		_keep_points_inside_playfield(point_positions, viewport_size)
+		return
+
+	var source_pts: Array = []
+	if ideal_points.size() == num_points:
+		source_pts = ideal_points
+	else:
+		var outline_src: Array = ideal_outline_points if not ideal_outline_points.is_empty() else ideal_points
+		source_pts = _resample_closed_polyline_points(outline_src, num_points)
+
+	var rot: float = _hud_outline_rotation_for_layout()
+	var cos_r: float = cos(rot)
+	var sin_r: float = sin(rot)
+	for i in range(source_pts.size()):
+		var ideal: Vector2 = source_pts[i] as Vector2
+		var rotated := Vector2(
+			ideal.x * cos_r - ideal.y * sin_r,
+			ideal.x * sin_r + ideal.y * cos_r
+		)
+		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
+		point_positions.append(hud_guide_center + (rotated + noise) * hud_guide_scale)
+
+	_keep_points_inside_playfield(point_positions, viewport_size)
+
 
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
 	var cfg: Dictionary
@@ -159,6 +385,8 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 	group2_cleared = false
 	ideal_display_radius = guide_radius_val
 	ideal_display_radius_2 = guide_radius_val
+	recompute_hud_guide_layout(shape_center, viewport_size)
+	_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
 	calculate_metrics(point_positions)
 
 
@@ -1252,6 +1480,9 @@ func _star_distance_at_angle(angle: float, rotation: float, outer_r: float, inne
 
 func _set_correspondence_scale_from_outline() -> void:
 	"""ideal_outline_points から correspondence_scale を設定（get_point_accuracy_alpha 用）"""
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
+		correspondence_rotation = 0.0
+		return
 	var ideal_ref_r: float = _percentile_length_from_origin(ideal_outline_points, REF_R_PERCENTILE)
 	if GUIDE_USE_FIXED_SIZE:
 		correspondence_scale = guide_radius_val / ideal_ref_r
@@ -1267,7 +1498,10 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			var m: Dictionary = _calc_unified_arc_metrics(point_positions, 0, point_positions.size())
 			current_centroid = m["centroid"]
 			current_avg_radius = m["avg_r"]
-			ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
+			if GameConfig.USE_SCREEN_HUD_GUIDE:
+				ideal_display_radius = hud_guide_scale if stage_type == "triangle" else hud_guide_ref_px
+			else:
+				ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
 			current_circularity_error = m["circ_err"]
 			current_circularity = m["circ"]
 			current_smoothness_error = 0.0
@@ -1276,19 +1510,31 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			if stage_type == "triangle":
 				polygon_rotation = -PI / 2.0  # 頂点上向きでガイド表示
 		"two_circles":
-			var m1: Dictionary = _calc_unified_arc_metrics(point_positions, 0, group_split)
+			var m1: Dictionary
+			var m2: Dictionary
+			if GameConfig.USE_SCREEN_HUD_GUIDE:
+				m1 = _calc_hud_screen_arc_metrics(point_positions, 0, group_split, hud_two_circle_c1, hud_two_circle_r)
+				m2 = _calc_hud_screen_arc_metrics(point_positions, group_split, point_positions.size(), hud_two_circle_c2, hud_two_circle_r)
+			else:
+				m1 = _calc_unified_arc_metrics(point_positions, 0, group_split)
+				m2 = _calc_unified_arc_metrics(point_positions, group_split, point_positions.size())
 			current_centroid = m1["centroid"]
 			current_avg_radius = m1["avg_r"]
-			ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
+			if GameConfig.USE_SCREEN_HUD_GUIDE:
+				ideal_display_radius = hud_two_circle_r
+			else:
+				ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
 			current_circularity_error = m1["circ_err"]
 			current_circularity = m1["circ"]
 			current_smoothness_error = 0.0
 			current_smoothness = 100.0
 
-			var m2: Dictionary = _calc_unified_arc_metrics(point_positions, group_split, point_positions.size())
 			current_centroid_2 = m2["centroid"]
 			current_avg_radius_2 = m2["avg_r"]
-			ideal_display_radius_2 = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius_2
+			if GameConfig.USE_SCREEN_HUD_GUIDE:
+				ideal_display_radius_2 = hud_two_circle_r
+			else:
+				ideal_display_radius_2 = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius_2
 			current_circularity_error_2 = m2["circ_err"]
 			current_circularity_2 = m2["circ"]
 			current_smoothness_error_2 = 0.0
@@ -1298,9 +1544,56 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			_calculate_unified_arc_metrics(point_positions)
 
 
+func _calc_hud_screen_arc_metrics(
+	pts: Array[Vector2], from_idx: int, to_idx: int, ring_center: Vector2, ring_r: float
+) -> Dictionary:
+	var n: int = to_idx - from_idx
+	if n < 1:
+		return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
+	var group_pts: Array = []
+	for i in range(from_idx, to_idx):
+		group_pts.append(pts[i])
+	var centroid: Vector2 = _perimeter_centroid(group_pts)
+	var avg_r: float = _percentile_distance_from_center(group_pts, centroid, REF_R_PERCENTILE)
+	var ring_mode: bool = ring_r > 0.0
+	if not ring_mode and hud_guide_outline_world.size() < 2:
+		return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
+	var ref_r: float = maxf(hud_guide_ref_px, 1.0)
+	var per_pt: Array = []
+	if ring_mode:
+		for i in range(from_idx, to_idx):
+			per_pt.append(_distance_point_to_circle_ring_outline(pts[i], ring_center, ring_r))
+	else:
+		var sample_count: int = maxi(n * 4, 64)
+		var player_outline: Array = _resample_closed_polyline_points(group_pts, sample_count)
+		var guide_outline: Array = _resample_closed_polyline_points(hud_guide_outline_world, sample_count)
+		for p in player_outline:
+			per_pt.append(_distance_to_polyline(p, hud_guide_outline_world))
+		for gp in guide_outline:
+			per_pt.append(_distance_to_polyline(gp, player_outline))
+	var avg_d: float = 0.0
+	var max_d: float = 0.0
+	for d in per_pt:
+		avg_d += d
+		max_d = maxf(max_d, d)
+	avg_d /= per_pt.size()
+	var combined: float = ARC_ERROR_AVG_WEIGHT * avg_d + ARC_ERROR_MAX_WEIGHT * max_d
+	var circ_err: float = combined / ref_r * 100.0
+	return {
+		"centroid": centroid,
+		"avg_r": avg_r,
+		"circ_err": circ_err,
+		"circ": maxf(0.0, 100.0 - circ_err),
+	}
+
+
 func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) -> Dictionary:
 	"""弧誤差のみ・回転非対応。指定範囲の点群を評価"""
 	var n: int = to_idx - from_idx
+	if GameConfig.USE_SCREEN_HUD_GUIDE and stage_type != "two_circles":
+		if n < 1:
+			return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
+		return _calc_hud_screen_arc_metrics(pts, from_idx, to_idx, Vector2.ZERO, -1.0)
 	if n < 3 or ideal_outline_points.is_empty():
 		return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
 
@@ -1381,15 +1674,24 @@ func _calculate_unified_arc_metrics(pts: Array[Vector2]) -> void:
 	var m: Dictionary = _calc_unified_arc_metrics(pts, 0, n)
 	current_centroid = m["centroid"]
 	current_avg_radius = m["avg_r"]
-	var use_fixed_guide: bool = GUIDE_USE_FIXED_SIZE and not guide_follows_player_radius
-	ideal_display_radius = guide_radius_val if use_fixed_guide else current_avg_radius
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
+		ideal_display_radius = hud_guide_ref_px
+	else:
+		var use_fixed_guide: bool = GUIDE_USE_FIXED_SIZE and not guide_follows_player_radius
+		ideal_display_radius = guide_radius_val if use_fixed_guide else current_avg_radius
 	current_circularity_error = m["circ_err"]
 	current_circularity = m["circ"]
 	current_smoothness_error = 0.0
 	current_smoothness = 100.0
 
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
+		_apply_hud_correspondence_scale()
+		correspondence_rotation = 0.0
+		polygon_rotation = 0.0
+		return
+	var use_fixed_guide2: bool = GUIDE_USE_FIXED_SIZE and not guide_follows_player_radius
 	var ideal_ref_r: float = _percentile_length_from_origin(ideal_outline_points, REF_R_PERCENTILE)
-	if use_fixed_guide:
+	if use_fixed_guide2:
 		correspondence_scale = guide_radius_val / ideal_ref_r
 	else:
 		correspondence_scale = current_avg_radius / ideal_ref_r
@@ -1412,6 +1714,20 @@ func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> floa
 	if idx < 0 or idx >= point_positions.size():
 		return 1.0
 	var p: Vector2 = point_positions[idx]
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
+		var ideal_dist_hud: float = get_distance_to_hint_guide_outline(p)
+		var ref_r_hud: float = maxf(hud_guide_ref_px, 1.0)
+		var error_ratio_hud: float = clampf(ideal_dist_hud / ref_r_hud, 0.0, 1.0)
+		var accuracy_hud: float = 1.0 - error_ratio_hud
+		if accuracy_hud < 0.90:
+			return 0.25
+		if accuracy_hud < 0.95:
+			var t_mid: float = (accuracy_hud - 0.90) / 0.05
+			var step_mid: int = mini(int(t_mid * 4.0), 3)
+			return 0.35 + step_mid * 0.05
+		var t_hi: float = (accuracy_hud - 0.95) / 0.05
+		var step_hi: int = mini(int(t_hi * 4.0), 3)
+		return 0.65 + step_hi * 0.1167
 	var ideal_dist: float
 	var ref_r: float = maxf(current_avg_radius, 1.0)
 
@@ -1499,6 +1815,16 @@ func _distance_point_to_circle_ring_outline(p: Vector2, center: Vector2, r: floa
 
 ## プレイ中ヒントガイド（draw_hint_shape）と同じ形状への最短距離（画面座標・px）
 func get_distance_to_hint_guide_outline(p: Vector2) -> float:
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
+		match stage_type:
+			"two_circles":
+				var dh1: float = _distance_point_to_circle_ring_outline(p, hud_two_circle_c1, hud_two_circle_r)
+				var dh2: float = _distance_point_to_circle_ring_outline(p, hud_two_circle_c2, hud_two_circle_r)
+				return minf(dh1, dh2)
+			_:
+				if hud_guide_outline_world.size() >= 2:
+					return _distance_to_polyline(p, hud_guide_outline_world)
+				return INF
 	match stage_type:
 		"triangle":
 			return _distance_point_to_regular_polygon_outline(

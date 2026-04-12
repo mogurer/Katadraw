@@ -81,6 +81,26 @@ const TYPE_DEFAULTS: Dictionary = {
 		"display_rate_min_pct": 75.0,
 		"guide_follows_player_radius": 1,
 	},
+	"heptagram": {
+		"num_points": 7,
+		"min_radius": 128.0,
+		"max_radius": 420.0,
+		"vertex_range": [3, 5],
+		"variance": 0.55,
+		"zigzag": 0.35,
+		"clear_pct": 98.0,
+		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
+	},
+	"heptagram_silhouette": {
+		"num_points": 14,
+		"min_radius": 128.0,
+		"max_radius": 420.0,
+		"variance": 0.15,
+		"clear_pct": 97.0,
+		"display_rate_min_pct": 80.0,
+		"guide_follows_player_radius": 0,
+	},
 }
 
 

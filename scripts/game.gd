@@ -344,8 +344,8 @@ var sfx_motion: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 
 # --- Debug ---
-## プレイ中のヒント表示など（コード上で固定。タイトルではタイトルBGMを鳴らさない用途にも使用）
-var debug_mode: bool = true
+## F2 から入る STAGE DEBUG 系でのみ有効にするデバッグフラグ
+var debug_mode: bool = false
 
 
 func _ready() -> void:
@@ -499,7 +499,7 @@ func _setup_game_cursor() -> void:
 
 func _setup_audio() -> void:
 	bgm_title = AudioStreamPlayer.new()
-	bgm_title.stream = _load_audio("res://assets/sounds/k_03_indigo_01.mp3")
+	bgm_title.stream = _load_audio("res://assets/sounds/bgm_katadraw_main_theme.mp3")
 	bgm_title.volume_db = -22.5
 	bgm_title.autoplay = false
 	if bgm_title.stream is AudioStreamMP3:
@@ -507,7 +507,7 @@ func _setup_audio() -> void:
 	add_child(bgm_title)
 
 	bgm_game = AudioStreamPlayer.new()
-	bgm_game.stream = _load_audio("res://assets/sounds/audiostock_1544483.mp3")
+	bgm_game.stream = _load_audio("res://assets/sounds/bgm_katadraw_playing01.mp3")
 	bgm_game.volume_db = -16.5
 	bgm_game.autoplay = false
 	if bgm_game.stream is AudioStreamMP3:
@@ -515,7 +515,7 @@ func _setup_audio() -> void:
 	add_child(bgm_game)
 
 	bgm_result = AudioStreamPlayer.new()
-	bgm_result.stream = _load_audio("res://assets/sounds/maou_bgm_cyber13.mp3")
+	bgm_result.stream = _load_audio("res://assets/sounds/bgm_katadraw_result.mp3")
 	bgm_result.volume_db = -16.5
 	bgm_result.autoplay = false
 	if bgm_result.stream is AudioStreamMP3:
@@ -523,57 +523,57 @@ func _setup_audio() -> void:
 	add_child(bgm_result)
 
 	sfx_count = AudioStreamPlayer.new()
-	sfx_count.stream = _load_audio("res://assets/sounds/count.wav")
+	sfx_count.stream = _load_audio("res://assets/sounds/se_count.wav")
 	sfx_count.volume_db = -14.5
 	add_child(sfx_count)
 
 	sfx_clear = AudioStreamPlayer.new()
-	sfx_clear.stream = _load_audio("res://assets/sounds/match.mp3")
+	sfx_clear.stream = _load_audio("res://assets/sounds/se_match.mp3")
 	sfx_clear.volume_db = -14.5
 	add_child(sfx_clear)
 
 	sfx_on = AudioStreamPlayer.new()
-	sfx_on.stream = _load_audio("res://assets/sounds/ui_on.wav")
+	sfx_on.stream = _load_audio("res://assets/sounds/se_on.wav")
 	sfx_on.volume_db = -14.5
 	add_child(sfx_on)
 
 	sfx_point = AudioStreamPlayer.new()
-	sfx_point.stream = _load_audio("res://assets/sounds/ui_point.wav")
+	sfx_point.stream = _load_audio("res://assets/sounds/se_point.wav")
 	sfx_point.volume_db = -14.5
 	add_child(sfx_point)
 
 	sfx_motion = AudioStreamPlayer.new()
-	sfx_motion.stream = _load_audio("res://assets/sounds/motion.mp3")
+	sfx_motion.stream = _load_audio("res://assets/sounds/se_motion.mp3")
 	sfx_motion.volume_db = -14.5
 	add_child(sfx_motion)
 
 	sfx_click = AudioStreamPlayer.new()
-	sfx_click.stream = _load_audio("res://assets/sounds/ui_click.wav")
+	sfx_click.stream = _load_audio("res://assets/sounds/se_click.wav")
 	sfx_click.volume_db = -14.5
 	add_child(sfx_click)
 
 	sfx_window_open = AudioStreamPlayer.new()
-	sfx_window_open.stream = _load_audio("res://assets/sounds/ui_window_open.wav")
+	sfx_window_open.stream = _load_audio("res://assets/sounds/se_window_open.wav")
 	sfx_window_open.volume_db = -14.5
 	add_child(sfx_window_open)
 
 	sfx_window_close = AudioStreamPlayer.new()
-	sfx_window_close.stream = _load_audio("res://assets/sounds/ui_window_close.wav")
+	sfx_window_close.stream = _load_audio("res://assets/sounds/se_window_close.wav")
 	sfx_window_close.volume_db = -14.5
 	add_child(sfx_window_close)
 
 	sfx_catch = AudioStreamPlayer.new()
-	sfx_catch.stream = _load_audio("res://assets/sounds/ui_catch.wav")
+	sfx_catch.stream = _load_audio("res://assets/sounds/se_catch.wav")
 	sfx_catch.volume_db = -14.5
 	add_child(sfx_catch)
 
 	sfx_move = AudioStreamPlayer.new()
-	sfx_move.stream = _load_audio("res://assets/sounds/ui_move.wav")
+	sfx_move.stream = _load_audio("res://assets/sounds/se_move.wav")
 	sfx_move.volume_db = -14.5
 	add_child(sfx_move)
 
 	sfx_stageclear = AudioStreamPlayer.new()
-	sfx_stageclear.stream = _load_audio("res://assets/sounds/ui_stageclear.wav")
+	sfx_stageclear.stream = _load_audio("res://assets/sounds/se_stageclear.wav")
 	sfx_stageclear.volume_db = -14.5
 	add_child(sfx_stageclear)
 
@@ -590,12 +590,9 @@ func _stop_bgm(player: AudioStreamPlayer) -> void:
 		player.stop()
 
 
-## debug_mode が true のときはタイトルBGMを鳴らさない（STAGE DEBUG から戻ったときも同様）。
+## タイトル画面では常にタイトルBGMを鳴らす。
 func _apply_title_bgm_for_debug_mode() -> void:
-	if debug_mode:
-		_stop_bgm(bgm_title)
-	else:
-		_play_bgm(bgm_title)
+	_play_bgm(bgm_title)
 
 
 func _play_sfx(player: AudioStreamPlayer) -> void:
@@ -1631,7 +1628,7 @@ func _apply_bgm_volume() -> void:
 	# レベル5を基準(0dB補正)とし、0=ミュート, 10=最大
 	# BGM基準音量: title=-22.5, game/result=-16.5
 	var offset_db: float = _volume_offset_db(bgm_volume)
-	bgm_title.volume_db = -22.5 + offset_db
+	bgm_title.volume_db = -16.5 + offset_db
 	bgm_game.volume_db = -16.5 + offset_db
 	bgm_result.volume_db = -16.5 + offset_db
 
@@ -2238,10 +2235,12 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 	if back_to_stage_debug:
 		_refresh_stage_debug_custom_paths()
 		_clamp_stage_debug_selection()
+		debug_mode = true
 		game_state = "stage_debug"
 		_sync_stage_debug_field_buffers()
 		stage_debug_last_error = ""
 	else:
+		debug_mode = false
 		game_state = "title"
 	preferred_input_method = ""
 	title_start_time = Time.get_ticks_msec() / 1000.0
@@ -2252,6 +2251,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 
 
 func _enter_stage_debug_screen() -> void:
+	debug_mode = true
 	_stop_bgm(bgm_title)
 	_refresh_stage_debug_custom_paths()
 	stage_debug_scroll = 0.0
@@ -3662,6 +3662,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		stage_debug_field_focus_idx = -1
 		_stage_debug_sync_ime_for_field_focus()
+		debug_mode = false
 		game_state = "title"
 		_apply_title_bgm_for_debug_mode()
 		queue_redraw()
@@ -3777,6 +3778,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 					6:
 						stage_debug_field_focus_idx = -1
 						_stage_debug_sync_ime_for_field_focus()
+						debug_mode = false
 						game_state = "title"
 						_apply_title_bgm_for_debug_mode()
 				queue_redraw()
