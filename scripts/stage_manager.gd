@@ -752,12 +752,14 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 	if total < 0.001:
 		return []
 	var result: Array = []
+	var last_seg: Dictionary = seg_lengths[seg_lengths.size() - 1]
 	for i in range(n):
 		var t: float = (float(i) / float(n)) * total
 		if t >= total:
-			t = total - 0.001
+			t = maxf(total - 1e-4, 0.0)
+		var placed: bool = false
 		for seg in seg_lengths:
-			if t <= seg["end"]:
+			if t <= seg["end"] + 1e-6:
 				var local_t: float = (t - seg["start"]) / (seg["end"] - seg["start"]) if (seg["end"] - seg["start"]) > 0.001 else 0.0
 				local_t = clampf(local_t, 0.0, 1.0)
 				if seg["arc_ac"] != null:
@@ -767,7 +769,17 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 					result.append(arc_pts[idx].lerp(arc_pts[idx + 1], frac))
 				else:
 					result.append(seg["p1"].lerp(seg["p2"], local_t))
+				placed = true
 				break
+		if not placed:
+			# Fallback when no segment matches t (prevents ideal_points OOB).
+			var p_end: Vector2 = last_seg["p2"]
+			result.append(p_end)
+	while result.size() < n:
+		if result.is_empty():
+			result.append(verts[0])
+		else:
+			result.append(result[result.size() - 1])
 	return result
 
 
