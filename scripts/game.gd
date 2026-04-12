@@ -204,6 +204,15 @@ const STAGE_DEBUG_LEFT_COL_RATIO: float = 0.40
 const STAGE_DEBUG_TOP_BTN_Y: float = 32.0
 const STAGE_DEBUG_ACTION_BTN_H: float = 30.0
 const STAGE_DEBUG_ACTION_BTN_GAP: float = 8.0
+## 左リストと分割線の間のスクロールバー（中央寄り）
+const STAGE_DEBUG_SCROLLBAR_W: float = 8.0
+const STAGE_DEBUG_SCROLLBAR_GAP: float = 5.0
+const STAGE_DEBUG_SCROLLBAR_MIN_THUMB: float = 28.0
+## 慣性: 約 1 秒でほぼ停止 (exp(-4)≈1.8%)
+const STAGE_DEBUG_SCROLL_INERTIA_DECAY: float = 4.0
+const STAGE_DEBUG_WHEEL_BASE_VEL: float = 240.0
+const STAGE_DEBUG_WHEEL_RATE_SCALE: float = 55.0
+const STAGE_DEBUG_WHEEL_RATE_CAP: float = 22.0
 ## 右パネル: 左は固定ラベル列、右のみ編集（値欄）。列幅は _stage_debug_field_label_column_width() で最長ラベルを測る
 const STAGE_DEBUG_FIELD_LABEL_FS: int = 14
 const STAGE_DEBUG_FIELD_VALUE_GAP: float = 10.0
@@ -226,6 +235,11 @@ const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 	"stage_name", "description",
 ]
 var stage_debug_scroll: float = 0.0
+## 正で下方向（scroll 増加）。慣性用 px/s
+var stage_debug_scroll_vel: float = 0.0
+var _stage_debug_wheel_times: Array[float] = []
+var stage_debug_scrollbar_drag: bool = false
+var _stage_debug_scrollbar_drag_thumb_rel_y: float = 0.0
 var stage_debug_selected: int = 0
 var stage_debug_pending: Dictionary = {}  # マスタ行 index -> partial（②: インデックスオーバーライド専用）
 ## ② Edit 産カスタム（ファイル1本=1行）。path -> フィールド編集の差分（config + meta.stage_name / meta.description）
@@ -282,6 +296,8 @@ var _se_ld_both_centers: Array[Vector2] = []
 var _se_ld_both_last_centers: Array[Vector2] = []
 var debug_stage_test_mode: bool = false
 var debug_stage_test_seed: int = 0
+## STAGE DEBUG: last cfg passed to start_stage (retry must use this when idx is not a master index).
+var debug_stage_test_restart_cfg: Dictionary = {}
 ## テストプレイ guide_info の説明行に出す（カスタムの meta.stage_name）
 var debug_stage_test_meta_stage_name: String = ""
 var input_recorder: DebugInputRecorder
@@ -2062,7 +2078,10 @@ func _do_pause_retry() -> void:
 	pause_active = false
 	var vp: Vector2 = get_viewport_rect().size
 	shape_center = Vector2(vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5)
-	stage_manager.start_stage(current_stage, shape_center, vp, point_positions)
+	if debug_stage_test_mode and not debug_stage_test_restart_cfg.is_empty():
+		stage_manager.start_stage(current_stage, shape_center, vp, point_positions, debug_stage_test_restart_cfg)
+	else:
+		stage_manager.start_stage(current_stage, shape_center, vp, point_positions)
 	_sync_stage_vars()
 	game_state = "guide_info"
 	guide_start_time = 0.0
@@ -2153,6 +2172,7 @@ func _resume_from_pause() -> void:
 
 func _start_game() -> void:
 	debug_stage_test_mode = false
+	debug_stage_test_restart_cfg.clear()
 	debug_stage_test_meta_stage_name = ""
 	input_recorder = null
 	_stop_bgm(bgm_title)
@@ -2205,6 +2225,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 	_screenshot_folder_opened = false
 	var back_to_stage_debug: bool = debug_stage_test_mode and _debug_tools_enabled()
 	debug_stage_test_mode = false
+	debug_stage_test_restart_cfg.clear()
 	debug_stage_test_meta_stage_name = ""
 	input_recorder = null
 	if back_to_stage_debug:
@@ -2223,6 +2244,9 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 func _enter_stage_debug_screen() -> void:
 	_refresh_stage_debug_custom_paths()
 	stage_debug_scroll = 0.0
+	stage_debug_scroll_vel = 0.0
+	_stage_debug_wheel_times.clear()
+	stage_debug_scrollbar_drag = false
 	stage_debug_selected = 0
 	stage_debug_field_focus_idx = -1
 	stage_debug_edit_buffer = ""
@@ -2543,6 +2567,76 @@ func _stage_debug_scroll_max(vp: Vector2) -> float:
 	var list_region_h: float = list_bottom - STAGE_DEBUG_LIST_TOP_Y
 	var total_list_h: float = float(n) * STAGE_DEBUG_ROW_H
 	return maxf(0.0, total_list_h - list_region_h)
+
+
+func _stage_debug_list_width_for_split(split: float) -> float:
+	return split - 8.0 - STAGE_DEBUG_SCROLLBAR_W - STAGE_DEBUG_SCROLLBAR_GAP * 2.0
+
+
+func _stage_debug_list_right_edge_x(split: float) -> float:
+	return split - STAGE_DEBUG_SCROLLBAR_W - STAGE_DEBUG_SCROLLBAR_GAP * 2.0
+
+
+func _stage_debug_scrollbar_track_rect(vp: Vector2) -> Rect2:
+	var split: float = _stage_debug_split_x(vp)
+	var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+	var track_h: float = list_bottom - STAGE_DEBUG_LIST_TOP_Y
+	var x: float = split - STAGE_DEBUG_SCROLLBAR_W - STAGE_DEBUG_SCROLLBAR_GAP
+	return Rect2(x, STAGE_DEBUG_LIST_TOP_Y, STAGE_DEBUG_SCROLLBAR_W, track_h)
+
+
+func _stage_debug_scrollbar_thumb_rect(vp: Vector2) -> Rect2:
+	var tr: Rect2 = _stage_debug_scrollbar_track_rect(vp)
+	var smax: float = _stage_debug_scroll_max(vp)
+	var track_h: float = tr.size.y
+	if smax <= 0.001 or track_h <= 1.0:
+		return tr
+	var thumb_h: float = maxf(STAGE_DEBUG_SCROLLBAR_MIN_THUMB, (track_h * track_h) / (track_h + smax))
+	thumb_h = minf(thumb_h, track_h)
+	var thumb_y: float = tr.position.y + (stage_debug_scroll / smax) * (track_h - thumb_h)
+	return Rect2(tr.position.x, thumb_y, STAGE_DEBUG_SCROLLBAR_W, thumb_h)
+
+
+func _stage_debug_process_scroll(delta: float) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	var smax: float = _stage_debug_scroll_max(vp)
+	if smax <= 0.0:
+		stage_debug_scroll = 0.0
+		stage_debug_scroll_vel = 0.0
+		return
+	stage_debug_scroll += stage_debug_scroll_vel * delta
+	if stage_debug_scroll < 0.0:
+		stage_debug_scroll = 0.0
+		stage_debug_scroll_vel = 0.0
+	elif stage_debug_scroll > smax:
+		stage_debug_scroll = smax
+		stage_debug_scroll_vel = 0.0
+	stage_debug_scroll_vel *= exp(-STAGE_DEBUG_SCROLL_INERTIA_DECAY * delta)
+	if absf(stage_debug_scroll_vel) < 4.0:
+		stage_debug_scroll_vel = 0.0
+
+
+func _stage_debug_wheel_record() -> void:
+	var t: float = Time.get_ticks_msec() / 1000.0
+	_stage_debug_wheel_times.append(t)
+	while _stage_debug_wheel_times.size() > 0 and t - _stage_debug_wheel_times[0] > 0.45:
+		_stage_debug_wheel_times.remove_at(0)
+
+
+func _stage_debug_wheel_events_per_sec() -> float:
+	if _stage_debug_wheel_times.size() < 2:
+		return 0.0
+	var t0: float = _stage_debug_wheel_times[0]
+	var t1: float = _stage_debug_wheel_times[_stage_debug_wheel_times.size() - 1]
+	var span: float = maxf(0.04, t1 - t0)
+	return float(_stage_debug_wheel_times.size() - 1) / span
+
+
+func _stage_debug_wheel_add_impulse(direction: float) -> void:
+	_stage_debug_wheel_record()
+	var rate: float = minf(_stage_debug_wheel_events_per_sec(), STAGE_DEBUG_WHEEL_RATE_CAP)
+	var add_vel: float = STAGE_DEBUG_WHEEL_BASE_VEL + STAGE_DEBUG_WHEEL_RATE_SCALE * rate
+	stage_debug_scroll_vel += direction * add_vel
 
 
 func _stage_debug_button_rects(vp: Vector2) -> Array[Rect2]:
@@ -3507,6 +3601,48 @@ func _input_stage_edit(event: InputEvent) -> void:
 
 func _input_stage_debug(event: InputEvent) -> void:
 	var vp: Vector2 = get_viewport_rect().size
+	var smax0: float = _stage_debug_scroll_max(vp)
+	# スクロールバー ドラッグ
+	if event is InputEventMouseMotion and stage_debug_scrollbar_drag:
+		var tr_d: Rect2 = _stage_debug_scrollbar_track_rect(vp)
+		var thumb_d: Rect2 = _stage_debug_scrollbar_thumb_rect(vp)
+		var track_h_d: float = tr_d.size.y
+		var thumb_h_d: float = thumb_d.size.y
+		var thumb_top: float = event.position.y - _stage_debug_scrollbar_drag_thumb_rel_y
+		thumb_top = clampf(thumb_top, tr_d.position.y, tr_d.position.y + maxf(0.0, track_h_d - thumb_h_d))
+		if smax0 > 0.001 and track_h_d - thumb_h_d > 0.001:
+			stage_debug_scroll = smax0 * (thumb_top - tr_d.position.y) / (track_h_d - thumb_h_d)
+		stage_debug_scroll_vel = 0.0
+		queue_redraw()
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if stage_debug_scrollbar_drag:
+			stage_debug_scrollbar_drag = false
+			queue_redraw()
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var tr_p: Rect2 = _stage_debug_scrollbar_track_rect(vp)
+		var thumb_p: Rect2 = _stage_debug_scrollbar_thumb_rect(vp)
+		if smax0 > 0.001 and tr_p.size.y > 2.0:
+			if thumb_p.has_point(event.position):
+				stage_debug_scrollbar_drag = true
+				_stage_debug_scrollbar_drag_thumb_rel_y = event.position.y - thumb_p.position.y
+				stage_debug_scroll_vel = 0.0
+				queue_redraw()
+				get_viewport().set_input_as_handled()
+				return
+			if tr_p.has_point(event.position) and not thumb_p.has_point(event.position):
+				var page: float = tr_p.size.y * 0.88
+				if event.position.y < thumb_p.position.y + thumb_p.size.y * 0.5:
+					stage_debug_scroll = maxf(0.0, stage_debug_scroll - page)
+				else:
+					stage_debug_scroll = minf(smax0, stage_debug_scroll + page)
+				stage_debug_scroll_vel = 0.0
+				queue_redraw()
+				get_viewport().set_input_as_handled()
+				return
 	if _debug_tools_enabled() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if _stage_debug_new_custom_button_rect(vp).has_point(event.position):
 			_enter_stage_edit_screen()
@@ -3519,11 +3655,11 @@ func _input_stage_debug(event: InputEvent) -> void:
 		queue_redraw()
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-		stage_debug_scroll = maxf(0.0, stage_debug_scroll - 40.0)
+		_stage_debug_wheel_add_impulse(-1.0)
 		queue_redraw()
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-		stage_debug_scroll = minf(_stage_debug_scroll_max(vp), stage_debug_scroll + 40.0)
+		_stage_debug_wheel_add_impulse(1.0)
 		queue_redraw()
 		return
 	if _debug_tools_enabled() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
@@ -3535,7 +3671,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 		for i_r in range(n_r):
 			var y1_r: float = y0_r + float(i_r) * STAGE_DEBUG_ROW_H
 			if pos_r.y >= y1_r and pos_r.y < y1_r + STAGE_DEBUG_ROW_H and pos_r.y < list_bottom_r and pos_r.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
-				if pos_r.x >= 8.0 and pos_r.x < split_r - 8.0:
+				if pos_r.x >= 8.0 and pos_r.x < _stage_debug_list_right_edge_x(split_r):
 					if _stage_debug_is_custom_row(i_r):
 						_enter_stage_edit_from_path(_stage_debug_custom_path_at(i_r))
 						get_viewport().set_input_as_handled()
@@ -3683,7 +3819,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 		for i in range(n):
 			var y1: float = y0 + float(i) * STAGE_DEBUG_ROW_H
 			if pos.y >= y1 and pos.y < y1 + STAGE_DEBUG_ROW_H and pos.y < list_bottom and pos.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
-				if pos.x >= 8.0 and pos.x < split - 8.0:
+				if pos.x >= 8.0 and pos.x < _stage_debug_list_right_edge_x(split):
 					if i != stage_debug_selected:
 						_commit_focused_field_to_pending()
 						if stage_debug_last_error != "":
@@ -3716,6 +3852,7 @@ func _start_stage_debug_test() -> void:
 			queue_redraw()
 			return
 		stage_debug_last_error = ""
+		debug_stage_test_restart_cfg = cfg.duplicate(true)
 		debug_stage_test_seed = randi()
 		seed(debug_stage_test_seed)
 		debug_stage_test_meta_stage_name = ""
@@ -3758,6 +3895,7 @@ func _start_stage_debug_test() -> void:
 		queue_redraw()
 		return
 	stage_debug_last_error = ""
+	debug_stage_test_restart_cfg = cfg.duplicate(true)
 	debug_stage_test_seed = randi()
 	seed(debug_stage_test_seed)
 	debug_stage_test_meta_stage_name = ""
@@ -3983,6 +4121,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "stage_debug":
+		_stage_debug_process_scroll(delta)
 		queue_redraw()
 
 	elif game_state == "guide_info":

@@ -88,8 +88,6 @@ var effective_config: Dictionary = {}
 
 
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
-	current_stage = idx
-	ideal_outline_points.clear()
 	var cfg: Dictionary
 	if cfg_override.is_empty():
 		var stages: Array = StageDebugOverrides.get_effective_stages()
@@ -99,6 +97,8 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 		cfg = stages[idx]
 	else:
 		cfg = cfg_override
+	current_stage = idx
+	ideal_outline_points.clear()
 	effective_config = cfg.duplicate(true)
 	stage_type = cfg.get("type", "circle")
 	min_radius = cfg["min_radius"]

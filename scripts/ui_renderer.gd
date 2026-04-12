@@ -768,7 +768,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	var text_c: Color = Color(0.26, 0.21, 0.28)
 	var guide_w: float = minf(vp.x - 280.0, 560.0)
 	_game.draw_string(_game.font_bold, Vector2(24, 48), "STAGE DEBUG (F2)", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 36, accent)
-	_game.draw_string(_game.font, Vector2(24, 86), "Wheel: スクロール | ESC: タイトル | [C]=custom_stages | 左で選択 | 右で編集・図形編集 | Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
+	_game.draw_string(_game.font, Vector2(24, 86), "ホイール: 慣性スクロール / バーで位置 | ESC: タイトル | [C]=custom | 左で選択 | 右で編集 | Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
 	if _game.stage_debug_last_error != "":
 		_game.draw_string(_game.font, Vector2(24, 112), _game.stage_debug_last_error, HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.95, 0.3, 0.2))
 	if _game._debug_tools_enabled():
@@ -788,7 +788,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	var y0: float = _game.STAGE_DEBUG_LIST_TOP_Y - _game.stage_debug_scroll
 	var fs: int = 16
 	var list_left: float = 8.0
-	var list_w: float = split - list_left - 8.0
+	var list_w: float = _game._stage_debug_list_width_for_split(split)
 	var icon_r: float = minf(26.0, (_game.STAGE_DEBUG_ROW_H - 12.0) * 0.45)
 	var prev_sz: float = minf(icon_r * 2.5, _game.STAGE_DEBUG_ROW_H - 10.0)
 	for i in range(total_rows):
@@ -833,6 +833,15 @@ func _draw_stage_debug(vp: Vector2) -> void:
 					drew_preview = true
 		if not drew_preview:
 			_draw_stage_debug_type_icon(Vector2(icx, icy), icon_r, tname, accent if sel else text_c)
+	# 左リスト右端（分割線寄り）のスクロールバー
+	var smax_draw: float = _game._stage_debug_scroll_max(vp)
+	var tr_sb: Rect2 = _game._stage_debug_scrollbar_track_rect(vp)
+	_game.draw_rect(tr_sb, Color(0.91, 0.89, 0.93, 0.95))
+	_game.draw_rect(tr_sb, Color(0.72, 0.69, 0.75), false, 1.0)
+	if smax_draw > 0.5:
+		var thumb_sb: Rect2 = _game._stage_debug_scrollbar_thumb_rect(vp)
+		_game.draw_rect(thumb_sb, Color(0.78, 0.75, 0.82))
+		_game.draw_rect(thumb_sb, Color(0.42, 0.36, 0.48), false, 1.0)
 	# ボタン（テスト・保存・図形編集・設定リセット・フォルダを開く | 右上 全リセット・戻る）
 	var rects: Array[Rect2] = _game._stage_debug_button_rects(vp)
 	var bl: Array[String] = ["テスト", "保存", "図形編集", "設定リセット", "フォルダを開く", "全リセット", "戻る"]
