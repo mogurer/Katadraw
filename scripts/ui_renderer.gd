@@ -382,7 +382,7 @@ func draw(state: String, vp: Vector2) -> void:
 		var fade_a: float = 1.0 - _transition_alpha
 		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(_game.BG_COLOR.r, _game.BG_COLOR.g, _game.BG_COLOR.b, fade_a))
 
-	if _game.debug_stage_test_mode and state == "playing":
+	if _game.stage_session.debug_test_mode and state == "playing":
 		_draw_debug_log_button(vp)
 
 
@@ -769,8 +769,8 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	var guide_w: float = minf(vp.x - 280.0, 560.0)
 	_game.draw_string(_game.font_bold, Vector2(24, 48), "STAGE DEBUG (F2)", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 36, accent)
 	_game.draw_string(_game.font, Vector2(24, 86), "ホイール: 慣性スクロール / バーで位置 | ESC: タイトル | [C]=custom | 左で選択 | 右で編集 | Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
-	if _game.stage_debug_last_error != "":
-		_game.draw_string(_game.font, Vector2(24, 112), _game.stage_debug_last_error, HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.95, 0.3, 0.2))
+	if _game.stage_debug_state.last_error != "":
+		_game.draw_string(_game.font, Vector2(24, 112), _game.stage_debug_state.last_error, HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.95, 0.3, 0.2))
 	if _game._debug_tools_enabled():
 		var nr: Rect2 = _game._stage_debug_new_custom_button_rect(vp)
 		_game.draw_rect(nr, Color(0.95, 0.19, 0.32, 0.2))
@@ -785,7 +785,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	# 左: ステージ一覧（マスタ + user://custom_stages の Edit 産）
 	var total_rows: int = _game._stage_debug_total_rows()
 	var master_n: int = _game._stage_debug_master_count()
-	var y0: float = _game.STAGE_DEBUG_LIST_TOP_Y - _game.stage_debug_scroll
+	var y0: float = _game.STAGE_DEBUG_LIST_TOP_Y - _game.stage_debug_state.scroll
 	var fs: int = 16
 	var list_left: float = 8.0
 	var list_w: float = _game._stage_debug_list_width_for_split(split)
@@ -800,7 +800,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 		var raw_custom: Dictionary = {}
 		var label_max_w: float = list_w - icon_r * 2.0 - 20.0
 		if i < master_n:
-			cfg = StageDebugOverrides.build_config_for_index(i, _game.stage_debug_pending.get(i, {}))
+			cfg = StageDebugOverrides.build_config_for_index(i, _game.stage_debug_state.pending.get(i, {}))
 			tname = str(cfg.get("type", "?"))
 		else:
 			raw_custom = _game._stage_debug_custom_raw_merged(_game._stage_debug_custom_path_at(i))
@@ -809,7 +809,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 				var cfg_part: Dictionary = raw_custom["config"] as Dictionary
 				tname = str(cfg_part.get("shape_type", cfg_part.get("type", "?")))
 				cfg = CustomStageFile.effective_config_with_shape(raw_custom)
-		var sel: bool = i == _game.stage_debug_selected
+		var sel: bool = i == _game.stage_debug_state.selected
 		var row_rect := Rect2(list_left, y, list_w, _game.STAGE_DEBUG_ROW_H - 4.0)
 		if sel:
 			_game.draw_rect(row_rect, Color(0.95, 0.19, 0.32, 0.14))
@@ -867,8 +867,8 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	for fi in range(n_fields):
 		var fr_val: Rect2 = _game._stage_debug_field_value_rect(vp, fi)
 		var fk: String = _game.STAGE_DEBUG_FIELD_KEYS[fi]
-		var buf: String = str(_game.stage_debug_field_buffers.get(fk, ""))
-		var focus: bool = fi == _game.stage_debug_field_focus_idx
+		var buf: String = str(_game.stage_debug_state.field_buffers.get(fk, ""))
+		var focus: bool = fi == _game.stage_debug_state.field_focus_idx
 		var row_bottom: float = fr_val.position.y + fr_val.size.y + 4.0
 		_game.draw_line(Vector2(label_left, row_bottom), Vector2(vp.x - dbg_margin, row_bottom), grid_c, 1.0)
 		if fi == 0:
@@ -884,7 +884,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 		_game.draw_rect(fr_val, accent if focus else Color(0.26, 0.21, 0.28), false, 5.75 if focus else 1.25)
 		var show: String = buf
 		if focus:
-			show = _game.stage_debug_edit_buffer
+			show = _game.stage_debug_state.edit_buffer
 		if fk == "description":
 			var desc_fs: int = _game.STAGE_DEBUG_DESC_LINE_FS
 			var pad_t: float = _game.STAGE_DEBUG_DESC_PAD_TOP
@@ -905,7 +905,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 			_game.draw_string(_game.font, Vector2(fr_val.position.x + 4, baseline_sn), show, HORIZONTAL_ALIGNMENT_LEFT, fr_val.size.x - 8, fs_sn, text_c)
 		else:
 			_game.draw_string(_game.font, Vector2(fr_val.position.x + 4, fr_val.position.y + 16), show, HORIZONTAL_ALIGNMENT_LEFT, fr_val.size.x - 8, 14, text_c)
-		if _game._stage_debug_is_custom_row(_game.stage_debug_selected):
+		if _game._stage_debug_is_custom_row(_game.stage_debug_state.selected):
 			if fk == "stage_name":
 				_draw_stage_debug_text_action_button(_game._stage_debug_stage_name_action_button_rect(vp, 0), "コピー", text_c)
 				_draw_stage_debug_text_action_button(_game._stage_debug_stage_name_action_button_rect(vp, 1), "消去", text_c)
@@ -918,7 +918,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 
 ## 正規化座標で半面に含まれる辺を鏡映し、キャンバス上に薄く描く（◀右→左 ▶左→右 ▲下→上 ▼上→下）
 func _stage_edit_draw_mirror_previews(canvas_r: Rect2, verts: Array[Vector2], edges: Array, n: int) -> void:
-	var pv: Array[bool] = _game.stage_edit_mirror_preview
+	var pv: Array[bool] = _game.stage_edit_state.mirror_preview
 	if not (pv[0] or pv[1] or pv[2] or pv[3]):
 		return
 	if n < 2 or edges.is_empty():
@@ -1022,13 +1022,13 @@ func _draw_stage_edit(vp: Vector2) -> void:
 	_game.draw_string(_game.font, Vector2(panel_r.position.x, panel_r.position.y + 28), "fish / cat_face: 左＝辺に直線で点／頂点を左ドラッグ。右＝辺に円弧で点、頂点は短押しで削除・ドラッグで移動。", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 13, Color(0.35, 0.28, 0.35))
 	var fr: Rect2 = _game._stage_edit_text_rect_filename(vp)
 	_game.draw_string(_game.font, Vector2(panel_r.position.x, fr.position.y - 18), "Stage ID（config.type・小文字・数字・_ のみ）", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 14, text_c)
-	var fn_focus: bool = _game.stage_edit_text_line == 0
+	var fn_focus: bool = _game.stage_edit_state.text_line == 0
 	_game.draw_rect(fr, Color(1.0, 1.0, 1.0))
 	_game.draw_rect(fr, accent if fn_focus else text_c, false, 3.0 if fn_focus else 1.5)
-	_game.draw_string(_game.font, Vector2(fr.position.x + 6, fr.position.y + 20), _game.stage_edit_stage_id, HORIZONTAL_ALIGNMENT_LEFT, fr.size.x - 12, 16, text_c)
+	_game.draw_string(_game.font, Vector2(fr.position.x + 6, fr.position.y + 20), _game.stage_edit_state.stage_id, HORIZONTAL_ALIGNMENT_LEFT, fr.size.x - 12, 16, text_c)
 	_game.draw_string(_game.font, Vector2(panel_r.position.x, fr.position.y + fr.size.y + 12), "shape_type（クリックで選択）", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 14, text_c)
 	var n_types: int = _game.STAGE_EDIT_TYPE_OPTIONS.size()
-	var tidx: int = clampi(_game.stage_edit_type_idx, 0, n_types - 1)
+	var tidx: int = clampi(_game.stage_edit_state.type_idx, 0, n_types - 1)
 	for ti in range(n_types):
 		var cr: Rect2 = _game._stage_edit_type_chip_rect(vp, ti)
 		var nm: String = _game.STAGE_EDIT_TYPE_OPTIONS[ti]
@@ -1041,7 +1041,7 @@ func _draw_stage_edit(vp: Vector2) -> void:
 	var tr: Rect2 = _game._stage_edit_fish_shape_toggle_rect(vp)
 	_game.draw_rect(tr, Color(1.0, 1.0, 1.0))
 	_game.draw_rect(tr, text_c, false, 1.5)
-	if fish_on and _game.stage_edit_include_fish_shape:
+	if fish_on and _game.stage_edit_state.include_fish_shape:
 		_game.draw_line(Vector2(tr.position.x + 6, tr.position.y + 14), Vector2(tr.position.x + 11, tr.position.y + 19), accent, 2.0, true)
 		_game.draw_line(Vector2(tr.position.x + 11, tr.position.y + 19), Vector2(tr.position.x + 20, tr.position.y + 8), accent, 2.0, true)
 	var toggle_lbl: String = "fish の初期頂点に res://samples/custom_stage.example.json の polygon を使う"
@@ -1054,11 +1054,11 @@ func _draw_stage_edit(vp: Vector2) -> void:
 		_game.draw_rect(canvas_r, Color(0.97, 0.96, 0.97))
 		_stage_edit_draw_canvas_grid(canvas_r)
 		_game.draw_rect(canvas_r, Color(0.55, 0.5, 0.58), false, 1.5)
-		var verts: Array[Vector2] = _game.stage_edit_canvas_vertices
-		var edges: Array = _game.stage_edit_canvas_edges
+		var verts: Array[Vector2] = _game.stage_edit_state.canvas_vertices
+		var edges: Array = _game.stage_edit_state.canvas_edges
 		var n: int = verts.size()
 		_stage_edit_draw_mirror_previews(canvas_r, verts, edges, n)
-		var hover_e: int = _game.stage_edit_canvas_hover_edge
+		var hover_e: int = _game.stage_edit_state.canvas_hover_edge
 		var line_c: Color = Color(0.35, 0.3, 0.42)
 		var line_hover_c: Color = Color(0.50, 0.55, 0.70)
 		var arc_c: Color = Color(0.40, 0.45, 0.55)
@@ -1084,7 +1084,7 @@ func _draw_stage_edit(vp: Vector2) -> void:
 		var mlbl: Array[String] = ["◀", "▶", "▲", "▼"]
 		for mi in range(mrs.size()):
 			var mr: Rect2 = mrs[mi]
-			var on: bool = _game.stage_edit_mirror_preview[mi]
+			var on: bool = _game.stage_edit_state.mirror_preview[mi]
 			_game.draw_rect(mr, Color(0.95, 0.19, 0.32, 0.24) if on else Color(0.98, 0.97, 0.99, 0.96))
 			_game.draw_rect(mr, accent, false, 2.5 if on else 2.0)
 			var fs_m: int = 17
@@ -1103,8 +1103,8 @@ func _draw_stage_edit(vp: Vector2) -> void:
 	_game.draw_rect(cbr, Color(0.88, 0.86, 0.88))
 	_game.draw_rect(cbr, text_c, false, 2.0)
 	_game.draw_string(_game.font, Vector2(cbr.position.x + 36, cbr.position.y + 23), "キャンセル", HORIZONTAL_ALIGNMENT_LEFT, cbr.size.x - 72, 14, text_c)
-	if _game.stage_edit_last_error != "":
-		_game.draw_string(_game.font, Vector2(panel_r.position.x, vp.y - 50), _game.stage_edit_last_error, HORIZONTAL_ALIGNMENT_LEFT, panel_r.size.x, 15, Color(0.95, 0.3, 0.2))
+	if _game.stage_edit_state.last_error != "":
+		_game.draw_string(_game.font, Vector2(panel_r.position.x, vp.y - 50), _game.stage_edit_state.last_error, HORIZONTAL_ALIGNMENT_LEFT, panel_r.size.x, 15, Color(0.95, 0.3, 0.2))
 	_game.draw_string(_game.font, Vector2(40, vp.y - 22), "ESC: 戻る | Ctrl+Z 元に戻す | Ctrl+Y / Ctrl+Shift+Z やり直し | ◀▶▲▼ 鏡像プレビュー（クリックでオンオフ） | キャンバス: 左＝直線/ドラッグ 右＝円弧/削除", HORIZONTAL_ALIGNMENT_LEFT, vp.x - 80, 12, Color(0.45, 0.4, 0.48))
 
 
@@ -1859,14 +1859,14 @@ func _draw_guide_info(vp: Vector2) -> void:
 	# ステージ番号
 	var y2: float = y1 + stage_desc_h + gap1 + num_asc
 	var a2: float = e2
-	_draw_monospace_number(_game.font_din, Vector2(tx, y2 + slide_px * (1.0 - e2)), "%d" % (_game.current_stage + 1), HORIZONTAL_ALIGNMENT_CENTER, text_w, num_fs, Color(text_color.r, text_color.g, text_color.b, a2))
+	_draw_monospace_number(_game.font_din, Vector2(tx, y2 + slide_px * (1.0 - e2)), _game._stage_display_number_text(), HORIZONTAL_ALIGNMENT_CENTER, text_w, num_fs, Color(text_color.r, text_color.g, text_color.b, a2))
 
 	# ステージ目的
 	var y3: float = y2 + num_desc_h + gap2 + desc_asc
 	var a3: float = e3
 	var type_desc: String = _stage_renderer.get_type_description()
-	if _game.debug_stage_test_mode and _game.debug_stage_test_meta_stage_name.strip_edges() != "":
-		type_desc = _game.debug_stage_test_meta_stage_name
+	if _game.stage_session.debug_test_mode and _game.stage_session.debug_test_meta_stage_name.strip_edges() != "":
+		type_desc = _game.stage_session.debug_test_meta_stage_name
 	_game.draw_string(_game.font, Vector2(tx, y3 + slide_px * (1.0 - e3)), type_desc, HORIZONTAL_ALIGNMENT_CENTER, text_w, desc_fs, Color(0.35, 0.28, 0.35, a3))
 
 	# 上部ブロックの下端
@@ -2194,7 +2194,7 @@ func _draw_hud(vp: Vector2) -> void:
 	_game.draw_rect(Rect2(stage_box.position + shadow_offset, stage_box.size), Color(0.26, 0.21, 0.28, 0.30))
 	_game.draw_rect(stage_box, Color(1.0, 1.0, 1.0))
 	_game.draw_rect(stage_box, Color(0.26, 0.21, 0.28), false, 5.75)
-	var stage_val: String = "%d" % (_game.current_stage + 1)
+	var stage_val: String = _game._stage_display_number_text()
 	var stage_baseline: float = stage_y + (box_h + _game.font_din.get_ascent(value_fs) - _game.font_din.get_descent(value_fs)) * 0.5 - 3.0
 	_draw_monospace_number(_game.font_din, Vector2(box_x, stage_baseline), stage_val, HORIZONTAL_ALIGNMENT_CENTER, box_w, value_fs, hud_black)
 
@@ -2568,7 +2568,7 @@ func _draw_results(vp: Vector2) -> void:
 
 	# ─── グリッド（内容80%・白枠110%横） ───
 	var grid_cx: float = lp_x + lp_w * 0.5
-	var n_stages: int = _game.stage_times.size()
+	var n_stages: int = _game.stage_session.stage_times.size()
 	var grid_vis_h: float = grid_h * GRID_SCALE
 	var row_h: float = grid_h / 5.0
 	var col_gap: float = 14.0
@@ -2606,16 +2606,16 @@ func _draw_results(vp: Vector2) -> void:
 			var side: float = minf(thumb_col_w - pad * 2.0, ch - pad * 2.0)
 			var thumb_rect := Rect2(cell_rect.position.x + (thumb_col_w - side) * 0.5, cell_rect.position.y + (ch - side) * 0.5, side, side)
 			var shape_dat: Dictionary = {}
-			if idx < _game.stage_result_shapes.size():
-				shape_dat = _game.stage_result_shapes[idx] as Dictionary
+			if idx < _game.stage_session.stage_result_shapes.size():
+				shape_dat = _game.stage_session.stage_result_shapes[idx] as Dictionary
 			var ideal_l: Array = shape_dat.get("ideal", [])
 			var player_l: Array = shape_dat.get("player", [])
 			if not ideal_l.is_empty() or not player_l.is_empty():
 				_stage_renderer.draw_result_thumbnail(thumb_rect, ideal_l, player_l)
 			else:
 				_game.draw_rect(thumb_rect, Color(1.0, 1.0, 1.0, 0.1 * a))
-			var t_s: float = _game.stage_times[idx]
-			var mv: int = _game.stage_move_counts[idx] if idx < _game.stage_move_counts.size() else 0
+			var t_s: float = _game.stage_session.stage_times[idx]
+			var mv: int = _game.stage_session.stage_move_counts[idx] if idx < _game.stage_session.stage_move_counts.size() else 0
 			var time_str: String = tr("RESULT_TIME_UNIT") % t_s
 			var move_str: String = tr("RESULT_MOVE_UNIT") % mv
 			var mid_x: float   = cell_rect.position.x + thumb_col_w + pad
@@ -2661,10 +2661,10 @@ func _draw_results(vp: Vector2) -> void:
 		_char_x += _char_advs[_ci2] + _gap_extra
 
 	var total_time: float = 0.0
-	for t in _game.stage_times:
+	for t in _game.stage_session.stage_times:
 		total_time += t
 	var total_moves: int = 0
-	for m in _game.stage_move_counts:
+	for m in _game.stage_session.stage_move_counts:
 		total_moves += m
 	var tot_area_x: float = total_bar_rect.position.x + total_label_w + 12.0
 	var tot_area_w: float = total_bar_rect.position.x + total_bar_rect.size.x - tot_area_x - 12.0
@@ -2843,7 +2843,9 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 		var shape_available_h: float = btn_top - controls_bottom_y
 		var shape_available_w: float = panel_w * 0.9
 		var shape_cy: float = controls_bottom_y + shape_available_h / 2.0
-		_stage_renderer.draw_guide_shape_side_by_side(Vector2(play_cx, shape_cy), shape_available_w, shape_available_h, 1.0, 2.5)
+		var guide_box_w: float = minf(shape_available_w, 384.0)
+		var guide_box_h: float = minf(shape_available_h, 216.0)
+		_stage_renderer.draw_guide_shape_fit_max(Vector2(play_cx, shape_cy), guide_box_w, guide_box_h, 1.0, 2.5)
 
 
 func _draw_particles() -> void:

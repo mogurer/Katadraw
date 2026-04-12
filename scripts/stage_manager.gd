@@ -23,15 +23,9 @@ const REF_R_PERCENTILE := REF_R_PERCENTILE_95
 # guide_follows_player_radius が true のとき代表半径に追従（cfg で 0/1、デフォルトは fish のみ 1）
 const GUIDE_USE_FIXED_SIZE := true
 
-## 組み込みステージの七芒星・シルエット図形（katadraw_custom_stage 形式）
-const STAGEDATA_HEPTAGRAM_JSON := "res://Resources/Stagedata/heptagram_m.json"
-const STAGEDATA_HEPTAGRAM_SILHOUETTE_JSON := "res://Resources/Stagedata/heptagramsil_j.json"
-static var _stagedata_shape_cache: Dictionary = {}
-static var _warned_heptagram_stagedata_fallback: bool = false
-static var _warned_heptagram_silhouette_stagedata_fallback: bool = false
-
 # --- Stage state ---
-var current_stage: int = 0
+## 本編進行 index。custom test / rules demo など main 以外は -1。
+var current_stage: int = -1
 var stage_type: String = "circle"
 ## StageConfig.guide_follows_player_radius を start_stage で解決した値（描画・_calculate_unified_arc_metrics 用）
 var guide_follows_player_radius: bool = false
@@ -314,19 +308,21 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 
 
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
-	var cfg: Dictionary
-	if cfg_override.is_empty():
+	var cfg: Dictionary = cfg_override
+	if cfg.is_empty():
 		var stages: Array = StageDebugOverrides.get_effective_stages()
 		if idx < 0 or idx >= stages.size():
 			push_error("StageManager: 無効なステージ index %d" % idx)
 			return
 		cfg = stages[idx]
-	else:
-		cfg = cfg_override
-	current_stage = idx
+	start_stage_with_config(idx, cfg, shape_center, viewport_size, point_positions)
+
+
+func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2]) -> void:
+	current_stage = int(cfg.get("stage_index", -1))
 	ideal_outline_points.clear()
 	effective_config = cfg.duplicate(true)
-	stage_type = cfg.get("type", "circle")
+	stage_type = str(cfg.get("shape_type", cfg.get("type", "circle")))
 	min_radius = cfg["min_radius"]
 	max_radius = cfg["max_radius"]
 	num_points = cfg["num_points"]
@@ -385,8 +381,10 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 	group2_cleared = false
 	ideal_display_radius = guide_radius_val
 	ideal_display_radius_2 = guide_radius_val
-	recompute_hud_guide_layout(shape_center, viewport_size)
-	_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
+	var skip_hud_initial_layout: bool = bool(cfg.get("skip_hud_initial_layout", false))
+	if not skip_hud_initial_layout:
+		recompute_hud_guide_layout(shape_center, viewport_size)
+		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
 	calculate_metrics(point_positions)
 
 
@@ -588,45 +586,6 @@ func _parse_arc_controls_from_cfg(v: Variant) -> Dictionary:
 	return _parse_arc_controls_from_cfg_static(v)
 
 
-## Stagedata の JSON（shape.polygon_vertices / shape.arc_controls）を読み込みキャッシュする
-static func _load_stagedata_shape(path: String) -> Dictionary:
-	if _stagedata_shape_cache.has(path):
-		return _stagedata_shape_cache[path] as Dictionary
-	var empty: Dictionary = {"polygon": [], "arc": {}}
-	if not FileAccess.file_exists(path):
-		push_warning("StageManager: Stagedata が見つかりません: %s" % path)
-		_stagedata_shape_cache[path] = empty
-		return empty
-	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		push_warning("StageManager: Stagedata のオープンに失敗: %s" % path)
-		_stagedata_shape_cache[path] = empty
-		return empty
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
-	if typeof(parsed) != TYPE_DICTIONARY:
-		push_warning("StageManager: Stagedata の JSON が不正: %s" % path)
-		_stagedata_shape_cache[path] = empty
-		return empty
-	var shape: Variant = (parsed as Dictionary).get("shape", {})
-	if typeof(shape) != TYPE_DICTIONARY:
-		_stagedata_shape_cache[path] = empty
-		return empty
-	var pv: Variant = (shape as Dictionary).get("polygon_vertices")
-	var poly: Array = []
-	if typeof(pv) == TYPE_ARRAY:
-		for item in pv as Array:
-			var p: Variant = _parse_vec2_item_static(item)
-			if p != null:
-				poly.append(p)
-	var arc: Dictionary = {}
-	var ac: Variant = (shape as Dictionary).get("arc_controls")
-	if ac != null and typeof(ac) == TYPE_DICTIONARY:
-		arc = _parse_arc_controls_from_cfg_static(ac)
-	var result: Dictionary = {"polygon": poly, "arc": arc}
-	_stagedata_shape_cache[path] = result
-	return result
-
-
 func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
 	"""案C: ねこの顔の理想点を生成。直線エッジと弧エッジを分けて処理"""
 	var base_r: float = (min_radius + max_radius) / 2.0
@@ -696,42 +655,6 @@ static func get_star_polygon_vertices() -> Array:
 
 static func get_star_arc_controls() -> Dictionary:
 	return {}
-
-
-## 七芒星（heptagram）の輪郭頂点。Resources/Stagedata/heptagram_m.json を優先し、失敗時は埋め込み
-static func get_heptagram_polygon_vertices() -> Array:
-	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_JSON)
-	var verts: Array = data.get("polygon", []) as Array
-	if verts.size() >= 3:
-		return verts
-	if not _warned_heptagram_stagedata_fallback:
-		push_warning("StageManager: heptagram_m.json が無効のため埋め込み七芒星頂点を使用します")
-		_warned_heptagram_stagedata_fallback = true
-	return _heptagram_polygon_vertices_embedded()
-
-
-static func get_heptagram_arc_controls() -> Dictionary:
-	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_JSON)
-	var arc: Dictionary = data.get("arc", {}) as Dictionary
-	return arc
-
-
-## 七芒星のシルエット。Resources/Stagedata/heptagramsil_j.json を優先し、失敗時は埋め込み
-static func get_heptagram_silhouette_polygon_vertices() -> Array:
-	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_SILHOUETTE_JSON)
-	var verts: Array = data.get("polygon", []) as Array
-	if verts.size() >= 3:
-		return verts
-	if not _warned_heptagram_silhouette_stagedata_fallback:
-		push_warning("StageManager: heptagramsil_j.json が無効のため埋め込みシルエット頂点を使用します")
-		_warned_heptagram_silhouette_stagedata_fallback = true
-	return _heptagram_silhouette_polygon_vertices_embedded()
-
-
-static func get_heptagram_silhouette_arc_controls() -> Dictionary:
-	var data: Dictionary = _load_stagedata_shape(STAGEDATA_HEPTAGRAM_SILHOUETTE_JSON)
-	var arc: Dictionary = data.get("arc", {}) as Dictionary
-	return arc
 
 
 static func _heptagram_polygon_vertices_embedded() -> Array:
@@ -851,8 +774,8 @@ func _generate_heptagram_polygon_shape(center: Vector2, pts: Array[Vector2], cfg
 	var variance_factor: float = cfg.get("variance", 0.50)
 	var n: int = num_points
 
-	var verts: Array = get_heptagram_polygon_vertices()
-	var arc_ctrls: Dictionary = get_heptagram_arc_controls()
+	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_polygon_vertices_embedded()
+	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -882,8 +805,8 @@ func _generate_heptagram_silhouette_polygon_shape(center: Vector2, pts: Array[Ve
 	var variance_factor: float = cfg.get("variance", 0.50)
 	var n: int = num_points
 
-	var verts: Array = get_heptagram_silhouette_polygon_vertices()
-	var arc_ctrls: Dictionary = get_heptagram_silhouette_arc_controls()
+	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_silhouette_polygon_vertices_embedded()
+	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -1141,9 +1064,13 @@ func _get_outline_edges_for_stage(stage_t: String) -> Array:
 		"star":
 			return _build_polygon_arc_edges(get_star_polygon_vertices(), get_star_arc_controls())
 		"heptagram":
-			return _build_polygon_arc_edges(get_heptagram_polygon_vertices(), get_heptagram_arc_controls())
+			var hv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_polygon_vertices_embedded()
+			var ha: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
+			return _build_polygon_arc_edges(hv, ha)
 		"heptagram_silhouette":
-			return _build_polygon_arc_edges(get_heptagram_silhouette_polygon_vertices(), get_heptagram_silhouette_arc_controls())
+			var hsv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_silhouette_polygon_vertices_embedded()
+			var hsa: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
+			return _build_polygon_arc_edges(hsv, hsa)
 		_:
 			return []
 

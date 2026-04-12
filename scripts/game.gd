@@ -97,10 +97,8 @@ var hint_end_time: float = 0.0
 var hints_triggered: Array[bool] = [false, false]
 
 # --- Stage Results ---
-var stage_times: Array[float] = []
-var stage_move_counts: Array[int] = []
+var stage_session: StageSession = StageSession.new()
 ## 各ステージクリア時のガイド／プレイヤー輪郭（リザルト一覧サムネイル用）。要素は capture_result_loops() と同形の Dictionary
-var stage_result_shapes: Array = []
 ## 現在ステージ中の「つかんだあと動かした」回数（閾値距離ごとに加算）
 var stage_move_count: int = 0
 const STAGE_MOVE_COUNT_PIXEL_THRESHOLD := 22.0
@@ -234,21 +232,7 @@ const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 	"display_rate_min_pct", "clear_pct", "guide_follows_player_radius", "group_sizes",
 	"stage_name", "description",
 ]
-var stage_debug_scroll: float = 0.0
-## 正で下方向（scroll 増加）。慣性用 px/s
-var stage_debug_scroll_vel: float = 0.0
-var _stage_debug_wheel_times: Array[float] = []
-var stage_debug_scrollbar_drag: bool = false
-var _stage_debug_scrollbar_drag_thumb_rel_y: float = 0.0
-var stage_debug_selected: int = 0
-var stage_debug_pending: Dictionary = {}  # マスタ行 index -> partial（②: インデックスオーバーライド専用）
-## ② Edit 産カスタム（ファイル1本=1行）。path -> フィールド編集の差分（config + meta.stage_name / meta.description）
-var stage_debug_custom_paths: Array[String] = []
-var stage_debug_custom_pending: Dictionary = {}
-var stage_debug_field_buffers: Dictionary = {}  # field_key -> String（選択行の編集用）
-var stage_debug_field_focus_idx: int = -1  # STAGE_DEBUG_FIELD_KEYS のインデックス、-1=なし
-var stage_debug_edit_buffer: String = ""
-var stage_debug_last_error: String = ""
+var stage_debug_state: StageDebugState = StageDebugState.new()
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
 	"fish", "cat_face", "triangle", "square", "circle", "star", "two_circles",
@@ -264,42 +248,109 @@ const STAGE_EDIT_CANVAS_EDGE_ADD_DISTANCE: float = 80.0
 const STAGE_EDIT_CANVAS_RIGHT_DRAG_THRESHOLD: float = 5.0
 const STAGE_EDIT_MIRROR_BTN_SZ: float = 36.0
 const STAGE_EDIT_UNDO_STACK_MAX: int = 80
-var stage_edit_stage_id: String = "new_stage"
+var stage_edit_state: StageEditState = StageEditState.new()
+var stage_edit_stage_id: String:
+	get:
+		return stage_edit_state.stage_id
+	set(value):
+		stage_edit_state.stage_id = value
 ## meta の JSON 保存時にそのままマージ（stage_name / description は STAGE DEBUG で編集）
-var stage_edit_meta_preserve: Dictionary = {}
-var stage_edit_type_idx: int = 0
+var stage_edit_meta_preserve: Dictionary:
+	get:
+		return stage_edit_state.meta_preserve
+	set(value):
+		stage_edit_state.meta_preserve = value
+var stage_edit_type_idx: int:
+	get:
+		return stage_edit_state.type_idx
+	set(value):
+		stage_edit_state.type_idx = value
 ## fish のとき samples の polygon を初期値に使うか（オフ時は組み込み fish 頂点）
-var stage_edit_include_fish_shape: bool = true
+var stage_edit_include_fish_shape: bool:
+	get:
+		return stage_edit_state.include_fish_shape
+	set(value):
+		stage_edit_state.include_fish_shape = value
 ## 0=Stage ID（テキスト欄はこれのみ）
-var stage_edit_text_line: int = 0
-var stage_edit_last_error: String = ""
+var stage_edit_text_line: int:
+	get:
+		return stage_edit_state.text_line
+	set(value):
+		stage_edit_state.text_line = value
+var stage_edit_last_error: String:
+	get:
+		return stage_edit_state.last_error
+	set(value):
+		stage_edit_state.last_error = value
 ## shape_type が fish / cat_face のときの編集用頂点（正規化座標）と辺（KatadrawShapeEditor と同様）
-var stage_edit_canvas_vertices: Array[Vector2] = []
-var stage_edit_canvas_edges: Array[Dictionary] = []
-var stage_edit_canvas_hover_edge: int = -1
-var stage_edit_canvas_drag_idx: int = -1
-var stage_edit_canvas_drag_norm_offset: Vector2 = Vector2.ZERO
-var stage_edit_canvas_right_drag_idx: int = -1
-var stage_edit_canvas_right_down_pos: Vector2 = Vector2.ZERO
-var stage_edit_canvas_right_drag_norm_offset: Vector2 = Vector2.ZERO
-var stage_edit_canvas_right_drag_committed: bool = false
+var stage_edit_canvas_vertices: Array[Vector2]:
+	get:
+		return stage_edit_state.canvas_vertices
+	set(value):
+		stage_edit_state.canvas_vertices = value
+var stage_edit_canvas_edges: Array[Dictionary]:
+	get:
+		return stage_edit_state.canvas_edges
+	set(value):
+		stage_edit_state.canvas_edges = value
+var stage_edit_canvas_hover_edge: int:
+	get:
+		return stage_edit_state.canvas_hover_edge
+	set(value):
+		stage_edit_state.canvas_hover_edge = value
+var stage_edit_canvas_drag_idx: int:
+	get:
+		return stage_edit_state.canvas_drag_idx
+	set(value):
+		stage_edit_state.canvas_drag_idx = value
+var stage_edit_canvas_drag_norm_offset: Vector2:
+	get:
+		return stage_edit_state.canvas_drag_norm_offset
+	set(value):
+		stage_edit_state.canvas_drag_norm_offset = value
+var stage_edit_canvas_right_drag_idx: int:
+	get:
+		return stage_edit_state.canvas_right_drag_idx
+	set(value):
+		stage_edit_state.canvas_right_drag_idx = value
+var stage_edit_canvas_right_down_pos: Vector2:
+	get:
+		return stage_edit_state.canvas_right_down_pos
+	set(value):
+		stage_edit_state.canvas_right_down_pos = value
+var stage_edit_canvas_right_drag_norm_offset: Vector2:
+	get:
+		return stage_edit_state.canvas_right_drag_norm_offset
+	set(value):
+		stage_edit_state.canvas_right_drag_norm_offset = value
+var stage_edit_canvas_right_drag_committed: bool:
+	get:
+		return stage_edit_state.canvas_right_drag_committed
+	set(value):
+		stage_edit_state.canvas_right_drag_committed = value
 ## Edit キャンバス用 undo / redo（頂点・辺のスナップショット）
-var stage_edit_undo_stack: Array = []
-var stage_edit_redo_stack: Array = []
+var stage_edit_undo_stack: Array:
+	get:
+		return stage_edit_state.undo_stack
+	set(value):
+		stage_edit_state.undo_stack = value
+var stage_edit_redo_stack: Array:
+	get:
+		return stage_edit_state.redo_stack
+	set(value):
+		stage_edit_state.redo_stack = value
 ## ◀▶▲▼ 鏡像プレビュー（各ボタンでトグル、データは変更しない）
-var stage_edit_mirror_preview: Array[bool] = [false, false, false, false]
+var stage_edit_mirror_preview: Array[bool]:
+	get:
+		return stage_edit_state.mirror_preview
+	set(value):
+		stage_edit_state.mirror_preview = value
 var _se_ld_single_arc_edge: int = -1
 var _se_ld_single_arc_angle: float = 0.0
 var _se_ld_both_edges: Array[int] = []
 var _se_ld_both_angles: Array[float] = []
 var _se_ld_both_centers: Array[Vector2] = []
 var _se_ld_both_last_centers: Array[Vector2] = []
-var debug_stage_test_mode: bool = false
-var debug_stage_test_seed: int = 0
-## STAGE DEBUG: last cfg passed to start_stage (retry must use this when idx is not a master index).
-var debug_stage_test_restart_cfg: Dictionary = {}
-## テストプレイ guide_info の説明行に出す（カスタムの meta.stage_name）
-var debug_stage_test_meta_stage_name: String = ""
 var input_recorder: DebugInputRecorder
 
 # --- Pause Menu ---
@@ -761,20 +812,27 @@ func _sync_stage_vars() -> void:
 	stage_effective_cfg = stage_manager.effective_config.duplicate(true)
 
 
-func _start_stage(idx: int) -> void:
-	var vp: Vector2 = get_viewport_rect().size
+func _default_stage_shape_center(vp: Vector2) -> Vector2:
 	# 左1/4がUIのため、右3/4領域の中央に図形を配置
-	shape_center = Vector2(vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5)
-	stage_manager.start_stage(idx, shape_center, vp, point_positions)
+	return Vector2(vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5)
+
+
+func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_state: String = "guide_info", reset_move_track: bool = true) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	shape_center = center
+	stage_manager.start_stage_with_config(idx, cfg, shape_center, vp, point_positions)
 	_sync_stage_vars()
 
-	game_state = "guide_info"
-	guide_start_time = 0.0
+	if next_state != "":
+		game_state = next_state
+	if next_state == "guide_info":
+		guide_start_time = 0.0
 	hovered_index = -1
 	is_dragging = false
 	selected_indices.clear()
-	stage_move_count = 0
-	_reset_stage_move_track_internal()
+	if reset_move_track:
+		stage_move_count = 0
+		_reset_stage_move_track_internal()
 	input_handler.reset_for_stage()
 	ui_renderer.clear_spore_particles()
 	hint_alpha = 0.0
@@ -782,6 +840,12 @@ func _start_stage(idx: int) -> void:
 	hints_triggered = [false, false]
 	guide_count_played = 0
 	queue_redraw()
+
+
+func _start_stage(idx: int) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(idx)
+	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp))
 
 
 func _calculate_metrics() -> void:
@@ -801,8 +865,10 @@ func _is_selected(idx: int) -> bool:
 	return idx in selected_indices
 
 
-func _append_stage_result_snapshot() -> void:
-	stage_result_shapes.append(ui_renderer.capture_stage_result_shapes())
+func _stage_display_number_text() -> String:
+	if current_stage >= 0:
+		return "%d" % (current_stage + 1)
+	return "-"
 
 
 func _check_clear() -> void:
@@ -829,10 +895,8 @@ func _check_clear() -> void:
 			input_handler.release_mouse_grab()
 			_stop_sfx_move()
 			clear_time = Time.get_ticks_msec() / 1000.0 - start_time
-			stage_times.append(clear_time)
 			_finalize_move_count()
-			stage_move_counts.append(stage_move_count)
-			_append_stage_result_snapshot()
+			stage_session.append_result(clear_time, stage_move_count, ui_renderer.capture_stage_result_shapes())
 			ui_renderer.clear_spore_particles()
 			var mid: Vector2 = (current_centroid + current_centroid_2) * 0.5
 			ui_renderer.spawn_particles(mid)
@@ -845,10 +909,8 @@ func _check_clear() -> void:
 		input_handler.release_mouse_grab()
 		_stop_sfx_move()
 		clear_time = Time.get_ticks_msec() / 1000.0 - start_time
-		stage_times.append(clear_time)
 		_finalize_move_count()
-		stage_move_counts.append(stage_move_count)
-		_append_stage_result_snapshot()
+		stage_session.append_result(clear_time, stage_move_count, ui_renderer.capture_stage_result_shapes())
 		ui_renderer.clear_spore_particles()
 		ui_renderer.spawn_particles(current_centroid)
 		_play_sfx(sfx_clear)
@@ -866,10 +928,8 @@ func _force_clear_for_debug() -> void:
 	input_handler.release_mouse_grab()
 	_stop_sfx_move()
 	clear_time = Time.get_ticks_msec() / 1000.0 - start_time
-	stage_times.append(clear_time)
 	_finalize_move_count()
-	stage_move_counts.append(stage_move_count)
-	_append_stage_result_snapshot()
+	stage_session.append_result(clear_time, stage_move_count, ui_renderer.capture_stage_result_shapes())
 	ui_renderer.clear_spore_particles()
 	if stage_manager.stage_type == "two_circles":
 		ui_renderer.spawn_particles((current_centroid + current_centroid_2) * 0.5)
@@ -1236,7 +1296,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "cleared":
-		if debug_stage_test_mode:
+		if stage_session.debug_test_mode:
 			if is_confirm_key or is_confirm_pad:
 				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
 					_stop_bgm(bgm_game)
@@ -1296,7 +1356,7 @@ func _input(event: InputEvent) -> void:
 	# イントロ演出中は入力を受け付けない（ポーズ除く）
 	if not ui_renderer.is_stage_intro_done():
 		return
-	if debug_stage_test_mode and input_recorder and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	if stage_session.debug_test_mode and input_recorder and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if _hit_debug_log_button(event.position):
 			_flush_debug_input_log()
 			return
@@ -1315,7 +1375,7 @@ func _input(event: InputEvent) -> void:
 			_stop_sfx_move()
 	if allow_pad and event is InputEventJoypadButton:
 		input_handler.handle_pad_button(event.button_index, event.pressed)
-	if debug_stage_test_mode and input_recorder:
+	if stage_session.debug_test_mode and input_recorder:
 		input_recorder.record_event(event)
 
 
@@ -1668,23 +1728,17 @@ func _enter_rules() -> void:
 	var shift_down: float = vp.y * 0.15
 	rules_demo_center = Vector2(vp.x / 2.0, guide_h + shift_down + (vp.y - guide_h - shift_down - btn_h) / 2.0)
 	rules_demo_radius = minf(vp.x, vp.y) * 0.12
-	point_positions.clear()
-	var demo_points: int = RULES_DEMO_POINTS
-	for i in range(demo_points):
-		var angle: float = TAU * i / float(demo_points)
-		point_positions.append(rules_demo_center + Vector2(cos(angle), sin(angle)) * rules_demo_radius)
-	stage_type = "circle"
-	stage_manager.stage_type = "circle"
-	stage_manager.group_split = 0
-	stage_manager.num_points = demo_points
-	stage_manager.current_centroid = rules_demo_center
-	shape_center = rules_demo_center
-	selected_indices.clear()
-	hovered_index = -1
-	is_dragging = false
-	input_handler.reset_for_stage()
-	ui_renderer.clear_spore_particles()
-	queue_redraw()
+	var demo_cfg: Dictionary = StageConfig.build_effective_config({
+		"type": "circle",
+		"num_points": RULES_DEMO_POINTS,
+		"min_radius": rules_demo_radius,
+		"max_radius": rules_demo_radius,
+		"variance": 0.0,
+		"clear_pct": 100.0,
+		"display_rate_min_pct": 0.0,
+	})
+	demo_cfg["skip_hud_initial_layout"] = true
+	_begin_stage_with_config(-1, demo_cfg, rules_demo_center, "rules", false)
 
 
 func _input_rules(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
@@ -2081,26 +2135,10 @@ func _do_pause_retry() -> void:
 	pause_retry_elapsed = pause_elapsed
 	pause_active = false
 	var vp: Vector2 = get_viewport_rect().size
-	shape_center = Vector2(vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5)
-	if debug_stage_test_mode and not debug_stage_test_restart_cfg.is_empty():
-		stage_manager.start_stage(current_stage, shape_center, vp, point_positions, debug_stage_test_restart_cfg)
-	else:
-		stage_manager.start_stage(current_stage, shape_center, vp, point_positions)
-	_sync_stage_vars()
-	game_state = "guide_info"
-	guide_start_time = 0.0
-	hovered_index = -1
-	is_dragging = false
-	selected_indices.clear()
-	stage_move_count = 0
-	_reset_stage_move_track_internal()
-	input_handler.reset_for_stage()
-	ui_renderer.clear_spore_particles()
-	hint_alpha = 0.0
-	hint_active = false
-	hints_triggered = [false, false]
-	guide_count_played = 0
-	queue_redraw()
+	var cfg: Dictionary = stage_session.debug_test_restart_cfg
+	if cfg.is_empty():
+		cfg = StageDebugOverrides.build_config_for_index(current_stage)
+	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(vp))
 
 
 func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> void:
@@ -2175,14 +2213,10 @@ func _resume_from_pause() -> void:
 
 
 func _start_game() -> void:
-	debug_stage_test_mode = false
-	debug_stage_test_restart_cfg.clear()
-	debug_stage_test_meta_stage_name = ""
+	stage_session.clear_debug_test()
 	input_recorder = null
 	_stop_bgm(bgm_title)
-	stage_times.clear()
-	stage_move_counts.clear()
-	stage_result_shapes.clear()
+	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(0)
 
@@ -2212,13 +2246,7 @@ func _enter_results_screen_debug() -> void:
 	if not _debug_tools_enabled():
 		return
 	const SLOT_COUNT: int = 10
-	stage_times.clear()
-	stage_move_counts.clear()
-	stage_result_shapes.clear()
-	for i in range(SLOT_COUNT):
-		stage_times.append(randf_range(1.0, 999.0))
-		stage_move_counts.append(randi_range(10, 500))
-		stage_result_shapes.append({})
+	stage_session.fill_dummy_results(SLOT_COUNT)
 	_stop_bgm(bgm_title)
 	game_state = "results"
 	_play_bgm(bgm_result)
@@ -2227,10 +2255,8 @@ func _enter_results_screen_debug() -> void:
 
 func _return_to_title_or_stage_debug_from_test() -> void:
 	_screenshot_folder_opened = false
-	var back_to_stage_debug: bool = debug_stage_test_mode and _debug_tools_enabled()
-	debug_stage_test_mode = false
-	debug_stage_test_restart_cfg.clear()
-	debug_stage_test_meta_stage_name = ""
+	var back_to_stage_debug: bool = stage_session.debug_test_mode and _debug_tools_enabled()
+	stage_session.clear_debug_test()
 	input_recorder = null
 	if back_to_stage_debug:
 		_refresh_stage_debug_custom_paths()
@@ -2238,7 +2264,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		debug_mode = true
 		game_state = "stage_debug"
 		_sync_stage_debug_field_buffers()
-		stage_debug_last_error = ""
+		stage_debug_state.last_error = ""
 	else:
 		debug_mode = false
 		game_state = "title"
@@ -2253,17 +2279,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 func _enter_stage_debug_screen() -> void:
 	debug_mode = true
 	_stop_bgm(bgm_title)
-	_refresh_stage_debug_custom_paths()
-	stage_debug_scroll = 0.0
-	stage_debug_scroll_vel = 0.0
-	_stage_debug_wheel_times.clear()
-	stage_debug_scrollbar_drag = false
-	stage_debug_selected = 0
-	stage_debug_field_focus_idx = -1
-	stage_debug_edit_buffer = ""
-	stage_debug_last_error = ""
-	_clamp_stage_debug_selection()
-	_sync_stage_debug_field_buffers()
+	stage_debug_state.reset_for_screen(_debug_tools_enabled(), STAGE_DEBUG_FIELD_KEYS)
 	game_state = "stage_debug"
 	_stage_debug_sync_ime_for_field_focus()
 	queue_redraw()
@@ -2277,249 +2293,55 @@ func _stage_debug_sync_ime_for_field_focus() -> void:
 		DisplayServer.window_set_ime_active(false)
 		return
 	var want_ime: bool = false
-	if stage_debug_field_focus_idx >= 0 and stage_debug_field_focus_idx < STAGE_DEBUG_FIELD_KEYS.size():
-		var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+	if stage_debug_state.field_focus_idx >= 0 and stage_debug_state.field_focus_idx < STAGE_DEBUG_FIELD_KEYS.size():
+		var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_state.field_focus_idx]
 		want_ime = fk == "stage_name" or fk == "description"
 	DisplayServer.window_set_ime_active(want_ime)
 
 
 func _refresh_stage_debug_custom_paths() -> void:
-	if not _debug_tools_enabled():
-		stage_debug_custom_paths.clear()
-		return
-	stage_debug_custom_paths = CustomStageFile.list_custom_stage_paths()
+	stage_debug_state.refresh_custom_paths(_debug_tools_enabled())
 
 
 func _stage_debug_master_count() -> int:
-	return StageData.get_stages().size()
+	return stage_debug_state.master_count()
 
 
 func _stage_debug_total_rows() -> int:
-	return _stage_debug_master_count() + stage_debug_custom_paths.size()
+	return stage_debug_state.total_rows()
 
 
 func _stage_debug_is_custom_row(row: int) -> bool:
-	return row >= _stage_debug_master_count() and row < _stage_debug_total_rows()
+	return stage_debug_state.is_custom_row(row)
 
 
 func _stage_debug_custom_path_at(row: int) -> String:
-	return stage_debug_custom_paths[row - _stage_debug_master_count()]
+	return stage_debug_state.custom_path_at(row)
 
 
 func _clamp_stage_debug_selection() -> void:
-	var n: int = _stage_debug_total_rows()
-	if n <= 0:
-		stage_debug_selected = 0
-		return
-	if stage_debug_selected >= n:
-		stage_debug_selected = n - 1
-	if stage_debug_selected < 0:
-		stage_debug_selected = 0
+	stage_debug_state.clamp_selection()
 
 
 ## カスタム行: ファイル + custom_pending をマージした raw（effective 前）
 func _stage_debug_custom_raw_merged(path: String) -> Dictionary:
-	var pr: Dictionary = CustomStageFile.parse_file(path)
-	if not pr.get("ok", false):
-		return {}
-	var raw: Dictionary = (pr["raw"] as Dictionary).duplicate(true)
-	var pend: Dictionary = stage_debug_custom_pending.get(path, {})
-	if pend.is_empty():
-		return raw
-	var cfg_partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
-	var meta_partial: Dictionary = {}
-	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
-		meta_partial = (raw["meta"] as Dictionary).duplicate(true)
-	for k in pend:
-		if k == "stage_name" or k == "description":
-			var vs: String = str(pend[k]).strip_edges()
-			if vs == "":
-				meta_partial.erase(k)
-			else:
-				meta_partial[k] = vs
-		else:
-			cfg_partial[k] = pend[k]
-	raw["config"] = cfg_partial
-	if not meta_partial.is_empty():
-		raw["meta"] = meta_partial
-	elif raw.has("meta"):
-		raw.erase("meta")
-	return raw
+	return stage_debug_state.custom_raw_merged(path)
 
 
 func _sync_stage_debug_field_buffers() -> void:
-	var cfg: Dictionary = {}
-	var row: int = stage_debug_selected
-	var raw_cfg: Dictionary = {}
-	var meta_view: Dictionary = {}
-	if _stage_debug_is_custom_row(row):
-		var path: String = _stage_debug_custom_path_at(row)
-		var raw: Dictionary = _stage_debug_custom_raw_merged(path)
-		if not raw.is_empty():
-			cfg = CustomStageFile.effective_config_with_shape(raw)
-			raw_cfg = raw["config"] as Dictionary
-			if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
-				meta_view = raw["meta"] as Dictionary
-	else:
-		cfg = StageDebugOverrides.build_config_for_index(
-			row, stage_debug_pending.get(row, {})
-		)
-	stage_debug_field_buffers.clear()
-	for key in STAGE_DEBUG_FIELD_KEYS:
-		if key == "stage_name":
-			if _stage_debug_is_custom_row(row):
-				stage_debug_field_buffers[key] = str(meta_view.get("stage_name", ""))
-			else:
-				stage_debug_field_buffers[key] = ""
-			continue
-		if key == "description":
-			if _stage_debug_is_custom_row(row):
-				stage_debug_field_buffers[key] = str(meta_view.get("description", ""))
-			else:
-				stage_debug_field_buffers[key] = ""
-			continue
-		if key == "group_sizes" and cfg.has("group_sizes"):
-			var gs: Array = cfg["group_sizes"] as Array
-			stage_debug_field_buffers[key] = "%d,%d" % [int(gs[0]), int(gs[1])]
-		elif _stage_debug_is_custom_row(row) and key == "type":
-			stage_debug_field_buffers[key] = str(raw_cfg.get("type", ""))
-		elif cfg.has(key):
-			stage_debug_field_buffers[key] = _stage_debug_config_value_str_for_buffer(key, cfg[key])
-		else:
-			stage_debug_field_buffers[key] = ""
-	if stage_debug_field_focus_idx >= 0 and stage_debug_field_focus_idx < STAGE_DEBUG_FIELD_KEYS.size():
-		var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
-		stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
+	stage_debug_state.sync_field_buffers(STAGE_DEBUG_FIELD_KEYS)
 
 
 func _commit_focused_field_to_pending() -> void:
-	if stage_debug_field_focus_idx < 0 or stage_debug_field_focus_idx >= STAGE_DEBUG_FIELD_KEYS.size():
-		return
-	var fk: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
-	var err: String = _apply_field_string_to_pending(fk, stage_debug_edit_buffer)
-	stage_debug_last_error = err
-	_sync_stage_debug_field_buffers()
+	stage_debug_state.commit_focused_field_to_pending(STAGE_DEBUG_FIELD_KEYS)
 
 
 func _validate_custom_stage_pending(path: String, partial: Dictionary) -> String:
-	var pr: Dictionary = CustomStageFile.parse_file(path)
-	if not pr.get("ok", false):
-		return str(pr.get("error", "読み込み失敗"))
-	var raw: Dictionary = (pr["raw"] as Dictionary).duplicate(true)
-	var cfg_partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
-	var meta_partial: Dictionary = {}
-	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
-		meta_partial = (raw["meta"] as Dictionary).duplicate(true)
-	for k in partial:
-		if k == "stage_name" or k == "description":
-			var vs: String = str(partial[k]).strip_edges()
-			if vs == "":
-				meta_partial.erase(k)
-			else:
-				meta_partial[k] = vs
-		else:
-			cfg_partial[k] = partial[k]
-	raw["config"] = cfg_partial
-	if not meta_partial.is_empty():
-		raw["meta"] = meta_partial
-	elif raw.has("meta"):
-		raw.erase("meta")
-	var vroot: String = CustomStageFile.validate_root(raw)
-	if vroot != "":
-		return vroot
-	var cfg: Dictionary = CustomStageFile.effective_config_with_shape(raw)
-	return StageDebugOverrides.validate_effective_config(cfg)
+	return stage_debug_state.validate_custom_stage_pending(path, partial)
 
 
 func _apply_field_string_to_pending(key: String, text: String) -> String:
-	var s: String = text.strip_edges()
-	var row: int = stage_debug_selected
-	if (key == "stage_name" or key == "description") and not _stage_debug_is_custom_row(row):
-		if s == "":
-			return ""
-		return "stage_name / description はカスタムステージ行のみ編集できます"
-	if _stage_debug_is_custom_row(row):
-		var path: String = _stage_debug_custom_path_at(row)
-		var p: Dictionary = stage_debug_custom_pending.get(path, {}).duplicate(true)
-		if s == "":
-			# stage_name / description は空文字を pending に残す（erase だと未編集扱いでファイルの meta に戻る）
-			if key == "stage_name" or key == "description":
-				p[key] = ""
-			else:
-				p.erase(key)
-		else:
-			match key:
-				"type":
-					p["type"] = s
-				"num_points":
-					if not s.is_valid_int():
-						return "num_points が整数ではありません"
-					p["num_points"] = int(s)
-				"min_radius", "max_radius", "variance", "zigzag", "display_rate_min_pct", "clear_pct":
-					if not s.is_valid_float():
-						return "%s が数値ではありません" % key
-					p[key] = float(s)
-				"guide_follows_player_radius":
-					if s != "0" and s != "1":
-						return "guide_follows_player_radius は 0 または 1"
-					p[key] = int(s)
-				"group_sizes":
-					var parts: PackedStringArray = s.split(",")
-					if parts.size() < 2:
-						return "group_sizes は 12,12 の形式にしてください"
-					if not parts[0].strip_edges().is_valid_int() or not parts[1].strip_edges().is_valid_int():
-						return "group_sizes が不正です"
-					p["group_sizes"] = [int(parts[0].strip_edges()), int(parts[1].strip_edges())]
-				"stage_name", "description":
-					p[key] = s
-				_:
-					p[key] = s
-		var verr: String = _validate_custom_stage_pending(path, p)
-		if verr != "":
-			return verr
-		if p.is_empty():
-			stage_debug_custom_pending.erase(path)
-		else:
-			stage_debug_custom_pending[path] = p
-		return ""
-
-	var idx: int = row
-	var p2: Dictionary = stage_debug_pending.get(idx, {}).duplicate(true)
-	if s == "":
-		p2.erase(key)
-	else:
-		match key:
-			"type":
-				p2["type"] = s
-			"num_points":
-				if not s.is_valid_int():
-					return "num_points が整数ではありません"
-				p2["num_points"] = int(s)
-			"min_radius", "max_radius", "variance", "zigzag", "display_rate_min_pct", "clear_pct":
-				if not s.is_valid_float():
-					return "%s が数値ではありません" % key
-				p2[key] = float(s)
-			"guide_follows_player_radius":
-				if s != "0" and s != "1":
-					return "guide_follows_player_radius は 0 または 1"
-				p2[key] = int(s)
-			"group_sizes":
-				var parts: PackedStringArray = s.split(",")
-				if parts.size() < 2:
-					return "group_sizes は 12,12 の形式にしてください"
-				if not parts[0].strip_edges().is_valid_int() or not parts[1].strip_edges().is_valid_int():
-					return "group_sizes が不正です"
-				p2["group_sizes"] = [int(parts[0].strip_edges()), int(parts[1].strip_edges())]
-			_:
-				p2[key] = s
-	var verr: String = StageDebugOverrides.validate_partial_with_master(idx, p2)
-	if verr != "":
-		return verr
-	if p2.is_empty():
-		stage_debug_pending.erase(idx)
-	else:
-		stage_debug_pending[idx] = p2
-	return ""
+	return stage_debug_state.apply_field_string_to_pending(key, text)
 
 
 func _stage_debug_split_x(vp: Vector2) -> float:
@@ -2535,20 +2357,16 @@ func _stage_debug_fields_start_y() -> float:
 
 
 func _stage_debug_config_value_str_for_buffer(key: String, v: Variant) -> String:
-	match key:
-		"num_points", "guide_follows_player_radius":
-			return str(int(v))
-		_:
-			return str(v)
+	return stage_debug_state.config_value_str_for_buffer(key, v)
 
 
 func _stage_debug_description_line_count() -> int:
 	var dfi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
 	var txt: String = ""
-	if dfi >= 0 and stage_debug_field_focus_idx == dfi:
-		txt = stage_debug_edit_buffer
+	if dfi >= 0 and stage_debug_state.field_focus_idx == dfi:
+		txt = stage_debug_state.edit_buffer
 	else:
-		txt = str(stage_debug_field_buffers.get("description", ""))
+		txt = str(stage_debug_state.field_buffers.get("description", ""))
 	var n: int = max(1, txt.split("\n").size())
 	return max(STAGE_DEBUG_DESC_VISIBLE_LINES, min(n, STAGE_DEBUG_DESC_MAX_LINES))
 
@@ -2604,7 +2422,7 @@ func _stage_debug_scrollbar_thumb_rect(vp: Vector2) -> Rect2:
 		return tr
 	var thumb_h: float = maxf(STAGE_DEBUG_SCROLLBAR_MIN_THUMB, (track_h * track_h) / (track_h + smax))
 	thumb_h = minf(thumb_h, track_h)
-	var thumb_y: float = tr.position.y + (stage_debug_scroll / smax) * (track_h - thumb_h)
+	var thumb_y: float = tr.position.y + (stage_debug_state.scroll / smax) * (track_h - thumb_h)
 	return Rect2(tr.position.x, thumb_y, STAGE_DEBUG_SCROLLBAR_W, thumb_h)
 
 
@@ -2612,42 +2430,42 @@ func _stage_debug_process_scroll(delta: float) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var smax: float = _stage_debug_scroll_max(vp)
 	if smax <= 0.0:
-		stage_debug_scroll = 0.0
-		stage_debug_scroll_vel = 0.0
+		stage_debug_state.scroll = 0.0
+		stage_debug_state.scroll_vel = 0.0
 		return
-	stage_debug_scroll += stage_debug_scroll_vel * delta
-	if stage_debug_scroll < 0.0:
-		stage_debug_scroll = 0.0
-		stage_debug_scroll_vel = 0.0
-	elif stage_debug_scroll > smax:
-		stage_debug_scroll = smax
-		stage_debug_scroll_vel = 0.0
-	stage_debug_scroll_vel *= exp(-STAGE_DEBUG_SCROLL_INERTIA_DECAY * delta)
-	if absf(stage_debug_scroll_vel) < 4.0:
-		stage_debug_scroll_vel = 0.0
+	stage_debug_state.scroll += stage_debug_state.scroll_vel * delta
+	if stage_debug_state.scroll < 0.0:
+		stage_debug_state.scroll = 0.0
+		stage_debug_state.scroll_vel = 0.0
+	elif stage_debug_state.scroll > smax:
+		stage_debug_state.scroll = smax
+		stage_debug_state.scroll_vel = 0.0
+	stage_debug_state.scroll_vel *= exp(-STAGE_DEBUG_SCROLL_INERTIA_DECAY * delta)
+	if absf(stage_debug_state.scroll_vel) < 4.0:
+		stage_debug_state.scroll_vel = 0.0
 
 
 func _stage_debug_wheel_record() -> void:
 	var t: float = Time.get_ticks_msec() / 1000.0
-	_stage_debug_wheel_times.append(t)
-	while _stage_debug_wheel_times.size() > 0 and t - _stage_debug_wheel_times[0] > 0.45:
-		_stage_debug_wheel_times.remove_at(0)
+	stage_debug_state.wheel_times.append(t)
+	while stage_debug_state.wheel_times.size() > 0 and t - stage_debug_state.wheel_times[0] > 0.45:
+		stage_debug_state.wheel_times.remove_at(0)
 
 
 func _stage_debug_wheel_events_per_sec() -> float:
-	if _stage_debug_wheel_times.size() < 2:
+	if stage_debug_state.wheel_times.size() < 2:
 		return 0.0
-	var t0: float = _stage_debug_wheel_times[0]
-	var t1: float = _stage_debug_wheel_times[_stage_debug_wheel_times.size() - 1]
+	var t0: float = stage_debug_state.wheel_times[0]
+	var t1: float = stage_debug_state.wheel_times[stage_debug_state.wheel_times.size() - 1]
 	var span: float = maxf(0.04, t1 - t0)
-	return float(_stage_debug_wheel_times.size() - 1) / span
+	return float(stage_debug_state.wheel_times.size() - 1) / span
 
 
 func _stage_debug_wheel_add_impulse(direction: float) -> void:
 	_stage_debug_wheel_record()
 	var rate: float = minf(_stage_debug_wheel_events_per_sec(), STAGE_DEBUG_WHEEL_RATE_CAP)
 	var add_vel: float = STAGE_DEBUG_WHEEL_BASE_VEL + STAGE_DEBUG_WHEEL_RATE_SCALE * rate
-	stage_debug_scroll_vel += direction * add_vel
+	stage_debug_state.scroll_vel += direction * add_vel
 
 
 func _stage_debug_button_rects(vp: Vector2) -> Array[Rect2]:
@@ -2727,14 +2545,14 @@ func _stage_debug_description_action_button_rect(vp: Vector2, action_idx: int) -
 
 
 func _stage_debug_paste_into_field(field_key: String) -> void:
-	if not _stage_debug_is_custom_row(stage_debug_selected):
+	if not _stage_debug_is_custom_row(stage_debug_state.selected):
 		return
 	var fi: int = STAGE_DEBUG_FIELD_KEYS.find(field_key)
 	if fi < 0:
 		return
-	stage_debug_field_focus_idx = fi
-	stage_debug_edit_buffer = _filter_stage_debug_paste_for_field(field_key, DisplayServer.clipboard_get())
-	stage_debug_last_error = _apply_field_string_to_pending(field_key, stage_debug_edit_buffer)
+	stage_debug_state.field_focus_idx = fi
+	stage_debug_state.edit_buffer = _filter_stage_debug_paste_for_field(field_key, DisplayServer.clipboard_get())
+	stage_debug_state.last_error = _apply_field_string_to_pending(field_key, stage_debug_state.edit_buffer)
 	_sync_stage_debug_field_buffers()
 	_stage_debug_sync_ime_for_field_focus()
 
@@ -2742,20 +2560,20 @@ func _stage_debug_paste_into_field(field_key: String) -> void:
 func _stage_debug_description_copy_to_clipboard() -> void:
 	var dfi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
 	var txt: String
-	if stage_debug_field_focus_idx == dfi:
-		txt = stage_debug_edit_buffer
+	if stage_debug_state.field_focus_idx == dfi:
+		txt = stage_debug_state.edit_buffer
 	else:
-		txt = str(stage_debug_field_buffers.get("description", ""))
+		txt = str(stage_debug_state.field_buffers.get("description", ""))
 	DisplayServer.clipboard_set(txt)
 
 
 func _stage_debug_stage_name_copy_to_clipboard() -> void:
 	var sfi: int = STAGE_DEBUG_FIELD_KEYS.find("stage_name")
 	var txt: String
-	if stage_debug_field_focus_idx == sfi:
-		txt = stage_debug_edit_buffer
+	if stage_debug_state.field_focus_idx == sfi:
+		txt = stage_debug_state.edit_buffer
 	else:
-		txt = str(stage_debug_field_buffers.get("stage_name", ""))
+		txt = str(stage_debug_state.field_buffers.get("stage_name", ""))
 	DisplayServer.clipboard_set(txt)
 
 
@@ -2763,9 +2581,9 @@ func _stage_debug_stage_name_clear() -> void:
 	var sfi: int = STAGE_DEBUG_FIELD_KEYS.find("stage_name")
 	if sfi < 0:
 		return
-	stage_debug_field_focus_idx = sfi
-	stage_debug_edit_buffer = ""
-	stage_debug_last_error = _apply_field_string_to_pending("stage_name", "")
+	stage_debug_state.field_focus_idx = sfi
+	stage_debug_state.edit_buffer = ""
+	stage_debug_state.last_error = _apply_field_string_to_pending("stage_name", "")
 	_sync_stage_debug_field_buffers()
 	_stage_debug_sync_ime_for_field_focus()
 
@@ -2774,9 +2592,9 @@ func _stage_debug_description_clear() -> void:
 	var dfi: int = STAGE_DEBUG_FIELD_KEYS.find("description")
 	if dfi < 0:
 		return
-	stage_debug_field_focus_idx = dfi
-	stage_debug_edit_buffer = ""
-	stage_debug_last_error = _apply_field_string_to_pending("description", "")
+	stage_debug_state.field_focus_idx = dfi
+	stage_debug_state.edit_buffer = ""
+	stage_debug_state.last_error = _apply_field_string_to_pending("description", "")
 	_sync_stage_debug_field_buffers()
 	_stage_debug_sync_ime_for_field_focus()
 
@@ -2946,83 +2764,67 @@ func _stage_edit_snap_current_canvas_to_grid() -> void:
 	_stage_edit_snap_canvas_state_to_grid(_stage_edit_canvas_rect(vp))
 
 
-func _enter_stage_edit_screen() -> void:
-	if not _debug_tools_enabled():
-		return
+func _open_stage_edit(raw: Dictionary = {}) -> void:
 	DisplayServer.window_set_ime_active(false)
-	stage_edit_stage_id = "new_stage"
-	stage_edit_meta_preserve = {}
-	stage_edit_type_idx = 0
-	stage_edit_include_fish_shape = true
-	stage_edit_text_line = 0
-	stage_edit_last_error = ""
-	stage_edit_canvas_drag_idx = -1
-	stage_edit_canvas_right_drag_idx = -1
-	stage_edit_canvas_right_drag_committed = false
-	stage_edit_undo_stack.clear()
-	stage_edit_redo_stack.clear()
-	stage_edit_mirror_preview = [false, false, false, false]
-	_init_stage_edit_canvas()
-	_stage_edit_snap_current_canvas_to_grid()
-	game_state = "stage_edit"
-	queue_redraw()
-
-
-func _enter_stage_edit_from_path(path: String) -> void:
-	if not _debug_tools_enabled():
-		return
-	DisplayServer.window_set_ime_active(false)
-	var pr: Dictionary = CustomStageFile.parse_file(path)
-	if not pr.get("ok", false):
-		stage_debug_last_error = str(pr.get("error", "読めません"))
-		queue_redraw()
-		return
-	stage_debug_last_error = ""
-	var raw: Dictionary = pr["raw"] as Dictionary
-	var cfg: Dictionary = raw["config"] as Dictionary
-	stage_edit_stage_id = str(cfg.get("type", "new_stage"))
-	stage_edit_meta_preserve = {}
-	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
-		stage_edit_meta_preserve = (raw["meta"] as Dictionary).duplicate(true)
-	stage_edit_type_idx = _stage_edit_type_idx_from_saved_config(cfg)
-	stage_edit_include_fish_shape = true
-	stage_edit_text_line = 0
-	stage_edit_last_error = ""
-	stage_edit_canvas_drag_idx = -1
-	stage_edit_canvas_right_drag_idx = -1
-	stage_edit_canvas_right_drag_committed = false
-	stage_edit_undo_stack.clear()
-	stage_edit_redo_stack.clear()
-	stage_edit_mirror_preview = [false, false, false, false]
+	if raw.is_empty():
+		stage_edit_state.reset_new()
+	else:
+		var cfg: Dictionary = raw["config"] as Dictionary
+		var meta_preserve: Dictionary = {}
+		if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+			meta_preserve = raw["meta"] as Dictionary
+		stage_edit_state.reset_from_raw(
+			str(cfg.get("type", "new_stage")),
+			meta_preserve,
+			_stage_edit_type_idx_from_saved_config(cfg)
+		)
 	_init_stage_edit_canvas(raw)
 	_stage_edit_snap_current_canvas_to_grid()
 	game_state = "stage_edit"
 	queue_redraw()
 
 
+func _enter_stage_edit_screen() -> void:
+	if not _debug_tools_enabled():
+		return
+	_open_stage_edit()
+
+
+func _enter_stage_edit_from_path(path: String) -> void:
+	if not _debug_tools_enabled():
+		return
+	var pr: Dictionary = CustomStageFile.parse_file(path)
+	if not pr.get("ok", false):
+		stage_debug_state.last_error = str(pr.get("error", "読めません"))
+		queue_redraw()
+		return
+	stage_debug_state.last_error = ""
+	_open_stage_edit(pr["raw"] as Dictionary)
+
+
 func _exit_stage_edit_to_debug() -> void:
-	stage_edit_last_error = ""
+	stage_edit_state.clear_error()
 	game_state = "stage_debug"
 	queue_redraw()
 
 
 func _exit_stage_edit_after_save(saved_path: String) -> void:
-	stage_debug_custom_pending.erase(saved_path)
+	stage_debug_state.custom_pending.erase(saved_path)
 	_refresh_stage_debug_custom_paths()
-	var idx: int = stage_debug_custom_paths.find(saved_path)
+	var idx: int = stage_debug_state.custom_paths.find(saved_path)
 	if idx < 0:
-		for i in range(stage_debug_custom_paths.size()):
-			if stage_debug_custom_paths[i].get_file() == saved_path.get_file():
+		for i in range(stage_debug_state.custom_paths.size()):
+			if stage_debug_state.custom_paths[i].get_file() == saved_path.get_file():
 				idx = i
 				break
 	if idx >= 0:
-		stage_debug_selected = _stage_debug_master_count() + idx
+		stage_debug_state.selected = _stage_debug_master_count() + idx
 	else:
 		_clamp_stage_debug_selection()
-	stage_edit_last_error = ""
+	stage_edit_state.clear_error()
 	game_state = "stage_debug"
 	_sync_stage_debug_field_buffers()
-	stage_debug_last_error = "保存しました: %s" % saved_path.get_file()
+	stage_debug_state.last_error = "保存しました: %s" % saved_path.get_file()
 	queue_redraw()
 
 
@@ -3614,22 +3416,22 @@ func _input_stage_debug(event: InputEvent) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var smax0: float = _stage_debug_scroll_max(vp)
 	# スクロールバー ドラッグ
-	if event is InputEventMouseMotion and stage_debug_scrollbar_drag:
+	if event is InputEventMouseMotion and stage_debug_state.scrollbar_drag:
 		var tr_d: Rect2 = _stage_debug_scrollbar_track_rect(vp)
 		var thumb_d: Rect2 = _stage_debug_scrollbar_thumb_rect(vp)
 		var track_h_d: float = tr_d.size.y
 		var thumb_h_d: float = thumb_d.size.y
-		var thumb_top: float = event.position.y - _stage_debug_scrollbar_drag_thumb_rel_y
+		var thumb_top: float = event.position.y - stage_debug_state.scrollbar_drag_thumb_rel_y
 		thumb_top = clampf(thumb_top, tr_d.position.y, tr_d.position.y + maxf(0.0, track_h_d - thumb_h_d))
 		if smax0 > 0.001 and track_h_d - thumb_h_d > 0.001:
-			stage_debug_scroll = smax0 * (thumb_top - tr_d.position.y) / (track_h_d - thumb_h_d)
-		stage_debug_scroll_vel = 0.0
+			stage_debug_state.scroll = smax0 * (thumb_top - tr_d.position.y) / (track_h_d - thumb_h_d)
+		stage_debug_state.scroll_vel = 0.0
 		queue_redraw()
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		if stage_debug_scrollbar_drag:
-			stage_debug_scrollbar_drag = false
+		if stage_debug_state.scrollbar_drag:
+			stage_debug_state.scrollbar_drag = false
 			queue_redraw()
 			get_viewport().set_input_as_handled()
 			return
@@ -3638,19 +3440,19 @@ func _input_stage_debug(event: InputEvent) -> void:
 		var thumb_p: Rect2 = _stage_debug_scrollbar_thumb_rect(vp)
 		if smax0 > 0.001 and tr_p.size.y > 2.0:
 			if thumb_p.has_point(event.position):
-				stage_debug_scrollbar_drag = true
-				_stage_debug_scrollbar_drag_thumb_rel_y = event.position.y - thumb_p.position.y
-				stage_debug_scroll_vel = 0.0
+				stage_debug_state.scrollbar_drag = true
+				stage_debug_state.scrollbar_drag_thumb_rel_y = event.position.y - thumb_p.position.y
+				stage_debug_state.scroll_vel = 0.0
 				queue_redraw()
 				get_viewport().set_input_as_handled()
 				return
 			if tr_p.has_point(event.position) and not thumb_p.has_point(event.position):
 				var page: float = tr_p.size.y * 0.88
 				if event.position.y < thumb_p.position.y + thumb_p.size.y * 0.5:
-					stage_debug_scroll = maxf(0.0, stage_debug_scroll - page)
+					stage_debug_state.scroll = maxf(0.0, stage_debug_state.scroll - page)
 				else:
-					stage_debug_scroll = minf(smax0, stage_debug_scroll + page)
-				stage_debug_scroll_vel = 0.0
+					stage_debug_state.scroll = minf(smax0, stage_debug_state.scroll + page)
+				stage_debug_state.scroll_vel = 0.0
 				queue_redraw()
 				get_viewport().set_input_as_handled()
 				return
@@ -3660,7 +3462,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 			queue_redraw()
 			return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		stage_debug_field_focus_idx = -1
+		stage_debug_state.field_focus_idx = -1
 		_stage_debug_sync_ime_for_field_focus()
 		debug_mode = false
 		game_state = "title"
@@ -3679,7 +3481,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 		var pos_r: Vector2 = event.position
 		var split_r: float = _stage_debug_split_x(vp)
 		var n_r: int = _stage_debug_total_rows()
-		var y0_r: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_scroll
+		var y0_r: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_state.scroll
 		var list_bottom_r: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
 		for i_r in range(n_r):
 			var y1_r: float = y0_r + float(i_r) * STAGE_DEBUG_ROW_H
@@ -3690,27 +3492,27 @@ func _input_stage_debug(event: InputEvent) -> void:
 						get_viewport().set_input_as_handled()
 					queue_redraw()
 				return
-	if stage_debug_field_focus_idx >= 0 and event is InputEventKey and event.pressed:
-		var fk_in: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+	if stage_debug_state.field_focus_idx >= 0 and event is InputEventKey and event.pressed:
+		var fk_in: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_state.field_focus_idx]
 		var ime_comp: String = DisplayServer.ime_get_text()
 		if event.keycode == KEY_TAB:
 			if not event.echo:
 				_commit_focused_field_to_pending()
-				if stage_debug_last_error != "":
+				if stage_debug_state.last_error != "":
 					queue_redraw()
 					return
 				_stage_debug_write_selected_row_to_disk(false)
-				if stage_debug_last_error != "":
+				if stage_debug_state.last_error != "":
 					queue_redraw()
 					return
 				_sync_stage_debug_field_buffers()
 				var n_keys: int = STAGE_DEBUG_FIELD_KEYS.size()
 				if event.shift_pressed:
-					stage_debug_field_focus_idx = (stage_debug_field_focus_idx - 1 + n_keys) % n_keys
+					stage_debug_state.field_focus_idx = (stage_debug_state.field_focus_idx - 1 + n_keys) % n_keys
 				else:
-					stage_debug_field_focus_idx = (stage_debug_field_focus_idx + 1) % n_keys
-				var fk_tab: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
-				stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk_tab, ""))
+					stage_debug_state.field_focus_idx = (stage_debug_state.field_focus_idx + 1) % n_keys
+				var fk_tab: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_state.field_focus_idx]
+				stage_debug_state.edit_buffer = str(stage_debug_state.field_buffers.get(fk_tab, ""))
 				_stage_debug_sync_ime_for_field_focus()
 				queue_redraw()
 			return
@@ -3719,7 +3521,7 @@ func _input_stage_debug(event: InputEvent) -> void:
 				queue_redraw()
 				return
 			if fk_in == "description":
-				stage_debug_edit_buffer += "\n"
+				stage_debug_state.edit_buffer += "\n"
 				queue_redraw()
 				return
 			if not event.echo:
@@ -3727,19 +3529,19 @@ func _input_stage_debug(event: InputEvent) -> void:
 				queue_redraw()
 			return
 		if event.keycode == KEY_BACKSPACE:
-			if stage_debug_edit_buffer.length() > 0:
-				stage_debug_edit_buffer = stage_debug_edit_buffer.left(stage_debug_edit_buffer.length() - 1)
+			if stage_debug_state.edit_buffer.length() > 0:
+				stage_debug_state.edit_buffer = stage_debug_state.edit_buffer.left(stage_debug_state.edit_buffer.length() - 1)
 			queue_redraw()
 			return
 		if event.keycode == KEY_V and (event.ctrl_pressed or event.meta_pressed):
 			if not event.echo:
-				var fk_paste: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_field_focus_idx]
+				var fk_paste: String = STAGE_DEBUG_FIELD_KEYS[stage_debug_state.field_focus_idx]
 				if fk_paste == "stage_name" or fk_paste == "description":
-					stage_debug_edit_buffer = _filter_stage_debug_paste_for_field(fk_paste, DisplayServer.clipboard_get())
-					stage_debug_last_error = _apply_field_string_to_pending(fk_paste, stage_debug_edit_buffer)
+					stage_debug_state.edit_buffer = _filter_stage_debug_paste_for_field(fk_paste, DisplayServer.clipboard_get())
+					stage_debug_state.last_error = _apply_field_string_to_pending(fk_paste, stage_debug_state.edit_buffer)
 					_sync_stage_debug_field_buffers()
 				else:
-					stage_debug_edit_buffer += _filter_stage_debug_paste_for_field(fk_paste, DisplayServer.clipboard_get())
+					stage_debug_state.edit_buffer += _filter_stage_debug_paste_for_field(fk_paste, DisplayServer.clipboard_get())
 				queue_redraw()
 			return
 		if fk_in == "stage_name" or fk_in == "description":
@@ -3747,14 +3549,14 @@ func _input_stage_debug(event: InputEvent) -> void:
 				var ch_u: String = String.chr(event.unicode)
 				var ok_u: String = _filter_stage_debug_char_for_field(fk_in, ch_u)
 				if ok_u.length() > 0:
-					stage_debug_edit_buffer += ok_u
+					stage_debug_state.edit_buffer += ok_u
 			queue_redraw()
 			return
 		if not event.echo and event.unicode >= 32 and event.unicode < 128:
 			var ch_in: String = PackedByteArray([event.unicode]).get_string_from_utf8()
 			var ok_in: String = _filter_stage_debug_char_for_field(fk_in, ch_in)
 			if ok_in.length() > 0:
-				stage_debug_edit_buffer += ok_in
+				stage_debug_state.edit_buffer += ok_in
 			queue_redraw()
 			return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -3776,14 +3578,14 @@ func _input_stage_debug(event: InputEvent) -> void:
 					5:
 						_stage_debug_reset_all_files()
 					6:
-						stage_debug_field_focus_idx = -1
+						stage_debug_state.field_focus_idx = -1
 						_stage_debug_sync_ime_for_field_focus()
 						debug_mode = false
 						game_state = "title"
 						_apply_title_bgm_for_debug_mode()
 				queue_redraw()
 				return
-		if _stage_debug_is_custom_row(stage_debug_selected):
+		if _stage_debug_is_custom_row(stage_debug_state.selected):
 			for sni in range(3):
 				if _stage_debug_stage_name_action_button_rect(vp, sni).has_point(pos):
 					match sni:
@@ -3808,43 +3610,43 @@ func _input_stage_debug(event: InputEvent) -> void:
 					return
 		for fi in range(STAGE_DEBUG_FIELD_KEYS.size()):
 			if _stage_debug_field_value_rect(vp, fi).has_point(pos):
-				if fi == stage_debug_field_focus_idx:
+				if fi == stage_debug_state.field_focus_idx:
 					queue_redraw()
 					return
-				if stage_debug_field_focus_idx >= 0:
+				if stage_debug_state.field_focus_idx >= 0:
 					_commit_focused_field_to_pending()
-					if stage_debug_last_error != "":
+					if stage_debug_state.last_error != "":
 						queue_redraw()
 						return
 					_stage_debug_write_selected_row_to_disk(false)
-					if stage_debug_last_error != "":
+					if stage_debug_state.last_error != "":
 						queue_redraw()
 						return
 					_sync_stage_debug_field_buffers()
-				stage_debug_field_focus_idx = fi
+				stage_debug_state.field_focus_idx = fi
 				var fk: String = STAGE_DEBUG_FIELD_KEYS[fi]
-				stage_debug_edit_buffer = str(stage_debug_field_buffers.get(fk, ""))
+				stage_debug_state.edit_buffer = str(stage_debug_state.field_buffers.get(fk, ""))
 				_stage_debug_sync_ime_for_field_focus()
 				queue_redraw()
 				return
 		var split: float = _stage_debug_split_x(vp)
 		var n: int = _stage_debug_total_rows()
-		var y0: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_scroll
+		var y0: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_state.scroll
 		var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
 		for i in range(n):
 			var y1: float = y0 + float(i) * STAGE_DEBUG_ROW_H
 			if pos.y >= y1 and pos.y < y1 + STAGE_DEBUG_ROW_H and pos.y < list_bottom and pos.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
 				if pos.x >= 8.0 and pos.x < _stage_debug_list_right_edge_x(split):
-					if i != stage_debug_selected:
+					if i != stage_debug_state.selected:
 						_commit_focused_field_to_pending()
-						if stage_debug_last_error != "":
+						if stage_debug_state.last_error != "":
 							queue_redraw()
 							return
 						_stage_debug_write_selected_row_to_disk(false)
-						if stage_debug_last_error != "":
+						if stage_debug_state.last_error != "":
 							queue_redraw()
 							return
-					stage_debug_selected = i
+					stage_debug_state.selected = i
 					_sync_stage_debug_field_buffers()
 					queue_redraw()
 				return
@@ -3852,120 +3654,77 @@ func _input_stage_debug(event: InputEvent) -> void:
 
 func _start_stage_debug_test() -> void:
 	_commit_focused_field_to_pending()
-	var idx: int = stage_debug_selected
+	var idx: int = stage_debug_state.selected
 	if _stage_debug_is_custom_row(idx):
 		var path: String = _stage_debug_custom_path_at(idx)
 		var raw: Dictionary = _stage_debug_custom_raw_merged(path)
 		if raw.is_empty():
-			stage_debug_last_error = "カスタムファイルを読めません: %s" % path
+			stage_debug_state.last_error = "カスタムファイルを読めません: %s" % path
 			queue_redraw()
 			return
 		var cfg: Dictionary = CustomStageFile.effective_config_with_shape(raw)
 		var err: String = StageDebugOverrides.validate_effective_config(cfg)
 		if err != "":
-			stage_debug_last_error = err
+			stage_debug_state.last_error = err
 			queue_redraw()
 			return
-		stage_debug_last_error = ""
-		debug_stage_test_restart_cfg = cfg.duplicate(true)
-		debug_stage_test_seed = randi()
-		seed(debug_stage_test_seed)
-		debug_stage_test_meta_stage_name = ""
+		stage_debug_state.last_error = ""
+		var meta_stage_name: String = ""
 		if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
-			debug_stage_test_meta_stage_name = str((raw["meta"] as Dictionary).get("stage_name", ""))
-		var vp: Vector2 = get_viewport_rect().size
-		shape_center = Vector2(
-			vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5
-		)
-		current_stage = idx
-		debug_stage_test_mode = true
+			meta_stage_name = str((raw["meta"] as Dictionary).get("stage_name", ""))
+		seed(stage_session.start_debug_test(cfg, meta_stage_name))
 		input_recorder = DebugInputRecorder.new()
-		stage_manager.start_stage(idx, shape_center, vp, point_positions, cfg)
-		_sync_stage_vars()
-		input_recorder.start_recording(debug_stage_test_seed, point_positions.duplicate() as Array[Vector2])
-		game_state = "guide_info"
-		guide_start_time = 0.0
-		hovered_index = -1
-		is_dragging = false
-		selected_indices.clear()
-		input_handler.reset_for_stage()
-		ui_renderer.clear_spore_particles()
-		hint_alpha = 0.0
-		hint_active = false
-		hints_triggered = [false, false]
-		guide_count_played = 0
-		queue_redraw()
+		_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size))
+		input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
 		return
 
-	var p: Dictionary = stage_debug_pending.get(idx, {})
+	var p: Dictionary = stage_debug_state.pending.get(idx, {})
 	var err: String = StageDebugOverrides.validate_partial_with_master(idx, p)
 	if err != "":
-		stage_debug_last_error = err
+		stage_debug_state.last_error = err
 		queue_redraw()
 		return
 	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(idx, p)
 	err = StageDebugOverrides.validate_effective_config(cfg)
 	if err != "":
-		stage_debug_last_error = err
+		stage_debug_state.last_error = err
 		queue_redraw()
 		return
-	stage_debug_last_error = ""
-	debug_stage_test_restart_cfg = cfg.duplicate(true)
-	debug_stage_test_seed = randi()
-	seed(debug_stage_test_seed)
-	debug_stage_test_meta_stage_name = ""
-	var vp: Vector2 = get_viewport_rect().size
-	shape_center = Vector2(
-		vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5
-	)
-	current_stage = idx
-	debug_stage_test_mode = true
+	stage_debug_state.last_error = ""
+	seed(stage_session.start_debug_test(cfg))
 	input_recorder = DebugInputRecorder.new()
-	stage_manager.start_stage(idx, shape_center, vp, point_positions, cfg)
-	_sync_stage_vars()
-	input_recorder.start_recording(debug_stage_test_seed, point_positions.duplicate() as Array[Vector2])
-	game_state = "guide_info"
-	guide_start_time = 0.0
-	hovered_index = -1
-	is_dragging = false
-	selected_indices.clear()
-	input_handler.reset_for_stage()
-	ui_renderer.clear_spore_particles()
-	hint_alpha = 0.0
-	hint_active = false
-	hints_triggered = [false, false]
-	guide_count_played = 0
-	queue_redraw()
+	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size))
+	input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
 
 
 ## 現在選択行の pending をファイル／オーバーライドに書き出す（保存ボタンと同一ロジック）
 func _stage_debug_write_selected_row_to_disk(show_success_message: bool = true) -> void:
-	var idx: int = stage_debug_selected
+	var idx: int = stage_debug_state.selected
 	if _stage_debug_is_custom_row(idx):
 		var path: String = _stage_debug_custom_path_at(idx)
 		var raw: Dictionary = _stage_debug_custom_raw_merged(path)
 		if raw.is_empty():
-			stage_debug_last_error = "保存できません（ファイルを読めません）"
+			stage_debug_state.last_error = "保存できません（ファイルを読めません）"
 			return
 		var err: String = CustomStageFile.save_to_path(path, raw)
 		if err != "":
-			stage_debug_last_error = err
+			stage_debug_state.last_error = err
 		else:
-			stage_debug_custom_pending.erase(path)
+			stage_debug_state.custom_pending.erase(path)
 			if show_success_message:
-				stage_debug_last_error = "保存しました: %s" % path
+				stage_debug_state.last_error = "保存しました: %s" % path
 			else:
-				stage_debug_last_error = ""
+				stage_debug_state.last_error = ""
 		return
-	var p: Dictionary = stage_debug_pending.get(idx, {})
+	var p: Dictionary = stage_debug_state.pending.get(idx, {})
 	var err2: String = StageDebugOverrides.save_stage_override(idx, p)
 	if err2 != "":
-		stage_debug_last_error = err2
+		stage_debug_state.last_error = err2
 	else:
 		if show_success_message:
-			stage_debug_last_error = "保存しました: %s" % StageDebugOverrides.path_for_index(idx)
+			stage_debug_state.last_error = "保存しました: %s" % StageDebugOverrides.path_for_index(idx)
 		else:
-			stage_debug_last_error = ""
+			stage_debug_state.last_error = ""
 
 
 func _stage_debug_save_selected() -> void:
@@ -3977,9 +3736,9 @@ func _stage_debug_save_selected() -> void:
 func _stage_debug_open_shape_edit_for_selected() -> void:
 	if not _debug_tools_enabled():
 		return
-	var idx: int = stage_debug_selected
+	var idx: int = stage_debug_state.selected
 	if not _stage_debug_is_custom_row(idx):
-		stage_debug_last_error = "図形編集は [C] カスタム行を選択したときのみ使えます"
+		stage_debug_state.last_error = "図形編集は [C] カスタム行を選択したときのみ使えます"
 		queue_redraw()
 		return
 	var path: String = _stage_debug_custom_path_at(idx)
@@ -3987,27 +3746,27 @@ func _stage_debug_open_shape_edit_for_selected() -> void:
 
 
 func _stage_debug_reset_selected_row() -> void:
-	var idx: int = stage_debug_selected
+	var idx: int = stage_debug_state.selected
 	if _stage_debug_is_custom_row(idx):
 		var path: String = _stage_debug_custom_path_at(idx)
-		stage_debug_custom_pending.erase(path)
+		stage_debug_state.custom_pending.erase(path)
 		_sync_stage_debug_field_buffers()
-		stage_debug_last_error = "カスタムの未保存編集を破棄しました（ファイル本体は変更しません）"
+		stage_debug_state.last_error = "カスタムの未保存編集を破棄しました（ファイル本体は変更しません）"
 		queue_redraw()
 		return
-	stage_debug_pending.erase(idx)
+	stage_debug_state.pending.erase(idx)
 	StageDebugOverrides.delete_stage_override(idx)
 	_sync_stage_debug_field_buffers()
-	stage_debug_last_error = "ステージ %d をマスターに戻しました" % idx
+	stage_debug_state.last_error = "ステージ %d をマスターに戻しました" % idx
 	queue_redraw()
 
 
 func _stage_debug_reset_all_files() -> void:
-	stage_debug_pending.clear()
-	stage_debug_custom_pending.clear()
+	stage_debug_state.pending.clear()
+	stage_debug_state.custom_pending.clear()
 	StageDebugOverrides.delete_all_overrides()
 	_sync_stage_debug_field_buffers()
-	stage_debug_last_error = "マスタのオーバーライドを削除し、カスタム行の未保存編集も破棄しました（user://custom_stages の JSON は削除していません）"
+	stage_debug_state.last_error = "マスタのオーバーライドを削除し、カスタム行の未保存編集も破棄しました（user://custom_stages の JSON は削除していません）"
 	queue_redraw()
 
 
@@ -4016,28 +3775,14 @@ func _stage_debug_open_saved_stages_folder() -> void:
 	var abs_path: String = ProjectSettings.globalize_path(CustomStageFile.CUSTOM_STAGE_DIR)
 	var err: Error = OS.shell_open(abs_path)
 	if err != OK:
-		stage_debug_last_error = "フォルダを開けませんでした: %s（%d）" % [abs_path, err]
+		stage_debug_state.last_error = "フォルダを開けませんでした: %s（%d）" % [abs_path, err]
 	else:
-		stage_debug_last_error = ""
+		stage_debug_state.last_error = ""
 	queue_redraw()
 
 
 func _stage_debug_list_row_label(row: int) -> String:
-	if row < 0 or row >= _stage_debug_total_rows():
-		return "?"
-	if row < _stage_debug_master_count():
-		var cfg: Dictionary = StageDebugOverrides.build_config_for_index(row, stage_debug_pending.get(row, {}))
-		var gtl: String = str(cfg.get("guide_type_label", "")).strip_edges()
-		if gtl != "":
-			return gtl
-		return str(cfg.get("type", "?"))
-	var path: String = _stage_debug_custom_path_at(row)
-	var fn: String = path.get_file().get_basename()
-	var raw: Dictionary = _stage_debug_custom_raw_merged(path)
-	if raw.is_empty():
-		return "[C] %s" % fn
-	var cfg_part: Dictionary = raw["config"] as Dictionary
-	return "[C] %s" % str(cfg_part.get("type", fn))
+	return stage_debug_state.list_row_label(row)
 
 
 func _hit_debug_log_button(pos: Vector2) -> bool:
@@ -4053,10 +3798,10 @@ func _flush_debug_input_log() -> void:
 		return
 	var path: String = input_recorder.save_to_user_file()
 	if path != "":
-		stage_debug_last_error = "ログ保存: %s" % path
+		stage_debug_state.last_error = "ログ保存: %s" % path
 		print("debug log: ", path)
 	else:
-		stage_debug_last_error = "ログ保存に失敗しました"
+		stage_debug_state.last_error = "ログ保存に失敗しました"
 	queue_redraw()
 
 
@@ -4098,7 +3843,7 @@ func _process(delta: float) -> void:
 			_move_count_track_valid = false
 			_move_count_accum = 0.0
 		_move_grab_was_active = cur_move_grab
-	if debug_stage_test_mode and input_recorder and game_state == "playing" and ui_renderer.is_stage_intro_done():
+	if stage_session.debug_test_mode and input_recorder and game_state == "playing" and ui_renderer.is_stage_intro_done():
 		input_recorder.record_pad_stick_if_needed()
 	# ポイント移動中のループSE管理（is_dragging ではなく grab_input_active）
 	# 左スティックのみの選択切替はつかみではないため鳴らさない。A/右スティック＋マウスドラッグがつかみ。

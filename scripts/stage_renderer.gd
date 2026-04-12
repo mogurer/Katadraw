@@ -501,7 +501,7 @@ func _get_ideal_vertex_loops() -> Array:
 				var a: float = TAU * i / _game.CIRCLE_SEGMENTS
 				v.append(_game.current_centroid + Vector2(cos(a), sin(a)) * _game.ideal_display_radius)
 			result.append(v)
-		"square", "star", "cat_face", "fish":
+		"square", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			if pts.is_empty():
 				return result

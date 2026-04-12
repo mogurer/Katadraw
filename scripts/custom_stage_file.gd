@@ -185,36 +185,17 @@ static func _parse_vec2(v: Variant) -> Variant:
 
 
 ## config 差分を StageConfig にマージした「ランタイム用 1 本分」
-## エンジン用の cfg.type は図形キー。Stage ID は cfg.stage_id（新形式のみ）。
+## エンジン用 cfg では cfg.type / cfg.shape_type が図形キー、cfg.stage_id が識別子。
 static func effective_config(raw: Dictionary) -> Dictionary:
-	var partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
-	var id_str: String = str(partial.get("type", ""))
-	var shape_kind: String = str(partial.get("shape_type", ""))
-	if shape_kind.is_empty() and StageConfig.TYPE_DEFAULTS.has(id_str):
-		return StageConfig.merge_config(partial)
-	if shape_kind.is_empty():
-		shape_kind = "circle"
-	var merge_in: Dictionary = {}
-	for k in partial:
-		if k == "type" or k == "shape_type":
-			continue
-		merge_in[k] = partial[k]
-	merge_in["type"] = shape_kind
-	var merged: Dictionary = StageConfig.merge_config(merge_in)
-	merged["stage_id"] = id_str
-	return merged
+	return StageConfig.build_effective_config(raw["config"] as Dictionary)
 
 
 ## shape ブロックを StageManager が読むキーへ写す（JSON 配列のまま渡し、Manager 側で Vector2 化）
 static func effective_config_with_shape(raw: Dictionary) -> Dictionary:
-	var cfg: Dictionary = effective_config(raw).duplicate(true)
+	var shape: Dictionary = {}
 	if raw.has("shape") and typeof(raw["shape"]) == TYPE_DICTIONARY:
-		var sh: Dictionary = raw["shape"] as Dictionary
-		if sh.has("polygon_vertices"):
-			cfg["shape_polygon_vertices"] = sh["polygon_vertices"]
-		if sh.has("arc_controls"):
-			cfg["shape_arc_controls"] = sh["arc_controls"]
-	return cfg
+		shape = raw["shape"] as Dictionary
+	return StageConfig.build_effective_config(raw["config"] as Dictionary, shape)
 
 
 ## ゲームプレイ用の検証（StageDebugOverrides と同じ基準）

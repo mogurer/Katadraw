@@ -44,16 +44,7 @@ static func overrides_from_file_payload(raw: Dictionary) -> Dictionary:
 
 
 static func fill_missing_from_type_defaults(cfg: Dictionary) -> Dictionary:
-	var t: String = str(cfg.get("type", "circle"))
-	if not StageConfig.TYPE_DEFAULTS.has(t):
-		return cfg
-	var defs: Dictionary = StageConfig.TYPE_DEFAULTS[t]
-	for k in defs:
-		if not cfg.has(k):
-			cfg[k] = defs[k]
-	if not cfg.has("display_rate_min_pct"):
-		cfg["display_rate_min_pct"] = 50.0
-	return cfg
+	return StageConfig.build_effective_config(cfg)
 
 
 static func merge_with_master(master_row: Dictionary, file_raw: Dictionary) -> Dictionary:
@@ -61,7 +52,7 @@ static func merge_with_master(master_row: Dictionary, file_raw: Dictionary) -> D
 	var ov: Dictionary = overrides_from_file_payload(file_raw)
 	for k in ov:
 		cfg[k] = ov[k]
-	return fill_missing_from_type_defaults(cfg)
+	return StageConfig.build_effective_config(cfg)
 
 
 static func get_effective_stages() -> Array:
@@ -83,7 +74,7 @@ static func build_config_for_index(idx: int, pending: Dictionary = {}) -> Dictio
 		base = merge_with_master(base, file_raw)
 	for k in pending:
 		base[k] = pending[k]
-	return fill_missing_from_type_defaults(base)
+	return StageConfig.build_effective_config(base)
 
 
 static func validate_effective_config(cfg: Dictionary) -> String:
@@ -92,6 +83,13 @@ static func validate_effective_config(cfg: Dictionary) -> String:
 	var t: String = str(cfg["type"])
 	if not StageConfig.TYPE_DEFAULTS.has(t):
 		return "未知の type: %s" % t
+	if not cfg.has("shape_type"):
+		return "shape_type がありません"
+	var st: String = str(cfg["shape_type"])
+	if not StageConfig.TYPE_DEFAULTS.has(st):
+		return "未知の shape_type: %s" % st
+	if not cfg.has("stage_id") or str(cfg["stage_id"]).strip_edges() == "":
+		return "stage_id がありません"
 	if not cfg.has("num_points"):
 		return "num_points がありません"
 	var np: int = int(cfg["num_points"])

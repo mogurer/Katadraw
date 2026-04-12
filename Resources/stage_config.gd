@@ -134,3 +134,33 @@ static func merge_config(overrides: Dictionary) -> Dictionary:
 	if not cfg.has("display_rate_min_pct"):
 		cfg["display_rate_min_pct"] = 50.0
 	return cfg
+
+
+## 「最終的にプレイへ渡す cfg」を 1 本化して生成する。
+## built-in: partial.type が図形キー。
+## custom: config.type が stage_id、config.shape_type が図形キー。
+static func build_effective_config(partial: Dictionary, shape: Dictionary = {}) -> Dictionary:
+	var source: Dictionary = partial.duplicate(true)
+	var raw_type: String = str(source.get("type", "circle"))
+	var shape_type: String = str(source.get("shape_type", "")).strip_edges()
+	var resolved_type: String = shape_type if shape_type != "" else raw_type
+	var stage_id: String = str(source.get("stage_id", "")).strip_edges()
+	if stage_id.is_empty():
+		stage_id = raw_type
+	var merge_in: Dictionary = {}
+	for k in source:
+		if k == "shape_type":
+			continue
+		if k == "type" and shape_type != "":
+			continue
+		merge_in[k] = source[k]
+	merge_in["type"] = resolved_type
+	var cfg: Dictionary = merge_config(merge_in)
+	cfg["shape_type"] = resolved_type
+	cfg["stage_id"] = stage_id
+	if not shape.is_empty():
+		if shape.has("polygon_vertices"):
+			cfg["shape_polygon_vertices"] = shape["polygon_vertices"]
+		if shape.has("arc_controls"):
+			cfg["shape_arc_controls"] = shape["arc_controls"]
+	return cfg
