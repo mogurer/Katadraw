@@ -735,7 +735,7 @@ func _sync_stage_vars() -> void:
 	ideal_display_radius = stage_manager.ideal_display_radius
 	ideal_display_radius_2 = stage_manager.ideal_display_radius_2
 	guide_follows_player_radius = stage_manager.guide_follows_player_radius
-	stage_effective_cfg = StageDebugOverrides.build_config_for_index(current_stage)
+	stage_effective_cfg = stage_manager.effective_config.duplicate(true)
 
 
 func _start_stage(idx: int) -> void:

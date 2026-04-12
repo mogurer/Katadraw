@@ -83,6 +83,8 @@ var guide_center_2: Vector2 = Vector2.ZERO
 var guide_radius_val: float = 0.0
 var ideal_display_radius: float = 0.0   # 理想形描画用。GUIDE_USE_FIXED_SIZE なら guide_radius_val
 var ideal_display_radius_2: float = 0.0  # two_circles 用
+## start_stage で解決したマージ済み設定（カスタム idx でも game が build_config_for_index に頼らず参照できる）
+var effective_config: Dictionary = {}
 
 
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
@@ -97,6 +99,7 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 		cfg = stages[idx]
 	else:
 		cfg = cfg_override
+	effective_config = cfg.duplicate(true)
 	stage_type = cfg.get("type", "circle")
 	min_radius = cfg["min_radius"]
 	max_radius = cfg["max_radius"]
