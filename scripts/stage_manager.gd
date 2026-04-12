@@ -730,6 +730,21 @@ func _sample_arc(a: Vector2, b: Vector2, ac: Vector2, num_samples: int) -> Array
 	return result
 
 
+## _sample_arc が共線などで [a,b] のみ返す場合でも OOB にならないよう、local_t に沿った点を返す
+func _point_on_arc_polyline(arc_pts: Array, local_t: float, p1: Vector2, p2: Vector2) -> Vector2:
+	var lt: float = clampf(local_t, 0.0, 1.0)
+	var n_sz: int = arc_pts.size()
+	if n_sz < 2:
+		return p1.lerp(p2, lt)
+	if n_sz == 2:
+		return (arc_pts[0] as Vector2).lerp(arc_pts[1] as Vector2, lt)
+	var num_steps: int = n_sz - 1
+	var f_idx: float = lt * float(num_steps)
+	var idx: int = clampi(int(f_idx), 0, num_steps - 1)
+	var frac: float = clampf(f_idx - float(idx), 0.0, 1.0)
+	return (arc_pts[idx] as Vector2).lerp(arc_pts[idx + 1] as Vector2, frac)
+
+
 func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n: int) -> Array:
 	"""多角形の周上に n 点を等間隔でサンプル。弧エッジは弧に沿ってサンプル"""
 	if verts.size() < 2:
@@ -764,9 +779,7 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 				local_t = clampf(local_t, 0.0, 1.0)
 				if seg["arc_ac"] != null:
 					var arc_pts: Array = _sample_arc(seg["p1"], seg["p2"], seg["arc_ac"], 16)
-					var idx: int = clampi(int(local_t * 16.0), 0, 15)
-					var frac: float = clampf(local_t * 16.0 - idx, 0.0, 1.0)
-					result.append(arc_pts[idx].lerp(arc_pts[idx + 1], frac))
+					result.append(_point_on_arc_polyline(arc_pts, local_t, seg["p1"], seg["p2"]))
 				else:
 					result.append(seg["p1"].lerp(seg["p2"], local_t))
 				placed = true
