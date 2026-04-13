@@ -427,8 +427,8 @@ func _ready() -> void:
 	else:
 		font_din = font
 	var vp: Vector2 = get_viewport_rect().size
-	# Center shape in right 3/4 area (UI zone is left 1/4)
-	shape_center = Vector2(vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5)
+	# 有効エリア中央（上下左右40px + 右上UI禁忌ゾーン考慮）
+	shape_center = _default_stage_shape_center(vp)
 	_setup_audio()
 	# Load logo texture
 	logo_texture = _load_texture("res://assets/UI/messed_logo.png")
@@ -813,8 +813,10 @@ func _sync_stage_vars() -> void:
 
 
 func _default_stage_shape_center(vp: Vector2) -> Vector2:
-	# 左1/4がUIのため、右3/4領域の中央に図形を配置
-	return Vector2(vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5, vp.y * 0.5)
+	# 画面中央を基準に、上端の TIME UI 被りを避けるため Y を少し下げる
+	# 右上禁忌ゾーンは上端の一角のみのため X は画面中央のままでよい
+	# 点のクランプは _keep_points_inside_playfield が担う
+	return Vector2(vp.x * 0.5, vp.y * 0.5 + 80.0)
 
 
 func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_state: String = "guide_info", reset_move_track: bool = true) -> void:

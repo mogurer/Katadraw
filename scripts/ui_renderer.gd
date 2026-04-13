@@ -63,7 +63,7 @@ const POINT_COLOR := Color(0.26, 0.21, 0.28)
 const POINT_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_RADIUS := 9.0
 const POINT_RADIUS_HOVER := 13.0
-const LINE_WIDTH := 4.0
+const LINE_WIDTH := 5.0
 # ガイド線から遠いほど大きい円（px 半径）。距離は get_distance_to_hint_guide_outline 基準
 const POINT_RADIUS_GUIDE_NEAR_MIN := 5.0
 const POINT_RADIUS_GUIDE_FAR_MAX := 25.0
@@ -1134,8 +1134,7 @@ func _draw_config(vp: Vector2) -> void:
 	var lx: float = vp.x * _game.CONFIG_MENU_LX_RATIO
 	var box_w: float = vp.x * _game.CONFIG_MENU_BOX_W_RATIO
 	var label_fs: int = 36
-	var val_fs: int = 34
-	var box_h: float = (_game.font.get_ascent(val_fs) + _game.font.get_descent(val_fs)) * 1.5
+	var box_h: float = (_game.font_din.get_ascent(50) + _game.font_din.get_descent(50)) * 1.5
 
 	var win_label: String = tr("CONFIG_FULLSCREEN") if _game.is_fullscreen else tr("CONFIG_WINDOW")
 	var item_labels: Array[String] = [
@@ -1173,8 +1172,9 @@ func _draw_config(vp: Vector2) -> void:
 		_game.draw_rect(Rect2(box_rect.position + shadow_offset, box_rect.size), Color(0.26, 0.21, 0.28, 0.30))
 		_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
 		_game.draw_rect(box_rect, Color(0.26, 0.21, 0.28), false, 5.75)
-		var val_baseline_y: float = box_rect.position.y + (bh + _game.font.get_ascent(val_fs) - _game.font.get_descent(val_fs)) * 0.5
 		var val_font: Font = _game.font_din if (i == 2 or i == 3) else _game.font
+		var val_fs: int = 50 if (i == 2 or i == 3) else 34
+		var val_baseline_y: float = box_rect.position.y + (bh + val_font.get_ascent(val_fs) - val_font.get_descent(val_fs)) * 0.5
 		_game.draw_string(val_font, Vector2(box_rect.position.x, val_baseline_y), item_values[i], HORIZONTAL_ALIGNMENT_CENTER, bw, val_fs, val_c)
 		var c: Color = sel_c if is_sel else text_c
 		var label_font: Font = _game.font_bold if is_sel else _game.font
@@ -1492,6 +1492,9 @@ func _draw_game(vp: Vector2) -> void:
 			vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5,
 			vp.y * 0.5
 		)
+		# STAGE1（三角形）の見本のみ100px下に移動
+		if _game.stage_manager.current_stage == 0:
+			sc.y += 100.0
 		_game.shape_center = sc
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(sc, vp)
 
@@ -1890,11 +1893,16 @@ func _draw_guide_info(vp: Vector2) -> void:
 	var shape_cy: float = top_block_bottom + available_h / 2.0
 	var intro_shape_w: float = 600.0
 	var intro_shape_h: float = 360.0
+	# ステージ別見本サイズ調整（線幅は変更しない）
+	var guide_shape_scale: float = 1.0
+	match _game.stage_manager.current_stage:
+		1, 6: guide_shape_scale = 0.75  # STAGE2・STAGE7
+		7:    guide_shape_scale = 0.90  # STAGE8
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(
 			Vector2(play_cx, shape_cy),
-			intro_shape_w * e4,
-			intro_shape_h * e4,
+			intro_shape_w * e4 * guide_shape_scale,
+			intro_shape_h * e4 * guide_shape_scale,
 			e4,
 			2.5
 		)

@@ -230,6 +230,19 @@ func _resample_closed_polyline_points(polyline: Array, n: int) -> Array:
 func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) -> void:
 	if pts.is_empty():
 		return
+	# 上下左右 40px マージン
+	const PLAY_MARGIN: float = 40.0
+	var play_left: float  = PLAY_MARGIN
+	var play_right: float = viewport_size.x - PLAY_MARGIN
+	var play_top: float   = PLAY_MARGIN
+	var play_bottom: float = viewport_size.y - PLAY_MARGIN
+	# STAGE/TIME UI 禁忌ゾーン（右上）: HUDボックス左端 + ラベル幅(約130) + 40px余白
+	# box_x_base = vp.x - 384 (= right_margin24 + box_w350 + extra10)
+	# ラベルはさらに左に ~130px → 禁忌左端 = vp.x - 384 - 130 - 40 = vp.x - 554
+	# TIME 下端 = 160 (time_y100 + box_h60)、40px余白 → 禁忌下端 = 200
+	var ui_x_left: float   = viewport_size.x - 554.0
+	const UI_Y_BOTTOM: float = 200.0  # TIME下端160 + 余白40
+
 	var min_x: float = INF
 	var max_x: float = -INF
 	var min_y: float = INF
@@ -240,10 +253,7 @@ func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) 
 		min_y = minf(min_y, p.y)
 		max_y = maxf(max_y, p.y)
 
-	var play_left: float = viewport_size.x * GameConfig.UI_WIDTH_RATIO
-	var play_right: float = viewport_size.x
-	var play_top: float = 0.0
-	var play_bottom: float = viewport_size.y
+	# グループ全体をシフト（基本マージン逸脱を補正）
 	var offset := Vector2.ZERO
 	if min_x < play_left:
 		offset.x = play_left - min_x
@@ -257,10 +267,14 @@ func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) 
 		for i in range(pts.size()):
 			pts[i] = pts[i] + offset
 
+	# 個別クランプ: 基本マージン + 右上 UI 禁忌ゾーン
 	for i in range(pts.size()):
 		var p: Vector2 = pts[i]
 		p.x = clampf(p.x, play_left, play_right)
 		p.y = clampf(p.y, play_top, play_bottom)
+		# 右上 UI 禁忌ゾーン内にある点は UI 下端まで押し下げる
+		if p.x >= ui_x_left and p.y < UI_Y_BOTTOM:
+			p.y = UI_Y_BOTTOM
 		pts[i] = p
 
 

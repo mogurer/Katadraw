@@ -95,7 +95,7 @@ static func _heptagram_silhouette_row() -> Dictionary:
 		return _heptagram_silhouette_master_row.duplicate(true)
 	_heptagram_silhouette_master_row = _load_custom_stage_master_row(
 		HEPTAGRAM_SILHOUETTE_STAGE_JSON,
-		{"type": "heptagram_silhouette", "stage_id": "heptagram_silhouette", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.0},
+		{"type": "heptagram_silhouette", "stage_id": "heptagram_silhouette", "num_points": 14, "min_radius": 128.0, "max_radius": 420.0, "variance": 0.1875, "display_rate_min_pct": 80.0, "clear_pct": 97.0},
 		"七芒星シルエット",
 		"heptagram_silhouette",
 		"heptagram_silhouette"
@@ -106,7 +106,7 @@ static func _heptagram_silhouette_row() -> Dictionary:
 static func get_stages() -> Array:
 	var overrides_list: Array = [
 		# チュートリアル: 正三角形（3頂点）
-		{"type": "triangle", "stage_id": "tutorial_triangle", "num_points": 3, "min_radius": 180.0, "max_radius": 260.0, "vertex_range": [3, 3], "variance": 0.20, "zigzag": 0.08, "clear_pct": 98.5},
+		{"type": "triangle", "stage_id": "tutorial_triangle", "num_points": 3, "min_radius": 162.0, "max_radius": 234.0, "vertex_range": [3, 3], "variance": 0.20, "zigzag": 0.08, "clear_pct": 98.5},
 		# テスト: 正方形（点対応・弧対応の判定を試す）
 		{"type": "square", "stage_id": "test_square", "num_points": 12, "min_radius": 180.0, "max_radius": 260.0, "variance": 0.20, "clear_pct": 97.5},
 		# circle: 14点、難易度2
