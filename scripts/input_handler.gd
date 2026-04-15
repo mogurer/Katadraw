@@ -28,6 +28,9 @@ const DRAG_CURSOR_SPRING := 52.0
 const DRAG_CURSOR_DAMPING := 14.0
 const DRAG_FOLLOW_SPRING := 20.0
 const DRAG_FOLLOW_DAMPING := 9.0
+const DRAG_FOLLOW_SPEED_MIN := 1.0
+const DRAG_FOLLOW_SPEED_MAX := 30.0
+const DRAG_FOLLOW_MIN_FACTOR := 0.05
 const DRAG_ANGLE_SPRING := 34.0
 const DRAG_ANGLE_DAMPING := 8.0
 const DRAG_VELOCITY_DAMPING := 4.6
@@ -35,15 +38,15 @@ const DRAG_MAX_INFLUENCE_RATIO := 0.35
 const DRAG_STOP_SPEED := 8.0
 const DRAG_STEP_MAX := 1.0 / 120.0
 const DRAG_POSITION_EPSILON := 0.01
-const GUIDE_EDGE_SNAP_RADIUS := 42.0
-const GUIDE_VERTEX_SNAP_RADIUS := 56.0
+const GUIDE_EDGE_SNAP_RADIUS := 21.0
+const GUIDE_VERTEX_SNAP_RADIUS := 13.0
 const GUIDE_EDGE_SPRING := 3.0
-const GUIDE_VERTEX_SPRING := 90.0
-const GUIDE_SNAP_DAMPING := 12.0
-const GUIDE_VERTEX_OCCUPY_SPEED := 10.0
-const GUIDE_VERTEX_OCCUPY_FRAMES := 2
-const GUIDE_VERTEX_OCCUPIED_SPRING := 320.0
-const GUIDE_VERTEX_OCCUPIED_DAMPING := 120.0
+const GUIDE_VERTEX_SPRING := 8.0
+const GUIDE_SNAP_DAMPING := 2.5
+const GUIDE_VERTEX_OCCUPY_SPEED := 6.0
+const GUIDE_VERTEX_OCCUPY_FRAMES := 5
+const GUIDE_VERTEX_OCCUPIED_SPRING := 128.0
+const GUIDE_VERTEX_OCCUPIED_DAMPING := 32.0
 const GUIDE_VERTEX_REPULSE_RADIUS := 34.0
 const GUIDE_VERTEX_REPULSE_STRENGTH := 11.0
 
@@ -1080,6 +1083,8 @@ func _step_drag_physics(delta: float) -> bool:
 
 	if drag_target_active and _is_drag_point_valid():
 		var drag_delta: Vector2 = drag_target_position - drag_start_positions[drag_point_idx]
+		var drag_loop_bounds: Vector2i = _get_loop_bounds_for_index(drag_point_idx)
+		var follow_speed_factor: float = _get_drag_follow_speed_factor()
 		for i in range(_game.point_positions.size()):
 			if _is_locked(i):
 				point_velocities[i] = Vector2.ZERO
@@ -1091,9 +1096,14 @@ func _step_drag_physics(delta: float) -> bool:
 			var weight: float = drag_influence_weights[i]
 			if weight <= 0.0:
 				continue
-			var desired: Vector2 = drag_start_positions[i] + drag_delta * weight
+			if _is_drag_link_blocked(drag_point_idx, i, drag_loop_bounds.x, drag_loop_bounds.y, occupied_vertices):
+				continue
+			var effective_weight: float = weight * follow_speed_factor
+			if effective_weight <= 0.0:
+				continue
+			var desired: Vector2 = drag_start_positions[i] + drag_delta * effective_weight
 			var to_desired: Vector2 = desired - _game.point_positions[i]
-			forces[i] += to_desired * DRAG_FOLLOW_SPRING - point_velocities[i] * (DRAG_FOLLOW_DAMPING * weight)
+			forces[i] += to_desired * DRAG_FOLLOW_SPRING - point_velocities[i] * (DRAG_FOLLOW_DAMPING * effective_weight)
 		_apply_local_angle_spring(forces)
 	_apply_guide_snap_and_repulsion(forces, nearest_features, occupied_vertices)
 
@@ -1106,12 +1116,6 @@ func _step_drag_physics(delta: float) -> bool:
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			point_velocities[i] = Vector2.ZERO
-			continue
-		var occupied_anchor: Dictionary = _get_occupied_anchor_for_point(i, occupied_vertices)
-		if not occupied_anchor.is_empty() and not (drag_target_active and drag_point_idx == i):
-			point_velocities[i] = Vector2.ZERO
-			_game.point_positions[i] = occupied_anchor.get("vertex_pos", _game.point_positions[i]) as Vector2
-			_clamp_point_to_viewport(i, lo, hi)
 			continue
 		point_velocities[i] += forces[i] * delta
 		point_velocities[i] *= damping
@@ -1492,6 +1496,78 @@ func _get_contour_distance(from_idx: int, to_idx: int, start_idx: int, end_idx: 
 		backward += _game.point_positions[cur].distance_to(_game.point_positions[prev_idx])
 		cur = prev_idx
 	return minf(forward, backward)
+
+
+func _advance_loop_index(idx: int, direction: int, start_idx: int, end_idx: int) -> int:
+	if direction >= 0:
+		var next_idx: int = idx + 1
+		return start_idx if next_idx >= end_idx else next_idx
+	var prev_idx: int = idx - 1
+	return end_idx - 1 if prev_idx < start_idx else prev_idx
+
+
+func _get_contour_distance_in_direction(from_idx: int, to_idx: int, start_idx: int, end_idx: int, direction: int) -> float:
+	if from_idx == to_idx:
+		return 0.0
+	var distance: float = 0.0
+	var cur: int = from_idx
+	while cur != to_idx:
+		var next_idx: int = _advance_loop_index(cur, direction, start_idx, end_idx)
+		distance += _game.point_positions[cur].distance_to(_game.point_positions[next_idx])
+		cur = next_idx
+	return distance
+
+
+func _path_has_blocking_occupied_point(
+	from_idx: int,
+	to_idx: int,
+	start_idx: int,
+	end_idx: int,
+	direction: int,
+	occupied_vertices: Dictionary
+) -> bool:
+	if occupied_vertices.is_empty() or from_idx == to_idx:
+		return false
+	var cur: int = from_idx
+	while cur != to_idx:
+		var next_idx: int = _advance_loop_index(cur, direction, start_idx, end_idx)
+		if next_idx == to_idx:
+			return false
+		for occupied in occupied_vertices.values():
+			var occupied_data: Dictionary = occupied as Dictionary
+			var occupied_idx: int = int(occupied_data.get("point_idx", -1))
+			if occupied_idx == next_idx and occupied_idx != from_idx:
+				return true
+		cur = next_idx
+	return false
+
+
+func _is_drag_link_blocked(
+	from_idx: int,
+	to_idx: int,
+	start_idx: int,
+	end_idx: int,
+	occupied_vertices: Dictionary
+) -> bool:
+	if from_idx == to_idx:
+		return false
+	var forward_len: float = _get_contour_distance_in_direction(from_idx, to_idx, start_idx, end_idx, 1)
+	var backward_len: float = _get_contour_distance_in_direction(from_idx, to_idx, start_idx, end_idx, -1)
+	if forward_len <= backward_len:
+		return _path_has_blocking_occupied_point(from_idx, to_idx, start_idx, end_idx, 1, occupied_vertices)
+	return _path_has_blocking_occupied_point(from_idx, to_idx, start_idx, end_idx, -1, occupied_vertices)
+
+
+func _get_drag_follow_speed_factor() -> float:
+	if not _is_drag_point_valid():
+		return 1.0
+	var speed: float = point_velocities[drag_point_idx].length()
+	if speed <= DRAG_FOLLOW_SPEED_MIN:
+		return DRAG_FOLLOW_MIN_FACTOR
+	if speed >= DRAG_FOLLOW_SPEED_MAX:
+		return 1.0
+	var t: float = (speed - DRAG_FOLLOW_SPEED_MIN) / (DRAG_FOLLOW_SPEED_MAX - DRAG_FOLLOW_SPEED_MIN)
+	return lerpf(DRAG_FOLLOW_MIN_FACTOR, 1.0, clampf(t, 0.0, 1.0))
 
 
 func _falloff_weight_from_ratio(ratio: float) -> float:

@@ -1571,7 +1571,7 @@ func _draw_game(vp: Vector2) -> void:
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
 		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
 		_stage_renderer.draw_hud_overlay_guide(hud_a)
-	if _game.game_state == "playing":
+	if _game.game_state == "playing" and _game._debug_tools_enabled():
 		_draw_actual_snap_vertices()
 
 	if _game.game_state == "cleared":
