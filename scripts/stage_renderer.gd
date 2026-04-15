@@ -79,7 +79,24 @@ func draw_ideal_shape() -> void:
 # --- ガイド・ヒント ---
 
 func draw_guide_shape(alpha: float, width_scale: float = 1.0) -> void:
-	draw_guide_shape_at(_game.shape_center, alpha, width_scale)
+	var width: float = 3.5 * width_scale
+	var loops: Array = _game.stage_manager.get_fixed_guide_loops_world()
+	match _game.stage_type:
+		"two_circles":
+			var col1 := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
+			if loops.size() > 0:
+				_draw_world_loop(loops[0] as Array, col1, width)
+			if loops.size() > 1:
+				_draw_world_loop(loops[1] as Array, col2, width)
+		"star", "heptagram", "heptagram_silhouette":
+			var col_star := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
+			for loop in loops:
+				_draw_world_loop(loop as Array, col_star, width)
+		_:
+			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			for loop in loops:
+				_draw_world_loop(loop as Array, col, width)
 
 
 func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0, size_scale: float = 1.0) -> void:
@@ -342,6 +359,15 @@ func _draw_ring(pos: Vector2, radius: float, color: Color, width: float = 1.0) -
 		var next: Vector2 = pos + Vector2(cos(a), sin(a)) * radius
 		_game.draw_line(prev, next, color, width, true)
 		prev = next
+
+
+func _draw_world_loop(points: Array, color: Color, width: float) -> void:
+	if points.size() < 2:
+		return
+	for i in range(points.size()):
+		var a: Vector2 = points[i] as Vector2
+		var b: Vector2 = points[(i + 1) % points.size()] as Vector2
+		_game.draw_line(a, b, color, width, true)
 
 
 func _draw_ideal_points_outline(center: Vector2, points: Array, scale: float, rotation: float, color: Color, width: float) -> void:

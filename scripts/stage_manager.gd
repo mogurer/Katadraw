@@ -7,6 +7,7 @@ class_name StageManager
 extends RefCounted
 
 const STAR_RATIO := 0.382  # inner/outer radius for regular 5-pointed star
+const CIRCLE_SEGMENTS := 128
 # 案F: 複合スコア（平均+最大）
 const USE_COMBINED_ARC_ERROR := true
 const ARC_ERROR_AVG_WEIGHT := 0.7
@@ -1670,29 +1671,19 @@ func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> floa
 		var step_hi: int = mini(int(t_hi * 4.0), 3)
 		return 0.65 + step_hi * 0.1167
 	var ideal_dist: float
-	var ref_r: float = maxf(current_avg_radius, 1.0)
+	var ref_r: float = maxf(guide_radius_val, 1.0)
 
 	match stage_type:
 		"triangle", "circle":
-			var centroid: Vector2 = current_centroid
-			var curr_p: Vector2 = p - centroid
-			var transformed: Array = []
-			for op in ideal_outline_points:
-				transformed.append(op * correspondence_scale)
-			ideal_dist = _distance_to_polyline(curr_p, transformed)
+			ideal_dist = get_distance_to_hint_guide_outline(p)
 		"square", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
-			var ideal_pos: Vector2 = current_centroid + _transform_ideal_point(ideal_points[idx])
-			ideal_dist = p.distance_to(ideal_pos)
+			if idx >= 0 and idx < ideal_points.size():
+				var ideal_pos: Vector2 = _fixed_guide_target_position_from_ideal(guide_center_1, ideal_points[idx])
+				ideal_dist = p.distance_to(ideal_pos)
+			else:
+				ideal_dist = get_distance_to_hint_guide_outline(p)
 		"two_circles":
-			var centroid: Vector2 = current_centroid_2 if idx >= group_split else current_centroid
-			ref_r = current_avg_radius_2 if idx >= group_split else current_avg_radius
-			var ideal_ref_r: float = _percentile_length_from_origin(ideal_outline_points, REF_R_PERCENTILE)
-			var scale: float = ref_r / ideal_ref_r
-			var curr_p: Vector2 = p - centroid
-			var transformed: Array = []
-			for op in ideal_outline_points:
-				transformed.append(op * scale)
-			ideal_dist = _distance_to_polyline(curr_p, transformed)
+			ideal_dist = get_distance_to_hint_guide_outline(p)
 		_:
 			return 1.0
 
@@ -1736,6 +1727,70 @@ func _world_polyline_from_ideal(center: Vector2, ideal_pts: Array, scale: float,
 	return verts
 
 
+func _fixed_guide_polyline_from_ideal(center: Vector2, ideal_pts: Array) -> Array:
+	return _world_polyline_from_ideal(center, ideal_pts, guide_radius_val, correspondence_rotation)
+
+
+func _fixed_guide_target_position_from_ideal(center: Vector2, ideal: Vector2) -> Vector2:
+	var cos_r: float = cos(correspondence_rotation)
+	var sin_r: float = sin(correspondence_rotation)
+	var tx: float = (ideal.x * cos_r - ideal.y * sin_r) * guide_radius_val
+	var ty: float = (ideal.x * sin_r + ideal.y * cos_r) * guide_radius_val
+	return center + Vector2(tx, ty)
+
+
+func get_fixed_guide_loops_world() -> Array:
+	var loops: Array = []
+	match stage_type:
+		"triangle":
+			loops.append(_regular_polygon_loop_world(guide_center_1, guide_radius_val, 3, polygon_rotation))
+		"square":
+			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, ideal_points))
+		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
+			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, pts))
+		"two_circles":
+			loops.append(_circle_loop_world(guide_center_1, guide_radius_val))
+			loops.append(_circle_loop_world(guide_center_2, guide_radius_val))
+		_:
+			loops.append(_circle_loop_world(guide_center_1, guide_radius_val))
+	var filtered: Array = []
+	for loop in loops:
+		var points: Array = loop as Array
+		if points.size() >= 2:
+			filtered.append(points)
+	return filtered
+
+
+func get_active_guide_loops_world() -> Array:
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return get_fixed_guide_loops_world()
+	if stage_type == "two_circles":
+		return [
+			_circle_loop_world(hud_two_circle_c1, hud_two_circle_r),
+			_circle_loop_world(hud_two_circle_c2, hud_two_circle_r),
+		]
+	if hud_guide_outline_world.size() >= 2:
+		return [hud_guide_outline_world.duplicate()]
+	return get_fixed_guide_loops_world()
+
+
+func _regular_polygon_loop_world(center: Vector2, radius: float, n_sides: int, rotation: float) -> Array:
+	var verts: Array = []
+	for k in range(n_sides):
+		var a: float = rotation + TAU * k / float(maxi(n_sides, 1))
+		verts.append(center + Vector2(cos(a), sin(a)) * radius)
+	return verts
+
+
+func _circle_loop_world(center: Vector2, radius: float) -> Array:
+	var verts: Array = []
+	for i in range(CIRCLE_SEGMENTS):
+		var a: float = TAU * float(i) / float(maxi(CIRCLE_SEGMENTS, 1))
+		verts.append(center + Vector2(cos(a), sin(a)) * radius)
+	return verts
+
+
 func _distance_point_to_regular_polygon_outline(
 	p: Vector2, center: Vector2, radius: float, n_sides: int, rotation: float
 ) -> float:
@@ -1766,28 +1821,12 @@ func get_distance_to_hint_guide_outline(p: Vector2) -> float:
 				if hud_guide_outline_world.size() >= 2:
 					return _distance_to_polyline(p, hud_guide_outline_world)
 				return INF
-	match stage_type:
-		"triangle":
-			return _distance_point_to_regular_polygon_outline(
-				p, current_centroid, ideal_display_radius, 3, polygon_rotation
-			)
-		"square":
-			var verts: Array = _world_polyline_from_ideal(
-				current_centroid, ideal_points, correspondence_scale, correspondence_rotation
-			)
-			return _distance_to_polyline(p, verts) if verts.size() >= 2 else INF
-		"circle", "star", "cat_face", "fish":
-			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
-			var verts2: Array = _world_polyline_from_ideal(
-				current_centroid, pts, correspondence_scale, correspondence_rotation
-			)
-			return _distance_to_polyline(p, verts2) if verts2.size() >= 2 else INF
-		"two_circles":
-			var d1: float = _distance_point_to_circle_ring_outline(p, current_centroid, ideal_display_radius)
-			var d2: float = _distance_point_to_circle_ring_outline(p, current_centroid_2, ideal_display_radius_2)
-			return minf(d1, d2)
-		_:
-			return _distance_point_to_circle_ring_outline(p, current_centroid, ideal_display_radius)
+	var best: float = INF
+	for loop in get_fixed_guide_loops_world():
+		var verts: Array = loop as Array
+		if verts.size() >= 2:
+			best = minf(best, _distance_to_polyline(p, verts))
+	return best
 
 
 func is_locked(idx: int) -> bool:
@@ -1828,5 +1867,5 @@ func set_group2_cleared() -> void:
 
 func get_target_center_for_point(idx: int) -> Vector2:
 	if stage_type == "two_circles":
-		return current_centroid_2 if idx >= group_split else current_centroid
-	return current_centroid
+		return guide_center_2 if idx >= group_split else guide_center_1
+	return guide_center_1

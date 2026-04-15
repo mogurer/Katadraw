@@ -1498,19 +1498,8 @@ func _draw_game(vp: Vector2) -> void:
 		_game.shape_center = sc
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(sc, vp)
 
-	# --- イントロ拡大→縮小演出 ---
-	var intro_t: float = get_stage_intro_progress()
+	# プレイ中の見た目と物理座標を一致させるため、描画時の拡大変換は使わない。
 	var intro_scale: float = 1.0
-	if intro_t < 1.0 and _game.game_state == "playing":
-		var eased: float = _ease_out_cubic(intro_t)
-		intro_scale = lerpf(1.5, 1.0, eased)
-		# shape_center 基準でスケーリング変換を適用
-		var center: Vector2 = _game.shape_center
-		var xform := Transform2D()
-		xform = xform.translated(-center)
-		xform = xform.scaled(Vector2(intro_scale, intro_scale))
-		xform = xform.translated(center)
-		_game.draw_set_transform_matrix(xform)
 
 	var n: int = _game.point_positions.size()
 
@@ -1582,6 +1571,8 @@ func _draw_game(vp: Vector2) -> void:
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
 		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
 		_stage_renderer.draw_hud_overlay_guide(hud_a)
+	if _game.game_state == "playing":
+		_draw_actual_snap_vertices()
 
 	if _game.game_state == "cleared":
 		_stage_renderer.draw_ideal_shape()
@@ -1673,6 +1664,14 @@ func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void
 		var black_c: Color = Color(SELECTED_POINT_BLACK.r, SELECTED_POINT_BLACK.g, SELECTED_POINT_BLACK.b, a)
 		_game.draw_circle(center, radius, black_c)
 	_game.draw_circle(center, r, SELECTED_POINT_WHITE)
+
+
+func _draw_actual_snap_vertices() -> void:
+	var snap_vertices: Array = _game.input_handler.get_debug_snap_vertices_world()
+	for point in snap_vertices:
+		var pos: Vector2 = point as Vector2
+		_game.draw_circle(pos, 5.5, Color(0.15, 0.85, 1.0, 0.92))
+		_game.draw_circle(pos, 2.4, Color(1.0, 1.0, 1.0, 0.95))
 
 
 func _effect_hover_base(base_r: float) -> float:

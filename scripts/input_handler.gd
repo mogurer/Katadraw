@@ -36,14 +36,14 @@ const DRAG_STOP_SPEED := 8.0
 const DRAG_STEP_MAX := 1.0 / 120.0
 const DRAG_POSITION_EPSILON := 0.01
 const GUIDE_EDGE_SNAP_RADIUS := 42.0
-const GUIDE_VERTEX_SNAP_RADIUS := 44.0
+const GUIDE_VERTEX_SNAP_RADIUS := 56.0
 const GUIDE_EDGE_SPRING := 3.0
-const GUIDE_VERTEX_SPRING := 24.0
-const GUIDE_SNAP_DAMPING := 5.8
-const GUIDE_VERTEX_OCCUPY_SPEED := 6.0
-const GUIDE_VERTEX_OCCUPY_FRAMES := 5
-const GUIDE_VERTEX_OCCUPIED_SPRING := 58.0
-const GUIDE_VERTEX_OCCUPIED_DAMPING := 16.0
+const GUIDE_VERTEX_SPRING := 90.0
+const GUIDE_SNAP_DAMPING := 12.0
+const GUIDE_VERTEX_OCCUPY_SPEED := 10.0
+const GUIDE_VERTEX_OCCUPY_FRAMES := 2
+const GUIDE_VERTEX_OCCUPIED_SPRING := 320.0
+const GUIDE_VERTEX_OCCUPIED_DAMPING := 120.0
 const GUIDE_VERTEX_REPULSE_RADIUS := 34.0
 const GUIDE_VERTEX_REPULSE_STRENGTH := 11.0
 
@@ -1107,6 +1107,12 @@ func _step_drag_physics(delta: float) -> bool:
 		if _is_locked(i):
 			point_velocities[i] = Vector2.ZERO
 			continue
+		var occupied_anchor: Dictionary = _get_occupied_anchor_for_point(i, occupied_vertices)
+		if not occupied_anchor.is_empty() and not (drag_target_active and drag_point_idx == i):
+			point_velocities[i] = Vector2.ZERO
+			_game.point_positions[i] = occupied_anchor.get("vertex_pos", _game.point_positions[i]) as Vector2
+			_clamp_point_to_viewport(i, lo, hi)
+			continue
 		point_velocities[i] += forces[i] * delta
 		point_velocities[i] *= damping
 		_game.point_positions[i] += point_velocities[i] * delta
@@ -1275,6 +1281,8 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 			var occupied_point_idx: int = int(occupied_data.get("point_idx", -1))
 			var occupied_pos: Vector2 = occupied_data.get("vertex_pos", pos) as Vector2
 			if occupied_point_idx == i:
+				if drag_target_active and drag_point_idx == i:
+					continue
 				var settle_strength: float = clampf(float(point_stop_frames[i]) / float(maxi(GUIDE_VERTEX_OCCUPY_FRAMES, 1)), 0.0, 1.0)
 				forces[i] += (occupied_pos - pos) * (GUIDE_VERTEX_OCCUPIED_SPRING * settle_strength)
 				forces[i] -= point_velocities[i] * (GUIDE_VERTEX_OCCUPIED_DAMPING * settle_strength)
@@ -1294,26 +1302,21 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 
 
 func _build_fixed_guide_snap_loops() -> Array:
-	var loops: Array = []
-	match _game.stage_type:
-		"triangle":
-			loops.append(_build_regular_polygon_loop(_game.guide_center_1, _game.guide_radius_val, 3, _game.polygon_rotation))
-		"square":
-			loops.append(_transform_fixed_guide_points(_game.ideal_points))
-		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
-			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
-			loops.append(_transform_fixed_guide_points(pts))
-		"two_circles":
-			loops.append(_build_circle_loop(_game.guide_center_1, _game.guide_radius_val))
-			loops.append(_build_circle_loop(_game.guide_center_2, _game.guide_radius_val))
-		_:
-			loops.append(_build_circle_loop(_game.guide_center_1, _game.guide_radius_val))
+	var loops: Array = _game.stage_manager.get_active_guide_loops_world()
 	var filtered: Array = []
 	for loop in loops:
 		var points: Array = loop as Array
 		if points.size() >= 2:
 			filtered.append(points)
 	return filtered
+
+
+func get_debug_snap_vertices_world() -> Array:
+	var vertices: Array = []
+	for loop in _build_fixed_guide_snap_loops():
+		for point in loop:
+			vertices.append(point)
+	return vertices
 
 
 func _transform_fixed_guide_points(points: Array) -> Array:
@@ -1434,6 +1437,14 @@ func _feature_is_on_same_vertex_or_edge(feature: Dictionary, occupied_data: Dict
 
 func _guide_vertex_feature_id(loop_idx: int, vertex_idx: int) -> String:
 	return str(loop_idx) + ":" + str(vertex_idx)
+
+
+func _get_occupied_anchor_for_point(point_idx: int, occupied_vertices: Dictionary) -> Dictionary:
+	for occupied in occupied_vertices.values():
+		var occupied_data: Dictionary = occupied as Dictionary
+		if int(occupied_data.get("point_idx", -1)) == point_idx:
+			return occupied_data
+	return {}
 
 
 func _local_signed_angle(prev_idx: int, center_idx: int, next_idx: int) -> float:
