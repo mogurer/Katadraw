@@ -1,41 +1,69 @@
 # =============================================================================
-# InputHandler - プレイ中の入力処理モジュール
+# InputHandler - input handling module
 # =============================================================================
-# マウス、ゲームパッド、ドラッグ、矩形選択、バウンディングボックスを担当。
-# game の状態（point_positions, selected_indices 等）を直接更新する。
+# Handles mouse, gamepad, dragging, rectangle selection, and bounding boxes.
+# Updates game state such as point_positions and selected_indices directly.
 
 class_name InputHandler
 extends RefCounted
 
 # --- Constants ---
 const HOVER_DISTANCE := 30.0
-const CLICK_HIT_DISTANCE := 30.0  # クリック時: ポイント上のみヒット
+const CLICK_HIT_DISTANCE := 30.0  # Click only hits points directly.
 const BB_ANCHOR_SIZE := 10.0
 const BB_ANCHOR_HIT := 16.0
 const BB_CENTER_SIZE := 9.0
 const PAD_CURSOR_SPEED := 600.0
-const PAD_RIGHT_STICK_SPEED := 400.0  # A+左スティックのポイント移動: 全倒し時の速度係数（× pow(倒し量, 下記指数) × delta）
-const PAD_A_DPAD_SPEED := 200.00  # A+十字キー連続移動速度（スティック全倒しの約2/3）
-## 左スティックアナログのみ。速度 ∝ pow(倒し量, この値)。1.0=線形、2.0=半分倒しで約1/4速度、>1 で弱い入力ほど遅く
+const PAD_RIGHT_STICK_SPEED := 400.0
+const PAD_A_DPAD_SPEED := 200.00
 const PAD_LEFT_STICK_SPEED_EXPONENT := 4.0
-const PAD_RIGHT_STICK_DEADZONE := 0.5  # 右スティック: 揺り戻し・誤検知防止のデッドゾーン
-const RIGHT_STICK_REDETECT_ANGLE_DEG := 5.0  # 右スティック: 固定時の方向からこの角度以上変化で再検出（ゆっくり操作でも反応）
-## レイ方向を固定したままにする許容角（これ以上スティックが動くとレイ更新）。KATA / L-R 後のピン解除にも使う
+const PAD_RIGHT_STICK_DEADZONE := 0.5
+const RIGHT_STICK_REDETECT_ANGLE_DEG := 5.0
 const RIGHT_STICK_RAY_PIN_BREAK_ANGLE_DEG := 15.0
-## LB/RB 用: レイ中心線からの半角（片側）。沿距離 along に対し許容垂線距離は max(MIN_PERP, along*tan(半角)) で、重心から遠いほど帯が広がる。
 const RIGHT_STICK_RAY_SHOULDER_CONE_HALF_ANGLE_DEG := 22.0
-## 上記コリドー: along が極小のときの垂線距離の下限（px）。近傍で帯がゼロ幅にならないようにする。
 const RIGHT_STICK_RAY_SHOULDER_MIN_PERP_PX := 4.0
-const PAD_LEFT_STICK_NEUTRAL_DEADZONE := 0.15  # 左スティック: ニュートラル判定（これ未満で次のポイント移動を受け付ける）
-## 右スティック+L/R で「一瞬 B/C になって A に戻る」調査用。true でコンソールに [PadRayLR] を出す。
+const PAD_LEFT_STICK_NEUTRAL_DEADZONE := 0.15
 const DEBUG_PAD_RAY_LR := false
+const DRAG_CURSOR_SPRING := 52.0
+const DRAG_CURSOR_DAMPING := 14.0
+const DRAG_FOLLOW_SPRING := 20.0
+const DRAG_FOLLOW_DAMPING := 9.0
+const DRAG_ANGLE_SPRING := 34.0
+const DRAG_ANGLE_DAMPING := 8.0
+const DRAG_VELOCITY_DAMPING := 4.6
+const DRAG_MAX_INFLUENCE_RATIO := 0.35
+const DRAG_STOP_SPEED := 8.0
+const DRAG_STEP_MAX := 1.0 / 120.0
+const DRAG_POSITION_EPSILON := 0.01
+const GUIDE_EDGE_SNAP_RADIUS := 42.0
+const GUIDE_VERTEX_SNAP_RADIUS := 44.0
+const GUIDE_EDGE_SPRING := 3.0
+const GUIDE_VERTEX_SPRING := 24.0
+const GUIDE_SNAP_DAMPING := 5.8
+const GUIDE_VERTEX_OCCUPY_SPEED := 6.0
+const GUIDE_VERTEX_OCCUPY_FRAMES := 5
+const GUIDE_VERTEX_OCCUPIED_SPRING := 58.0
+const GUIDE_VERTEX_OCCUPIED_DAMPING := 16.0
+const GUIDE_VERTEX_REPULSE_RADIUS := 34.0
+const GUIDE_VERTEX_REPULSE_STRENGTH := 11.0
 
-# --- Callback (game が設定) ---
+# --- Callbacks set by game ---
 var on_points_changed: Callable
-var on_selection_changed: Callable  # 左スティック・十字キー・LB/RBで選択ポイントが変更された時
+var on_selection_changed: Callable
 
-# --- 操作中の一時状態 ---
+# --- Temporary interaction state ---
 var drag_offsets: Array[Vector2] = []
+var point_velocities: Array[Vector2] = []
+var drag_target_active: bool = false
+var drag_target_position: Vector2 = Vector2.ZERO
+var drag_target_offset: Vector2 = Vector2.ZERO
+var drag_point_idx: int = -1
+var drag_start_positions: Array[Vector2] = []
+var drag_influence_weights: Array[float] = []
+var drag_angle_prev_idx: int = -1
+var drag_angle_next_idx: int = -1
+var drag_angle_reference: float = 0.0
+var point_stop_frames: Array[int] = []
 var bb_dragging: bool = false
 var bb_anchor_idx: int = -1
 var bb_origin: Vector2 = Vector2.ZERO
@@ -45,40 +73,35 @@ var bb_start_rect: Rect2 = Rect2()
 var pad_cursor: Vector2 = Vector2.ZERO
 var pad_cursor_initialized: bool = false
 var pad_grabbing: bool = false
-var _grabbing_from_right_stick: bool = false  # 右スティックでつかんでいる場合のみ、離すとリリース
-var _right_stick_was_active: bool = false  # 前フレームで右スティックがデッドゾーン超えていたか
-var _right_stick_release_frames: int = 0  # 右スティックがデッドゾーン以下になった連続フレーム数（誤リリース防止）
-var _right_stick_dir_when_fixed: Vector2 = Vector2.ZERO  # 選択固定時の右スティック方向（累積角度で再検出判定）
-var _left_stick_used_while_right_held: bool = false  # 左スティック操作で選択固定。右スティック方向変化でクリア→再検出
-var _left_stick_was_neutral: bool = true  # 前フレーム終了時に左スティックがニュートラルだったか（ポイント移動は中立→傾きの1回だけ）
-var _right_stick_ray_pinned: bool = false  # KATA / L-R 後はレイ方向を固定（15°以上で解除）
-var _right_stick_locked_ray_dir: Vector2 = Vector2.ZERO  # 正規化。ピン中はこの方向でレイを張る
-var _right_stick_last_effective_ray_dir: Vector2 = Vector2.ZERO  # process_pad 直近で使ったレイ方向（ピン時のロック値）
-var _right_stick_ray_bundle: Array[int] = []  # 同一レイ上の候補（沿距離昇順）。L-R で巡回
-## KATA 後: 左・十字がニュートラルかつ右スティックが ref から15°以上動くまで、自動レイ選択で掴みを変えない
+var _grabbing_from_right_stick: bool = false
+var _right_stick_was_active: bool = false
+var _right_stick_release_frames: int = 0
+var _right_stick_dir_when_fixed: Vector2 = Vector2.ZERO
+var _left_stick_used_while_right_held: bool = false
+var _left_stick_was_neutral: bool = true
+var _right_stick_ray_pinned: bool = false
+var _right_stick_locked_ray_dir: Vector2 = Vector2.ZERO
+var _right_stick_last_effective_ray_dir: Vector2 = Vector2.ZERO
+var _right_stick_ray_bundle: Array[int] = []
 var _rs_kata_grab_lock: bool = false
 var _rs_kata_grab_lock_ref_dir: Vector2 = Vector2.ZERO
-## L-R 後: 右15°以上動くか次のL-Rまで、自動レイ選択で選択を変えない
 var _rs_lr_selection_lock: bool = false
 var _rs_lr_lock_ref_dir: Vector2 = Vector2.ZERO
-## process_pad 用: ショルダー L/R のエッジ検出（_input より後に process が走るとレイ巡回が自動選択に負けるのを防ぐ）
 var _prev_shoulder_l_pressed: bool = false
 var _prev_shoulder_r_pressed: bool = false
-## 右スティックの自動レイ選択を「この倒しっぱなしで既に実行したか」。倒し続けている間はつかみだけ維持し、毎フレーム select_line しない。
 var _right_stick_ray_auto_select_done: bool = false
-## 上記が true のときの物理スティック方向（再検出で auto_select_done を戻す）
 var _last_rs_phys_dir_at_auto_select: Vector2 = Vector2.ZERO
 
-# つかみ状態の判定用（右スティック・A・マウスでポイントを動かせる状態か）
+# Whether grab-capable input is currently active.
 var grab_input_active: bool = false
 
-# 右スティックデバッグ可視化用（process_pad で更新）
+# Right stick debug rendering.
 var debug_right_stick_active: bool = false
 var debug_right_stick_center: Vector2 = Vector2.ZERO
 var debug_right_stick_direction: Vector2 = Vector2.ZERO
-var _last_input_method: String = ""  # "mouse" or "pad" - 入力切り替え検出用
+var _last_input_method: String = ""
 
-# --- game 参照 ---
+# --- game reference ---
 var _game: Node2D
 
 
@@ -95,7 +118,6 @@ func is_bb_dragging() -> bool:
 	return bb_dragging
 
 
-## process_pad 末尾で grab_input_active が立つ前に _notify_points_changed が走るため、つかみ判定に使う
 func is_pad_grabbing_modifier_now() -> bool:
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		return false
@@ -106,17 +128,18 @@ func is_pad_grabbing_modifier_now() -> bool:
 
 
 func update_grab_state_for_mouse() -> void:
-	"""マウス利用時: process_pad がスキップされるため、grab_input_active をここで更新（実現率表示用）"""
+	"""Update grab state for mouse-driven dragging."""
 	grab_input_active = _game.is_dragging and _last_input_method == "mouse"
 
 
 func release_mouse_grab() -> void:
-	"""マウスクリック・ドラッグ状態を強制的に解除（two_circles で1つ目の円確定時など）"""
+	"""Force-release the mouse drag state."""
 	_game.is_dragging = false
 	_game.selected_indices.clear()
 	_game.hovered_index = -1
 	drag_offsets.clear()
-	# パッドのつかみ状態も解除（クリア後も右スティック入力が残ると grab が再点灯するのを防ぐ）
+	_end_active_drag(true)
+	# Also clear pad-grab state so grab does not immediately re-light.
 	pad_grabbing = false
 	_grabbing_from_right_stick = false
 	_clear_right_stick_ray_state()
@@ -124,8 +147,10 @@ func release_mouse_grab() -> void:
 
 
 func reset_for_stage() -> void:
-	"""ステージ開始時に呼び、操作中の一時状態をクリアする"""
+
 	drag_offsets.clear()
+	_end_active_drag(true)
+	_ensure_drag_state_arrays()
 	bb_dragging = false
 	bb_anchor_idx = -1
 	bb_start_positions.clear()
@@ -152,22 +177,18 @@ func handle_mouse_motion(mouse: Vector2) -> void:
 		return
 
 	if _game.is_dragging:
-		# マウス入力を検知した瞬間に、コントローラで掴んでいた状態をリリース
+		# ?????????????????????????E?????????
 		if _last_input_method == "pad" or drag_offsets.size() != _game.selected_indices.size():
 			_game.is_dragging = false
 			pad_grabbing = false
+			_end_active_drag(false)
 			_last_input_method = "mouse"
-			# ホバー更新へフォールスルー（下の else で処理）
+			# Fall through to hover update below.
 		else:
-			for i in range(_game.selected_indices.size()):
-				var idx: int = _game.selected_indices[i]
-				_game.point_positions[idx] = mouse + drag_offsets[i]
-			_clamp_points_to_viewport()
-			drag_offsets.clear()
-			for idx in _game.selected_indices:
-				drag_offsets.append(_game.point_positions[idx] - mouse)
-			_notify_points_changed()
-			_game.queue_redraw()
+			if _game.selected_indices.size() == 1 and drag_offsets.size() == 1:
+				drag_target_position = mouse + drag_offsets[0]
+				drag_target_active = true
+				_game.queue_redraw()
 			_last_input_method = "mouse"
 
 	else:
@@ -175,7 +196,7 @@ func handle_mouse_motion(mouse: Vector2) -> void:
 		var hover_changed: bool = (best != _game.hovered_index)
 		if hover_changed:
 			_game.hovered_index = best
-		# マウスオーバーで選択ポイントをそこへ移動（ホバー＝選択）
+		# Hover also moves single-point selection.
 		var need_select: bool = best >= 0 and (_game.selected_indices.is_empty() or _game.selected_indices[0] != best)
 		if need_select:
 			_game.selected_indices.clear()
@@ -191,7 +212,7 @@ func handle_mouse_press(mouse: Vector2) -> void:
 	_last_input_method = "mouse"
 	var clicked: int = _find_point_at(mouse, CLICK_HIT_DISTANCE)
 
-	# クリックした位置にポイントがあればつかむ。なければ何もしない
+	# Only grab when a point itself was clicked.
 	if clicked < 0:
 		return
 	_game.selected_indices.clear()
@@ -206,6 +227,8 @@ func _begin_drag(mouse: Vector2) -> void:
 	drag_offsets.clear()
 	for idx in _game.selected_indices:
 		drag_offsets.append(_game.point_positions[idx] - mouse)
+	if _game.selected_indices.size() == 1 and drag_offsets.size() == 1:
+		_begin_point_drag(_game.selected_indices[0], mouse + drag_offsets[0], "mouse")
 
 
 func handle_mouse_release(_mouse: Vector2) -> void:
@@ -216,6 +239,7 @@ func handle_mouse_release(_mouse: Vector2) -> void:
 
 	if _game.is_dragging:
 		_game.is_dragging = false
+		_end_active_drag(false)
 		_notify_points_changed()
 		_game.queue_redraw()
 
@@ -289,6 +313,7 @@ func _hit_bb_anchor(mouse: Vector2) -> int:
 
 
 func _begin_bb_drag(anchor_idx: int, mouse: Vector2) -> void:
+	_end_active_drag(true)
 	bb_dragging = true
 	bb_anchor_idx = anchor_idx
 	bb_start_mouse = mouse
@@ -366,6 +391,7 @@ func _get_selection_center() -> Vector2:
 
 
 func rotate_selected(angle: float) -> void:
+	_end_active_drag(true)
 	var center: Vector2 = _get_selection_center()
 	for idx in _game.selected_indices:
 		var offset: Vector2 = _game.point_positions[idx] - center
@@ -376,6 +402,7 @@ func rotate_selected(angle: float) -> void:
 
 
 func scale_selected(factor: float) -> void:
+	_end_active_drag(true)
 	var center: Vector2 = _get_selection_center()
 	for idx in _game.selected_indices:
 		var offset: Vector2 = _game.point_positions[idx] - center
@@ -402,8 +429,7 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
 	var right_stick_held: bool = Vector2(rx, ry).length() >= PAD_RIGHT_STICK_DEADZONE
 	var pad_grabbing_modifier: bool = a_held or right_stick_held
-	# レイ束の L/R 巡回は process_pad 内で束構築直後に行う（_process が _input より後だと
-	# 自動レイ選択に上書きされるため）。ここではレイ束でないとき、保存レイで束を試しダメなら多角形。
+	# L/R ray-bundle cycling is handled in process_pad after bundle construction.
 	var cur_sel: int = _game.selected_indices[0] if _game.selected_indices.size() > 0 else -1
 	var sel_on_ray_bundle: bool = cur_sel >= 0 and _right_stick_ray_bundle.find(cur_sel) >= 0
 	var use_ray_bundle_for_shoulder: bool = _right_stick_ray_bundle.size() >= 2 and (
@@ -412,8 +438,7 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 		or _grabbing_from_right_stick
 		or sel_on_ray_bundle
 	)
-	# 右スティック文脈なのにレイ束が未確定（size<2 等）のとき LB/RB で多角形巡回すると、
-	# 直後の process_pad で select_line がレイ最良点へ戻してしまう（ログの shR=true かつ sel=5→idx=4）。
+	# Avoid polygon cycling when we are still in right-stick ray-selection context.
 	var in_right_stick_context: bool = (
 		right_stick_held
 		or _right_stick_was_active
@@ -444,7 +469,7 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 
 
 func _ensure_pad_selection() -> void:
-	"""コントローラ操作時は常に1点選択。未選択なら最寄りポイントを選択"""
+	"""Ensure there is always one pad-selected point."""
 	if _game.selected_indices.size() >= 1:
 		return
 	var best: int = _find_point_at(pad_cursor)
@@ -462,12 +487,12 @@ func _ensure_pad_selection() -> void:
 
 
 func get_connected_indices(idx: int) -> Array[int]:
-	"""接続されている prev, next のインデックスを返す"""
+	"""Return connected prev/next indices."""
 	return [_get_polygon_prev(idx), _get_polygon_next(idx)]
 
 
 func _get_polygon_prev(idx: int) -> int:
-	"""多角形上の前のインデックス（two_circles はグループ内でループ）"""
+	"""Get previous index on the polygon loop."""
 	var n: int = _game.point_positions.size()
 	if _game.stage_manager.stage_type == "two_circles":
 		var split: int = _game.stage_manager.group_split
@@ -480,7 +505,7 @@ func _get_polygon_prev(idx: int) -> int:
 
 
 func _get_polygon_next(idx: int) -> int:
-	"""多角形上の次のインデックス"""
+	"""Get next index on the polygon loop."""
 	var n: int = _game.point_positions.size()
 	if _game.stage_manager.stage_type == "two_circles":
 		var split: int = _game.stage_manager.group_split
@@ -509,7 +534,7 @@ func _apply_lr_grab_lock_after_shoulder_cycle() -> void:
 			_rs_lr_lock_ref_dir = Vector2.RIGHT
 
 
-## LB/RB: 多角形の接続に沿って移動。RB=時計回り（_get_polygon_next）、LB=反時計回り（_get_polygon_prev）。ロック頂点は飛ばす。
+# LB/RB polygon ring traversal.
 func _cycle_polygon_ring_adjacent(cw: bool, right_stick_style: bool) -> bool:
 	if _game.selected_indices.is_empty():
 		return false
@@ -543,9 +568,7 @@ func _cycle_polygon_ring_adjacent(cw: bool, right_stick_style: bool) -> bool:
 
 
 func _cycle_pad_point_direction(direction: Vector2) -> void:
-	"""十字キー: 入力方向から円形・両方向に走査し、最初にヒットする線の先へ切り替え
-	ルール: 位置+方向→移動先。接続（prev/next）のみ対象。入力方向の角度から走査開始し、
-	最も角度差が小さい接続先を選択（＝最初にヒットする線）。"""
+	"""Move selection toward the closest connected point in the input direction."""
 	if _game.selected_indices.is_empty():
 		return
 	var idx: int = _game.selected_indices[0]
@@ -561,9 +584,8 @@ func _cycle_pad_point_direction(direction: Vector2) -> void:
 	if candidates.is_empty():
 		return
 
-	# 入力方向の角度（円形走査の開始位置）
+	# Choose the connected edge closest to the input direction.
 	var input_angle: float = direction.angle()
-	# 各接続先への線の角度との差が最小のものを選択（＝最初にヒット）
 	var best: Dictionary = candidates[0]
 	var best_diff: float = INF
 	for c in candidates:
@@ -606,7 +628,7 @@ func _dpad_any_pressed() -> bool:
 		or Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_RIGHT)
 
 
-## LB/RB コリドー: レイ沿い距離 along に応じた垂線距離の上限（px）。距離に比例して広がる。
+# Corridor width along the shoulder ray.
 func ray_shoulder_corridor_max_perp_px(along: float) -> float:
 	return maxf(
 		RIGHT_STICK_RAY_SHOULDER_MIN_PERP_PX,
@@ -614,7 +636,7 @@ func ray_shoulder_corridor_max_perp_px(along: float) -> float:
 	)
 
 
-## LB/RB の束に入れる候補: 半直線前方（along≥0）かつ垂線距離が ray_shoulder_corridor_max_perp_px(along) 以下。
+# Check whether a point is inside the shoulder ray corridor.
 func _point_is_in_ray_shoulder_corridor(origin: Vector2, dir_n: Vector2, idx: int) -> bool:
 	if _is_locked(idx):
 		return false
@@ -629,7 +651,7 @@ func _point_is_in_ray_shoulder_corridor(origin: Vector2, dir_n: Vector2, idx: in
 	return true
 
 
-## コリドー内の全頂点。多角形の辺に沿った BFS では辺の外側の頂点が漏れるため、条件を満たす点を毎回全走査する。
+# Collect all points in the shoulder ray corridor.
 func _collect_all_indices_in_ray_shoulder_corridor(origin: Vector2, dir_n: Vector2) -> Array[int]:
 	var out: Array[int] = []
 	for i in range(_game.point_positions.size()):
@@ -669,7 +691,7 @@ func _apply_ray_selection(idx: int) -> void:
 	_notify_selection_changed()
 
 
-## レイ束（沿距離順）のインデックスで、指定ポイントに幾何的に最も近いスロットを返す（束外のとき pos=0 相当のズレを防ぐ）
+# Find the nearest slot in the ray bundle.
 func _nearest_ray_bundle_slot_for_point(cur_point_idx: int, bundle: Array[int]) -> int:
 	if bundle.is_empty():
 		return 0
@@ -684,7 +706,7 @@ func _nearest_ray_bundle_slot_for_point(cur_point_idx: int, bundle: Array[int]) 
 	return best_slot
 
 
-## レイ束（沿距離昇順＝内→外）内でのみ巡回。dir=+1 で内→外へ1つ、dir=-1 で外→内へ1つ。RBは dir=-1、LBは dir=+1。right_stick_style: 右スティック掴み用のロック付き。
+# Core cycling logic inside a ray bundle.
 func _cycle_ray_bundle_core(bundle: Array[int], dir: int, right_stick_style: bool) -> bool:
 	if bundle.size() < 2 or _game.selected_indices.is_empty():
 		return false
@@ -712,12 +734,12 @@ func _cycle_ray_bundle_core(bundle: Array[int], dir: int, right_stick_style: boo
 	return true
 
 
-## `process_pad` で構築済みの `_right_stick_ray_bundle` 上でのみ移動（レイ上／付近の点に限定）。
+# Cycle only within the current ray bundle.
 func _cycle_ray_bundle(dir: int) -> void:
 	_cycle_ray_bundle_core(_right_stick_ray_bundle, dir, true)
 
 
-## `handle_pad_button` 用: 直近の実効レイが残っていれば同じ定義で束を組み LB/RB。束が1点以下なら移動なし（多角形には落とさない）。レイが無ければ false。
+# Rebuild a ray bundle from the saved ray if possible.
 func _try_shoulder_cycle_ray_bundle_from_saved_ray(dir: int) -> bool:
 	if _right_stick_last_effective_ray_dir.length_squared() < 0.0001:
 		return false
@@ -746,13 +768,13 @@ func _sync_pinned_selection_only() -> void:
 	var cur: int = _game.selected_indices[0]
 	if bundle.find(cur) >= 0:
 		return
-	# 束の再計算で外れた場合は「沿距離の先頭」ではなく、直前の選択位置に最も近い束内点へ（自動レイの最良点と bundle[0] が一致しないことがある）
+	# If the current point fell out of the bundle, snap to the nearest slot.
 	var slot: int = _nearest_ray_bundle_slot_for_point(cur, bundle)
 	_apply_ray_selection(bundle[slot])
 
 
 func _stick_to_cardinal_direction(stick_vec: Vector2) -> Vector2:
-	"""アナログスティックを上下左右のいずれかに変換。傾きが弱い場合は ZERO"""
+	"""Convert an analog stick vector into a cardinal direction."""
 	if stick_vec.length() < 0.15:
 		return Vector2.ZERO
 	if absf(stick_vec.x) > absf(stick_vec.y):
@@ -762,7 +784,7 @@ func _stick_to_cardinal_direction(stick_vec: Vector2) -> Vector2:
 
 
 func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> bool:
-	"""右スティック: 倒した方角に半直線を引き、その方向側で直線に最も近いポイントを選択（逆側は対象外）。成功時のみ true"""
+	"""Select the best point along a direction line and return success."""
 	if direction.length_squared() < 0.0001:
 		return false
 	var dir_n: Vector2 = direction.normalized()
@@ -776,7 +798,7 @@ func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> boo
 		var delta: Vector2 = p - origin
 		var along: float = delta.dot(dir_n)
 		if along < 0:
-			continue  # スティックの逆側のポイントは対象外
+			continue
 		var perp: Vector2 = delta - along * dir_n
 		var perp_dist: float = perp.length()
 		if best < 0 or perp_dist < best_perp_dist or (absf(perp_dist - best_perp_dist) < 0.001 and along > best_along):
@@ -828,8 +850,10 @@ func process_pad(delta: float) -> void:
 
 	var a_held: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
 	var pad_grabbing_modifier: bool = a_held or right_active
+	if pad_grabbing_modifier and _game.selected_indices.size() == 1:
+		_ensure_pad_drag_context()
 
-	# 右スティック: 重心＋レイ。ピン中はレイ方向固定（15°以上で解除）。KATA/L-R ロック中は自動選択しない。
+	# Right stick ray selection and locking.
 	if right_active:
 		_last_input_method = "pad"
 		var current_dir: Vector2 = right_vec.normalized()
@@ -880,15 +904,13 @@ func process_pad(delta: float) -> void:
 			debug_right_stick_center = centroid
 			debug_right_stick_direction = dir_for_ray
 			_right_stick_ray_bundle = _finalize_shoulder_ray_bundle(centroid, dir_for_ray)
-			# レイ束を確定した直後に L/R を処理（入力イベントより後の _process でも自動レイに負けない）
-			# 右スティック中: LB/RB はレイ延長線上／付近の候補（束）の沿距離順のみ。束が1点なら何もしない。
-			# 沿距離昇順の束 [内→外]: RB=外側へ回り込み C→B→A→…、LB=内側へ B→C→A→…（画像チュートリアル準拠）
+			# Process shoulder input immediately after rebuilding the ray bundle.
 			if shoulder_l_edge:
 				_cycle_ray_bundle(1)
 			elif shoulder_r_edge:
 				_cycle_ray_bundle(-1)
-			# L/R ロック解除はショルダー巡回の後。ショルダー押下フレームでは解除しない（同一フレームで
-			# _cycle が付けたロックが外れ、block_auto が偽になり _sync_pinned が巡回結果を潰すのを防ぐ）。
+			# L/R ??E?????????????E????????????????????E?????????
+			# Clear the L/R lock only on frames without shoulder input.
 			if not shoulder_l_edge and not shoulder_r_edge:
 				if _rs_lr_selection_lock and dir_for_ray.dot(_rs_lr_lock_ref_dir) < cos_pin_break:
 					if DEBUG_PAD_RAY_LR:
@@ -925,14 +947,12 @@ func process_pad(delta: float) -> void:
 			debug_right_stick_active = false
 		_right_stick_was_active = true
 		_right_stick_release_frames = 0
-		# 右スティックを倒している間はつかみを維持。L/R でレイ束内（B↔A↔C）を切り替えてもドラッグ状態を維持する。
+		# Keep grab state active while the right stick remains engaged.
 		pad_grabbing = true
 		_game.is_dragging = true
 		_grabbing_from_right_stick = true
 	elif _right_stick_was_active:
-		# 右スティック非アクティブ時: KATA ロックは process_pad の right_active 内でしか外れないため、
-		# 離したあと _rs_kata_grab_lock が残り「リリース判定が進まない」→ レイ表示が消えない原因になる。ここで解除する。
-		# L/R ロックはショルダー一瞬デッドゾーン対策で 2 フレーム経過後に外す。完全クリアは 4 フレーム（短い抜けに耐える）。
+		# Release right-stick-specific locks after a short grace period.
 		if not right_active:
 			_rs_kata_grab_lock = false
 			debug_right_stick_active = false
@@ -949,20 +969,18 @@ func process_pad(delta: float) -> void:
 					pad_grabbing = false
 					_grabbing_from_right_stick = false
 					_game.is_dragging = false
+					_end_active_drag(false)
 					_game.queue_redraw()
 
-	# 左スティック: A/右スティック中は KATA 変形（連続移動）、それ以外はポイント移動（中立→傾きの1回だけ）
+	# Left stick: move the grabbed point while grab input is active.
 	if left_vec != Vector2.ZERO:
 		_last_input_method = "pad"
 		if pad_grabbing_modifier and _game.selected_indices.size() >= 1:
 			var left_len: float = left_vec.length()
 			var speed: float = pow(left_len, PAD_LEFT_STICK_SPEED_EXPONENT) * PAD_RIGHT_STICK_SPEED * delta
 			var move: Vector2 = left_vec.normalized() * speed
-			for idx in _game.selected_indices:
-				_game.point_positions[idx] += move
-			pad_cursor = _game.point_positions[_game.selected_indices[0]]
-			_clamp_points_to_viewport()
-			_notify_points_changed()
+			drag_target_position += move
+			pad_cursor = drag_target_position
 			_game.queue_redraw()
 			if _game.game_state != "playing" and _game.game_state != "rules":
 				return
@@ -984,7 +1002,7 @@ func process_pad(delta: float) -> void:
 
 	_left_stick_was_neutral = left_neutral
 
-	# A/右スティック選択 + 十字キー → ポイント連続移動
+	# D-pad also moves the grabbed point while grab input is active.
 	if pad_grabbing_modifier and _game.selected_indices.size() >= 1:
 		var dpad: Vector2 = Vector2.ZERO
 		if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_UP):
@@ -998,11 +1016,8 @@ func process_pad(delta: float) -> void:
 		if dpad != Vector2.ZERO:
 			_last_input_method = "pad"
 			var move: Vector2 = dpad.normalized() * PAD_A_DPAD_SPEED * delta
-			for idx in _game.selected_indices:
-				_game.point_positions[idx] += move
-			pad_cursor = _game.point_positions[_game.selected_indices[0]]
-			_clamp_points_to_viewport()
-			_notify_points_changed()
+			drag_target_position += move
+			pad_cursor = drag_target_position
 			_game.queue_redraw()
 			if right_active and _right_stick_last_effective_ray_dir.length_squared() > 0.0001:
 				_right_stick_ray_pinned = true
@@ -1016,15 +1031,475 @@ func process_pad(delta: float) -> void:
 				_prev_shoulder_r_pressed = shoulder_r_now
 				return
 
-	# つかみ状態: 右スティック・A・マウスでポイントを動かせる状態か
+	# ?????E ???E???E???A?????????????????
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		grab_input_active = false
 		_prev_shoulder_l_pressed = shoulder_l_now
 		_prev_shoulder_r_pressed = shoulder_r_now
 		return
+	if not pad_grabbing_modifier and _last_input_method == "pad":
+		_game.is_dragging = false
+		_end_active_drag(false)
 	grab_input_active = pad_grabbing_modifier or (_game.is_dragging and _last_input_method == "mouse")
 	_prev_shoulder_l_pressed = shoulder_l_now
 	_prev_shoulder_r_pressed = shoulder_r_now
+
+
+# =============================================================================
+# Drag Physics
+# =============================================================================
+
+func update_drag_physics(delta: float) -> void:
+	_ensure_drag_state_arrays()
+	if not drag_target_active and not _has_active_point_velocity():
+		return
+
+	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
+	var step_delta: float = delta / float(steps)
+	var moved: bool = false
+	for _i in range(steps):
+		moved = _step_drag_physics(step_delta) or moved
+
+	if moved:
+		_notify_points_changed()
+		_game.queue_redraw()
+
+
+func _step_drag_physics(delta: float) -> bool:
+	if _game.point_positions.is_empty():
+		return false
+
+	var before: Array[Vector2] = _game.point_positions.duplicate()
+	var guide_loops: Array = _build_fixed_guide_snap_loops()
+	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
+	var occupied_vertices: Dictionary = _compute_occupied_guide_vertices(nearest_features)
+	var forces: Array[Vector2] = []
+	forces.resize(_game.point_positions.size())
+	for i in range(forces.size()):
+		forces[i] = Vector2.ZERO
+
+	if drag_target_active and _is_drag_point_valid():
+		var drag_delta: Vector2 = drag_target_position - drag_start_positions[drag_point_idx]
+		for i in range(_game.point_positions.size()):
+			if _is_locked(i):
+				point_velocities[i] = Vector2.ZERO
+				continue
+			if i == drag_point_idx:
+				var to_target: Vector2 = drag_target_position - _game.point_positions[i]
+				forces[i] += to_target * DRAG_CURSOR_SPRING - point_velocities[i] * DRAG_CURSOR_DAMPING
+				continue
+			var weight: float = drag_influence_weights[i]
+			if weight <= 0.0:
+				continue
+			var desired: Vector2 = drag_start_positions[i] + drag_delta * weight
+			var to_desired: Vector2 = desired - _game.point_positions[i]
+			forces[i] += to_desired * DRAG_FOLLOW_SPRING - point_velocities[i] * (DRAG_FOLLOW_DAMPING * weight)
+		_apply_local_angle_spring(forces)
+	_apply_guide_snap_and_repulsion(forces, nearest_features, occupied_vertices)
+
+	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
+	var vp: Vector2 = _game.get_viewport_rect().size
+	var margin: float = _game.ui_renderer.POINT_RADIUS
+	var lo := Vector2(margin, margin)
+	var hi := Vector2(vp.x - margin, vp.y - margin)
+
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			point_velocities[i] = Vector2.ZERO
+			continue
+		point_velocities[i] += forces[i] * delta
+		point_velocities[i] *= damping
+		_game.point_positions[i] += point_velocities[i] * delta
+		_clamp_point_to_viewport(i, lo, hi)
+
+	if not drag_target_active and not _has_active_point_velocity():
+		_zero_all_point_velocities()
+
+	for i in range(_game.point_positions.size()):
+		if before[i].distance_squared_to(_game.point_positions[i]) > DRAG_POSITION_EPSILON * DRAG_POSITION_EPSILON:
+			return true
+	return false
+
+
+func _begin_point_drag(idx: int, target_position: Vector2, input_method: String) -> void:
+	if idx < 0 or idx >= _game.point_positions.size():
+		return
+	_ensure_drag_state_arrays()
+	drag_target_active = true
+	drag_point_idx = idx
+	drag_target_position = target_position
+	drag_target_offset = target_position - _game.point_positions[idx]
+	drag_start_positions = _game.point_positions.duplicate()
+	_prepare_drag_influence_weights(idx)
+	_capture_drag_angle_reference(idx)
+	_last_input_method = input_method
+
+
+func _ensure_pad_drag_context() -> void:
+	if _game.selected_indices.size() != 1:
+		return
+	var idx: int = _game.selected_indices[0]
+	if drag_target_active and drag_point_idx == idx and _last_input_method == "pad":
+		return
+	_begin_point_drag(idx, _game.point_positions[idx], "pad")
+
+
+func _end_active_drag(clear_velocity: bool) -> void:
+	drag_target_active = false
+	drag_point_idx = -1
+	drag_target_offset = Vector2.ZERO
+	drag_start_positions.clear()
+	drag_influence_weights.clear()
+	drag_angle_prev_idx = -1
+	drag_angle_next_idx = -1
+	drag_angle_reference = 0.0
+	if clear_velocity:
+		_zero_all_point_velocities()
+
+
+func _ensure_drag_state_arrays() -> void:
+	while point_velocities.size() < _game.point_positions.size():
+		point_velocities.append(Vector2.ZERO)
+	while point_velocities.size() > _game.point_positions.size():
+		point_velocities.pop_back()
+	while point_stop_frames.size() < _game.point_positions.size():
+		point_stop_frames.append(0)
+	while point_stop_frames.size() > _game.point_positions.size():
+		point_stop_frames.pop_back()
+
+
+func _zero_all_point_velocities() -> void:
+	for i in range(point_velocities.size()):
+		point_velocities[i] = Vector2.ZERO
+	for i in range(point_stop_frames.size()):
+		point_stop_frames[i] = 0
+
+
+func _has_active_point_velocity() -> bool:
+	for velocity in point_velocities:
+		if velocity.length() > DRAG_STOP_SPEED:
+			return true
+	if drag_target_active:
+		return true
+	for i in range(point_velocities.size()):
+		if point_velocities[i].length_squared() > 0.01:
+			return true
+	return false
+
+
+func _is_drag_point_valid() -> bool:
+	return (
+		drag_point_idx >= 0
+		and drag_point_idx < _game.point_positions.size()
+		and drag_start_positions.size() == _game.point_positions.size()
+	)
+
+
+func _prepare_drag_influence_weights(grab_idx: int) -> void:
+	drag_influence_weights.clear()
+	var loop_bounds: Vector2i = _get_loop_bounds_for_index(grab_idx)
+	var perimeter: float = _get_loop_perimeter(loop_bounds.x, loop_bounds.y)
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			drag_influence_weights.append(0.0)
+		elif i == grab_idx:
+			drag_influence_weights.append(1.0)
+		elif i < loop_bounds.x or i >= loop_bounds.y or perimeter <= 0.001:
+			drag_influence_weights.append(0.0)
+		else:
+			var ratio: float = _get_contour_distance(grab_idx, i, loop_bounds.x, loop_bounds.y) / perimeter
+			drag_influence_weights.append(_falloff_weight_from_ratio(ratio))
+
+
+func _capture_drag_angle_reference(grab_idx: int) -> void:
+	drag_angle_prev_idx = _get_polygon_prev(grab_idx)
+	drag_angle_next_idx = _get_polygon_next(grab_idx)
+	if drag_angle_prev_idx == drag_angle_next_idx:
+		drag_angle_reference = 0.0
+		return
+	drag_angle_reference = _local_signed_angle(drag_angle_prev_idx, grab_idx, drag_angle_next_idx)
+
+
+func _apply_local_angle_spring(forces: Array[Vector2]) -> void:
+	if not _is_drag_point_valid():
+		return
+	if drag_angle_prev_idx < 0 or drag_angle_next_idx < 0:
+		return
+	if drag_angle_prev_idx >= _game.point_positions.size() or drag_angle_next_idx >= _game.point_positions.size():
+		return
+	if _is_locked(drag_angle_prev_idx) or _is_locked(drag_angle_next_idx) or _is_locked(drag_point_idx):
+		return
+
+	var center: Vector2 = _game.point_positions[drag_point_idx]
+	var prev_vec: Vector2 = _game.point_positions[drag_angle_prev_idx] - center
+	var next_vec: Vector2 = _game.point_positions[drag_angle_next_idx] - center
+	if prev_vec.length_squared() < 0.001 or next_vec.length_squared() < 0.001:
+		return
+
+	var angle_error: float = wrapf(_local_signed_angle(drag_angle_prev_idx, drag_point_idx, drag_angle_next_idx) - drag_angle_reference, -PI, PI)
+	if absf(angle_error) < 0.0001:
+		return
+
+	var correction: float = angle_error * 0.5
+	var desired_prev_pos: Vector2 = center + prev_vec.rotated(correction)
+	var desired_next_pos: Vector2 = center + next_vec.rotated(-correction)
+	var prev_delta: Vector2 = desired_prev_pos - _game.point_positions[drag_angle_prev_idx]
+	var next_delta: Vector2 = desired_next_pos - _game.point_positions[drag_angle_next_idx]
+	var angle_center_force: Vector2 = -(prev_delta + next_delta) * 0.5
+
+	forces[drag_angle_prev_idx] += prev_delta * DRAG_ANGLE_SPRING - point_velocities[drag_angle_prev_idx] * DRAG_ANGLE_DAMPING
+	forces[drag_angle_next_idx] += next_delta * DRAG_ANGLE_SPRING - point_velocities[drag_angle_next_idx] * DRAG_ANGLE_DAMPING
+	forces[drag_point_idx] += angle_center_force * DRAG_ANGLE_SPRING - point_velocities[drag_point_idx] * DRAG_ANGLE_DAMPING * 0.5
+
+
+func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: Array, occupied_vertices: Dictionary) -> void:
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			continue
+		var feature: Dictionary = nearest_features[i] as Dictionary
+		var pos: Vector2 = _game.point_positions[i]
+		var edge_dist: float = feature.get("edge_dist", INF) as float
+		if edge_dist < GUIDE_EDGE_SNAP_RADIUS:
+			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
+			var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
+			forces[i] += (edge_target - pos) * (GUIDE_EDGE_SPRING * edge_strength)
+			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * edge_strength)
+		var vertex_dist: float = feature.get("vertex_dist", INF) as float
+		if vertex_dist < GUIDE_VERTEX_SNAP_RADIUS:
+			var vertex_strength: float = 1.0 - vertex_dist / GUIDE_VERTEX_SNAP_RADIUS
+			var vertex_target: Vector2 = feature.get("vertex_pos", pos) as Vector2
+			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength)
+			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength)
+		for occupied in occupied_vertices.values():
+			var occupied_data: Dictionary = occupied as Dictionary
+			var occupied_point_idx: int = int(occupied_data.get("point_idx", -1))
+			var occupied_pos: Vector2 = occupied_data.get("vertex_pos", pos) as Vector2
+			if occupied_point_idx == i:
+				var settle_strength: float = clampf(float(point_stop_frames[i]) / float(maxi(GUIDE_VERTEX_OCCUPY_FRAMES, 1)), 0.0, 1.0)
+				forces[i] += (occupied_pos - pos) * (GUIDE_VERTEX_OCCUPIED_SPRING * settle_strength)
+				forces[i] -= point_velocities[i] * (GUIDE_VERTEX_OCCUPIED_DAMPING * settle_strength)
+				continue
+			if not _feature_is_on_same_vertex_or_edge(feature, occupied_data):
+				continue
+			var delta: Vector2 = pos - occupied_pos
+			var dist: float = delta.length()
+			if dist >= GUIDE_VERTEX_REPULSE_RADIUS:
+				continue
+			var repel_dir: Vector2 = delta.normalized()
+			if dist < 0.001:
+				var fallback: Vector2 = pos - (feature.get("edge_point", occupied_pos) as Vector2)
+				repel_dir = fallback.normalized() if fallback.length_squared() > 0.0001 else Vector2.RIGHT
+			var repel_strength: float = 1.0 - minf(dist, GUIDE_VERTEX_REPULSE_RADIUS) / GUIDE_VERTEX_REPULSE_RADIUS
+			forces[i] += repel_dir * (GUIDE_VERTEX_REPULSE_STRENGTH * repel_strength * repel_strength)
+
+
+func _build_fixed_guide_snap_loops() -> Array:
+	var loops: Array = []
+	match _game.stage_type:
+		"triangle":
+			loops.append(_build_regular_polygon_loop(_game.guide_center_1, _game.guide_radius_val, 3, _game.polygon_rotation))
+		"square":
+			loops.append(_transform_fixed_guide_points(_game.ideal_points))
+		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
+			loops.append(_transform_fixed_guide_points(pts))
+		"two_circles":
+			loops.append(_build_circle_loop(_game.guide_center_1, _game.guide_radius_val))
+			loops.append(_build_circle_loop(_game.guide_center_2, _game.guide_radius_val))
+		_:
+			loops.append(_build_circle_loop(_game.guide_center_1, _game.guide_radius_val))
+	var filtered: Array = []
+	for loop in loops:
+		var points: Array = loop as Array
+		if points.size() >= 2:
+			filtered.append(points)
+	return filtered
+
+
+func _transform_fixed_guide_points(points: Array) -> Array:
+	var verts: Array = []
+	var center: Vector2 = _game.guide_center_1
+	var scale: float = _game.guide_radius_val
+	var rotation: float = _game.correspondence_rotation
+	var cos_r: float = cos(rotation)
+	var sin_r: float = sin(rotation)
+	for pt in points:
+		var p: Vector2 = pt as Vector2
+		var tx: float = (p.x * cos_r - p.y * sin_r) * scale
+		var ty: float = (p.x * sin_r + p.y * cos_r) * scale
+		verts.append(center + Vector2(tx, ty))
+	return verts
+
+
+func _build_regular_polygon_loop(center: Vector2, radius: float, n_sides: int, rotation: float) -> Array:
+	var verts: Array = []
+	for k in range(n_sides):
+		var angle: float = rotation + TAU * float(k) / float(maxi(n_sides, 1))
+		verts.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	return verts
+
+
+func _build_circle_loop(center: Vector2, radius: float) -> Array:
+	var verts: Array = []
+	for i in range(_game.CIRCLE_SEGMENTS):
+		var angle: float = TAU * float(i) / float(maxi(_game.CIRCLE_SEGMENTS, 1))
+		verts.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	return verts
+
+
+func _compute_nearest_guide_features(guide_loops: Array) -> Array:
+	var features: Array = []
+	for i in range(_game.point_positions.size()):
+		var pos: Vector2 = _game.point_positions[i]
+		var best: Dictionary = {
+			"vertex_dist": INF,
+			"vertex_pos": pos,
+			"vertex_idx": -1,
+			"vertex_loop": -1,
+			"edge_dist": INF,
+			"edge_point": pos,
+			"edge_start_idx": -1,
+			"edge_loop": -1,
+			"loop_size": 0,
+		}
+		for loop_idx in range(guide_loops.size()):
+			var loop: Array = guide_loops[loop_idx] as Array
+			var loop_size: int = loop.size()
+			for vertex_idx in range(loop_size):
+				var vertex_pos: Vector2 = loop[vertex_idx] as Vector2
+				var vertex_dist: float = pos.distance_to(vertex_pos)
+				if vertex_dist < (best.get("vertex_dist", INF) as float):
+					best["vertex_dist"] = vertex_dist
+					best["vertex_pos"] = vertex_pos
+					best["vertex_idx"] = vertex_idx
+					best["vertex_loop"] = loop_idx
+				var next_idx: int = (vertex_idx + 1) % loop_size
+				var edge_point: Vector2 = _closest_point_on_segment(pos, vertex_pos, loop[next_idx] as Vector2)
+				var edge_dist: float = pos.distance_to(edge_point)
+				if edge_dist < (best.get("edge_dist", INF) as float):
+					best["edge_dist"] = edge_dist
+					best["edge_point"] = edge_point
+					best["edge_start_idx"] = vertex_idx
+					best["edge_loop"] = loop_idx
+					best["loop_size"] = loop_size
+		features.append(best)
+	return features
+
+
+func _compute_occupied_guide_vertices(nearest_features: Array) -> Dictionary:
+	var occupied_vertices: Dictionary = {}
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			point_stop_frames[i] = 0
+			continue
+		var feature: Dictionary = nearest_features[i] as Dictionary
+		var vertex_idx: int = feature.get("vertex_idx", -1) as int
+		var vertex_loop: int = feature.get("vertex_loop", -1) as int
+		var vertex_dist: float = feature.get("vertex_dist", INF) as float
+		if vertex_idx < 0 or vertex_loop < 0 or vertex_dist > GUIDE_VERTEX_SNAP_RADIUS:
+			point_stop_frames[i] = 0
+			continue
+		if point_velocities[i].length() <= GUIDE_VERTEX_OCCUPY_SPEED:
+			point_stop_frames[i] += 1
+		else:
+			point_stop_frames[i] = 0
+		if point_stop_frames[i] < GUIDE_VERTEX_OCCUPY_FRAMES:
+			continue
+		var feature_id: String = _guide_vertex_feature_id(vertex_loop, vertex_idx)
+		var current_best: Dictionary = occupied_vertices.get(feature_id, {}) as Dictionary
+		if current_best.is_empty() or vertex_dist < (current_best.get("vertex_dist", INF) as float):
+			occupied_vertices[feature_id] = {
+				"point_idx": i,
+				"vertex_loop": vertex_loop,
+				"vertex_idx": vertex_idx,
+				"vertex_pos": feature.get("vertex_pos", _game.point_positions[i]),
+				"vertex_dist": vertex_dist,
+				"loop_size": feature.get("loop_size", 0),
+			}
+	return occupied_vertices
+
+
+func _feature_is_on_same_vertex_or_edge(feature: Dictionary, occupied_data: Dictionary) -> bool:
+	var occupied_loop: int = occupied_data.get("vertex_loop", -1) as int
+	var occupied_vertex: int = occupied_data.get("vertex_idx", -1) as int
+	if feature.get("vertex_loop", -1) as int == occupied_loop and feature.get("vertex_idx", -1) as int == occupied_vertex:
+		return true
+	if feature.get("edge_loop", -1) as int != occupied_loop:
+		return false
+	var loop_size: int = maxi(1, occupied_data.get("loop_size", feature.get("loop_size", 0)) as int)
+	var edge_start: int = feature.get("edge_start_idx", -1) as int
+	var prev_edge: int = (occupied_vertex - 1 + loop_size) % loop_size
+	return edge_start == occupied_vertex or edge_start == prev_edge
+
+
+func _guide_vertex_feature_id(loop_idx: int, vertex_idx: int) -> String:
+	return str(loop_idx) + ":" + str(vertex_idx)
+
+
+func _local_signed_angle(prev_idx: int, center_idx: int, next_idx: int) -> float:
+	var from_prev: Vector2 = _game.point_positions[prev_idx] - _game.point_positions[center_idx]
+	var to_next: Vector2 = _game.point_positions[next_idx] - _game.point_positions[center_idx]
+	return atan2(from_prev.cross(to_next), from_prev.dot(to_next))
+
+
+func _get_loop_bounds_for_index(idx: int) -> Vector2i:
+	if _game.stage_manager.stage_type != "two_circles":
+		return Vector2i(0, _game.point_positions.size())
+	var split: int = _game.stage_manager.group_split
+	if idx < split:
+		return Vector2i(0, split)
+	return Vector2i(split, _game.point_positions.size())
+
+
+func _get_loop_perimeter(start_idx: int, end_idx: int) -> float:
+	var perimeter: float = 0.0
+	for i in range(start_idx, end_idx):
+		var next_idx: int = i + 1
+		if next_idx >= end_idx:
+			next_idx = start_idx
+		perimeter += _game.point_positions[i].distance_to(_game.point_positions[next_idx])
+	return perimeter
+
+
+func _get_contour_distance(from_idx: int, to_idx: int, start_idx: int, end_idx: int) -> float:
+	if from_idx == to_idx:
+		return 0.0
+	var forward: float = 0.0
+	var cur: int = from_idx
+	while cur != to_idx:
+		var next_idx: int = cur + 1
+		if next_idx >= end_idx:
+			next_idx = start_idx
+		forward += _game.point_positions[cur].distance_to(_game.point_positions[next_idx])
+		cur = next_idx
+	var backward: float = 0.0
+	cur = from_idx
+	while cur != to_idx:
+		var prev_idx: int = cur - 1
+		if prev_idx < start_idx:
+			prev_idx = end_idx - 1
+		backward += _game.point_positions[cur].distance_to(_game.point_positions[prev_idx])
+		cur = prev_idx
+	return minf(forward, backward)
+
+
+func _falloff_weight_from_ratio(ratio: float) -> float:
+	if ratio <= 0.0:
+		return 1.0
+	if ratio >= DRAG_MAX_INFLUENCE_RATIO:
+		return 0.0
+	var normalized: float = ratio / DRAG_MAX_INFLUENCE_RATIO
+	return pow(1.0 - normalized, 2.0)
+
+
+func _clamp_point_to_viewport(idx: int, lo: Vector2, hi: Vector2) -> void:
+	var pos: Vector2 = _game.point_positions[idx]
+	var clamped: Vector2 = pos.clamp(lo, hi)
+	if not is_equal_approx(pos.x, clamped.x):
+		point_velocities[idx].x = 0.0
+	if not is_equal_approx(pos.y, clamped.y):
+		point_velocities[idx].y = 0.0
+	_game.point_positions[idx] = clamped
 
 
 # =============================================================================
@@ -1054,7 +1529,7 @@ func _find_point_at(pos: Vector2, max_dist: float = HOVER_DISTANCE) -> int:
 
 
 func _find_closest_point(pos: Vector2) -> int:
-	"""距離制限なしで最寄りのアンロックポイントを返す"""
+	"""Return the closest unlocked point without a distance limit."""
 	var best: int = -1
 	var best_d: float = INF
 	for i in range(_game.point_positions.size()):
@@ -1068,7 +1543,7 @@ func _find_closest_point(pos: Vector2) -> int:
 
 
 func _find_point_in_direction(from_pos: Vector2, direction: Vector2) -> int:
-	"""from_pos から direction の方向にある最寄りのポイントを返す。該当がなければ -1"""
+	"""Return the closest unlocked point in the given direction."""
 	var dir_n: Vector2 = direction.normalized()
 	var best: int = -1
 	var best_d: float = INF
@@ -1104,3 +1579,5 @@ func _notify_points_changed() -> void:
 func _notify_selection_changed() -> void:
 	if on_selection_changed.is_valid():
 		on_selection_changed.call()
+
+

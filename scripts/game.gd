@@ -3836,6 +3836,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	_process_pad(delta)
+	input_handler.update_drag_physics(delta)
 	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":
 		var cur_move_grab: bool = _is_move_grab_active_for_count()
