@@ -38,17 +38,27 @@ const DRAG_MAX_INFLUENCE_RATIO := 0.35
 const DRAG_STOP_SPEED := 8.0
 const DRAG_STEP_MAX := 1.0 / 120.0
 const DRAG_POSITION_EPSILON := 0.01
-const GUIDE_EDGE_SNAP_RADIUS := 21.0
-const GUIDE_VERTEX_SNAP_RADIUS := 13.0
-const GUIDE_EDGE_SPRING := 3.0
-const GUIDE_VERTEX_SPRING := 8.0
-const GUIDE_SNAP_DAMPING := 2.5
-const GUIDE_VERTEX_OCCUPY_SPEED := 6.0
-const GUIDE_VERTEX_OCCUPY_FRAMES := 5
-const GUIDE_VERTEX_OCCUPIED_SPRING := 128.0
-const GUIDE_VERTEX_OCCUPIED_DAMPING := 32.0
-const GUIDE_VERTEX_REPULSE_RADIUS := 34.0
-const GUIDE_VERTEX_REPULSE_STRENGTH := 11.0
+const GUIDE_EDGE_SNAP_RADIUS := 26.0
+const GUIDE_VERTEX_SNAP_RADIUS := 16.0
+const GUIDE_EDGE_SPRING := 9.0
+const GUIDE_VERTEX_SPRING := 22.0
+const GUIDE_SNAP_DAMPING := 4.8
+const GUIDE_VERTEX_LOCK_RADIUS := 7.0
+const GUIDE_VERTEX_LOCK_SPRING := 220.0
+const GUIDE_VERTEX_LOCK_DAMPING := 30.0
+const GUIDE_VERTEX_CONTACT_RELEASE_MUL := 0.35
+const PLAYER_RADIUS := 16.0
+const PLAYER_FORCE_RADIUS := 128.0
+const PLAYER_MOVE_SPEED := 320.0
+const PLAYER_DPAD_SPEED := 220.0
+const PLAYER_SPEED_BOOST_PER_BUTTON := 0.35
+const PLAYER_REPEL_STRENGTH := 6400.0
+const PLAYER_ATTRACT_STRENGTH := 5600.0
+const PLAYER_CONTACT_FORCE := 9000.0
+const PLAYER_MIN_FORCE_DISTANCE := 8.0
+const POINT_PAIR_REPULSE_DISTANCE := 32.0
+const POINT_PAIR_REPULSE_STRENGTH := 2600.0
+const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -103,6 +113,14 @@ var debug_right_stick_active: bool = false
 var debug_right_stick_center: Vector2 = Vector2.ZERO
 var debug_right_stick_direction: Vector2 = Vector2.ZERO
 var _last_input_method: String = ""
+var player_position: Vector2 = Vector2.ZERO
+var player_position_initialized: bool = false
+var player_force_attracting: bool = false
+var player_force_repelling: bool = false
+var player_has_motion_input: bool = false
+var player_force_active: bool = false
+var player_influenced_point_count: int = 0
+var mouse_force_pressed: bool = false
 
 # --- game reference ---
 var _game: Node2D
@@ -124,25 +142,24 @@ func is_bb_dragging() -> bool:
 func is_pad_grabbing_modifier_now() -> bool:
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		return false
-	var rx: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
-	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
-	var right_active: bool = Vector2(rx, ry).length() >= PAD_RIGHT_STICK_DEADZONE
-	return Input.is_joy_button_pressed(0, JOY_BUTTON_A) or right_active
+	return player_force_attracting or player_force_repelling or player_force_active
 
 
 func update_grab_state_for_mouse() -> void:
-	"""Update grab state for mouse-driven dragging."""
-	grab_input_active = _game.is_dragging and _last_input_method == "mouse"
+	"""Update interaction state for mouse-driven player control."""
+	grab_input_active = mouse_force_pressed or player_force_active
 
 
 func release_mouse_grab() -> void:
-	"""Force-release the mouse drag state."""
+	"""Force-release the mouse-driven attract state."""
 	_game.is_dragging = false
 	_game.selected_indices.clear()
 	_game.hovered_index = -1
 	drag_offsets.clear()
 	_end_active_drag(true)
-	# Also clear pad-grab state so grab does not immediately re-light.
+	mouse_force_pressed = false
+	player_force_attracting = false
+	player_force_repelling = false
 	pad_grabbing = false
 	_grabbing_from_right_stick = false
 	_clear_right_stick_ray_state()
@@ -171,58 +188,57 @@ func reset_for_stage() -> void:
 	_last_input_method = ""
 	_prev_shoulder_l_pressed = false
 	_prev_shoulder_r_pressed = false
+	player_position_initialized = false
+	player_force_attracting = false
+	player_force_repelling = false
+	player_has_motion_input = false
+	player_force_active = false
+	player_influenced_point_count = 0
+	mouse_force_pressed = false
+	_reset_player_position()
+
+
+func _reset_player_position() -> void:
+	player_position = _default_player_position()
+	player_position_initialized = true
+
+
+func _default_player_position() -> Vector2:
+	if _game.point_positions.is_empty():
+		return _game.shape_center
+	var spawn_offset_y: float = maxf(_game.guide_radius_val, 96.0) + PLAYER_FORCE_RADIUS + 24.0
+	var spawn_pos: Vector2 = _game.shape_center + Vector2(0.0, spawn_offset_y)
+	var vp: Vector2 = _game.get_viewport_rect().size
+	var margin: float = PLAYER_RADIUS
+	return spawn_pos.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
+
+
+func _refresh_hovered_point() -> void:
+	_game.hovered_index = get_player_focus_index(HOVER_DISTANCE)
 
 
 func handle_mouse_motion(mouse: Vector2) -> void:
 	if bb_dragging:
 		_handle_bb_motion(mouse)
-		_last_input_method = "mouse"
 		return
-
-	if _game.is_dragging:
-		# ?????????????????????????E?????????
-		if _last_input_method == "pad" or drag_offsets.size() != _game.selected_indices.size():
-			_game.is_dragging = false
-			pad_grabbing = false
-			_end_active_drag(false)
-			_last_input_method = "mouse"
-			# Fall through to hover update below.
-		else:
-			if _game.selected_indices.size() == 1 and drag_offsets.size() == 1:
-				drag_target_position = mouse + drag_offsets[0]
-				drag_target_active = true
-				_game.queue_redraw()
-			_last_input_method = "mouse"
-
-	else:
-		var best: int = _find_point_at(mouse)
-		var hover_changed: bool = (best != _game.hovered_index)
-		if hover_changed:
-			_game.hovered_index = best
-		# Hover also moves single-point selection.
-		var need_select: bool = best >= 0 and (_game.selected_indices.is_empty() or _game.selected_indices[0] != best)
-		if need_select:
-			_game.selected_indices.clear()
-			_game.selected_indices.append(best)
-			_game.hovered_index = best
-			_notify_selection_changed()
-		if hover_changed or need_select:
-			_game.queue_redraw()
-		_last_input_method = "mouse"
+	player_position = mouse
+	player_position_initialized = true
+	player_has_motion_input = false
+	_last_input_method = "mouse"
+	_refresh_hovered_point()
+	_game.queue_redraw()
 
 
 func handle_mouse_press(mouse: Vector2) -> void:
 	_last_input_method = "mouse"
-	var clicked: int = _find_point_at(mouse, CLICK_HIT_DISTANCE)
-
-	# Only grab when a point itself was clicked.
-	if clicked < 0:
-		return
-	_game.selected_indices.clear()
-	_game.selected_indices.append(clicked)
-	_game.hovered_index = clicked
-	_notify_selection_changed()
-	_begin_drag(mouse)
+	player_position = mouse
+	player_position_initialized = true
+	mouse_force_pressed = true
+	player_force_attracting = true
+	player_force_repelling = false
+	grab_input_active = true
+	_game.is_dragging = false
+	_game.queue_redraw()
 
 
 func _begin_drag(mouse: Vector2) -> void:
@@ -240,11 +256,12 @@ func handle_mouse_release(_mouse: Vector2) -> void:
 		_end_bb_drag()
 		return
 
-	if _game.is_dragging:
-		_game.is_dragging = false
-		_end_active_drag(false)
-		_notify_points_changed()
-		_game.queue_redraw()
+	mouse_force_pressed = false
+	player_force_attracting = false
+	player_force_repelling = false
+	grab_input_active = player_force_active
+	_game.is_dragging = false
+	_game.queue_redraw()
 
 
 func _closest_point_on_segment(p: Vector2, a: Vector2, b: Vector2) -> Vector2:
@@ -424,51 +441,12 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 		return
 	if _game.point_positions.is_empty():
 		return
-	_ensure_pad_selection()
-	if not pressed:
-		return
-	var a_held: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
-	var rx: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
-	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
-	var right_stick_held: bool = Vector2(rx, ry).length() >= PAD_RIGHT_STICK_DEADZONE
-	var pad_grabbing_modifier: bool = a_held or right_stick_held
-	# L/R ray-bundle cycling is handled in process_pad after bundle construction.
-	var cur_sel: int = _game.selected_indices[0] if _game.selected_indices.size() > 0 else -1
-	var sel_on_ray_bundle: bool = cur_sel >= 0 and _right_stick_ray_bundle.find(cur_sel) >= 0
-	var use_ray_bundle_for_shoulder: bool = _right_stick_ray_bundle.size() >= 2 and (
-		right_stick_held
-		or _right_stick_was_active
-		or _grabbing_from_right_stick
-		or sel_on_ray_bundle
-	)
-	# Avoid polygon cycling when we are still in right-stick ray-selection context.
-	var in_right_stick_context: bool = (
-		right_stick_held
-		or _right_stick_was_active
-		or _grabbing_from_right_stick
-	)
 	_last_input_method = "pad"
-	match btn:
-		JOY_BUTTON_LEFT_SHOULDER:
-			if not use_ray_bundle_for_shoulder and not in_right_stick_context:
-				if not _try_shoulder_cycle_ray_bundle_from_saved_ray(1):
-					_cycle_polygon_ring_adjacent(false, false)
-		JOY_BUTTON_RIGHT_SHOULDER:
-			if not use_ray_bundle_for_shoulder and not in_right_stick_context:
-				if not _try_shoulder_cycle_ray_bundle_from_saved_ray(-1):
-					_cycle_polygon_ring_adjacent(true, false)
-		JOY_BUTTON_DPAD_UP:
-			if not pad_grabbing_modifier:
-				_cycle_pad_point_direction(Vector2.UP)
-		JOY_BUTTON_DPAD_DOWN:
-			if not pad_grabbing_modifier:
-				_cycle_pad_point_direction(Vector2.DOWN)
-		JOY_BUTTON_DPAD_LEFT:
-			if not pad_grabbing_modifier:
-				_cycle_pad_point_direction(Vector2.LEFT)
-		JOY_BUTTON_DPAD_RIGHT:
-			if not pad_grabbing_modifier:
-				_cycle_pad_point_direction(Vector2.RIGHT)
+	if btn == JOY_BUTTON_A:
+		player_force_attracting = pressed
+	elif btn == JOY_BUTTON_B:
+		player_force_repelling = pressed
+	grab_input_active = _get_player_force_mode() != 0 or player_force_active
 
 
 func _ensure_pad_selection() -> void:
@@ -818,234 +796,64 @@ func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> boo
 
 
 func process_pad(delta: float) -> void:
-	grab_input_active = false
-	var shoulder_l_now: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
-	var shoulder_r_now: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
-	var shoulder_l_edge: bool = shoulder_l_now and not _prev_shoulder_l_pressed
-	var shoulder_r_edge: bool = shoulder_r_now and not _prev_shoulder_r_pressed
 	if _game.game_state != "playing" and _game.game_state != "rules":
-		_prev_shoulder_l_pressed = shoulder_l_now
-		_prev_shoulder_r_pressed = shoulder_r_now
+		player_has_motion_input = false
+		player_force_attracting = false
+		player_force_repelling = false
+		grab_input_active = false
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
-		_prev_shoulder_l_pressed = shoulder_l_now
-		_prev_shoulder_r_pressed = shoulder_r_now
+		player_has_motion_input = false
+		player_force_attracting = false
+		player_force_repelling = false
+		grab_input_active = false
 		return
 	if _game.point_positions.is_empty():
-		_prev_shoulder_l_pressed = shoulder_l_now
-		_prev_shoulder_r_pressed = shoulder_r_now
+		player_has_motion_input = false
+		player_force_attracting = false
+		player_force_repelling = false
+		grab_input_active = false
 		return
-	if not pad_cursor_initialized:
-		pad_cursor = _game.shape_center
-		pad_cursor_initialized = true
-	_ensure_pad_selection()
+	if not player_position_initialized:
+		_reset_player_position()
 
 	var left_x: float = Input.get_joy_axis(0, JOY_AXIS_LEFT_X)
 	var left_y: float = Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
 	var left_raw: Vector2 = Vector2(left_x, left_y)
 	var left_neutral: bool = left_raw.length() < PAD_LEFT_STICK_NEUTRAL_DEADZONE
-	var left_vec: Vector2 = left_raw if not left_neutral else Vector2.ZERO
+	var move_vec: Vector2 = left_raw if not left_neutral else Vector2.ZERO
+	var dpad: Vector2 = Vector2.ZERO
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_UP):
+		dpad.y -= 1.0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_DOWN):
+		dpad.y += 1.0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_LEFT):
+		dpad.x -= 1.0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_RIGHT):
+		dpad.x += 1.0
 
-	var right_x: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
-	var right_y: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
-	var right_vec := Vector2(right_x, right_y)
-	var right_active: bool = right_vec.length() >= PAD_RIGHT_STICK_DEADZONE
+	player_force_attracting = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
+	player_force_repelling = Input.is_joy_button_pressed(0, JOY_BUTTON_B)
+	var speed_mul: float = _get_player_speed_multiplier()
+	var moved: bool = false
+	if move_vec != Vector2.ZERO:
+		var speed: float = pow(clampf(move_vec.length(), 0.0, 1.0), PAD_LEFT_STICK_SPEED_EXPONENT) * PLAYER_MOVE_SPEED * speed_mul
+		player_position += move_vec.normalized() * speed * delta
+		moved = true
+	if dpad != Vector2.ZERO:
+		player_position += dpad.normalized() * PLAYER_DPAD_SPEED * speed_mul * delta
+		moved = true
 
-	var a_held: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
-	var pad_grabbing_modifier: bool = a_held or right_active
-	if pad_grabbing_modifier and _game.selected_indices.size() == 1:
-		_ensure_pad_drag_context()
-
-	# Right stick ray selection and locking.
-	if right_active:
+	player_has_motion_input = moved
+	if not _game.selected_indices.is_empty():
+		_game.selected_indices.clear()
+	if moved:
+		_clamp_player_to_viewport()
 		_last_input_method = "pad"
-		var current_dir: Vector2 = right_vec.normalized()
-		var cos_pin_break: float = cos(deg_to_rad(RIGHT_STICK_RAY_PIN_BREAK_ANGLE_DEG))
-
-		if _right_stick_ray_auto_select_done and _last_rs_phys_dir_at_auto_select.length_squared() > 0.0001:
-			var cos_redetect: float = cos(deg_to_rad(RIGHT_STICK_REDETECT_ANGLE_DEG))
-			if current_dir.dot(_last_rs_phys_dir_at_auto_select) < cos_redetect:
-				_right_stick_ray_auto_select_done = false
-
-		if _rs_kata_grab_lock and left_neutral and not _dpad_any_pressed() \
-				and current_dir.dot(_rs_kata_grab_lock_ref_dir) < cos_pin_break:
-			_rs_kata_grab_lock = false
-
-		var dir_for_ray: Vector2
-		if _right_stick_ray_pinned:
-			if current_dir.dot(_right_stick_locked_ray_dir) >= cos_pin_break:
-				dir_for_ray = _right_stick_locked_ray_dir
-			else:
-				dir_for_ray = current_dir
-				_right_stick_locked_ray_dir = current_dir
-				_right_stick_ray_pinned = false
-				_left_stick_used_while_right_held = false
-				_right_stick_ray_auto_select_done = false
-		else:
-			dir_for_ray = current_dir
-			_right_stick_locked_ray_dir = current_dir
-
-		_right_stick_last_effective_ray_dir = dir_for_ray
-
-		var direction_changed: bool = false
-		if _left_stick_used_while_right_held and _right_stick_dir_when_fixed.length_squared() > 0.01:
-			var dot_ls: float = current_dir.dot(_right_stick_dir_when_fixed)
-			var cos5: float = cos(deg_to_rad(RIGHT_STICK_REDETECT_ANGLE_DEG))
-			direction_changed = (dot_ls < cos5)
-			if direction_changed:
-				_left_stick_used_while_right_held = false
-
-		var centroid := Vector2.ZERO
-		var count: int = 0
-		for i in range(_game.point_positions.size()):
-			if not _is_locked(i):
-				centroid += _game.point_positions[i]
-				count += 1
-		if count > 0:
-			centroid /= float(count)
-			debug_right_stick_active = true
-			debug_right_stick_center = centroid
-			debug_right_stick_direction = dir_for_ray
-			_right_stick_ray_bundle = _finalize_shoulder_ray_bundle(centroid, dir_for_ray)
-			# Process shoulder input immediately after rebuilding the ray bundle.
-			if shoulder_l_edge:
-				_cycle_ray_bundle(1)
-			elif shoulder_r_edge:
-				_cycle_ray_bundle(-1)
-			# L/R ??E?????????????E????????????????????E?????????
-			# Clear the L/R lock only on frames without shoulder input.
-			if not shoulder_l_edge and not shoulder_r_edge:
-				if _rs_lr_selection_lock and dir_for_ray.dot(_rs_lr_lock_ref_dir) < cos_pin_break:
-					if DEBUG_PAD_RAY_LR:
-						_log_pad_ray_lr(
-							"lr_lock_clear eff_dot_ref=" + str(dir_for_ray.dot(_rs_lr_lock_ref_dir))
-							+ " dir_eff=" + str(dir_for_ray) + " ref=" + str(_rs_lr_lock_ref_dir)
-						)
-					_rs_lr_selection_lock = false
-			var block_auto: bool = _rs_kata_grab_lock or _rs_lr_selection_lock
-			if DEBUG_PAD_RAY_LR:
-				var sel0: int = _game.selected_indices[0] if _game.selected_indices.size() > 0 else -1
-				var branch: String = "pass"
-				if block_auto:
-					branch = "block_auto"
-				elif _right_stick_ray_pinned:
-					branch = "sync_pinned"
-				elif (direction_changed or not _left_stick_used_while_right_held) and (direction_changed or not _right_stick_ray_auto_select_done):
-					branch = "select_line"
-				else:
-					branch = "hold_grab_only"
-				_log_pad_ray_lr(
-					"sel=" + str(sel0) + " lr_lock=" + str(_rs_lr_selection_lock) + " branch=" + branch
-					+ " shL=" + str(shoulder_l_edge) + " shR=" + str(shoulder_r_edge)
-				)
-			if block_auto:
-				pass
-			elif _right_stick_ray_pinned:
-				_sync_pinned_selection_only()
-			elif (direction_changed or not _left_stick_used_while_right_held) and (direction_changed or not _right_stick_ray_auto_select_done):
-				if _select_point_by_direction_line(centroid, dir_for_ray):
-					_right_stick_ray_auto_select_done = true
-					_last_rs_phys_dir_at_auto_select = current_dir
-		else:
-			debug_right_stick_active = false
-		_right_stick_was_active = true
-		_right_stick_release_frames = 0
-		# Keep grab state active while the right stick remains engaged.
-		pad_grabbing = true
-		_game.is_dragging = true
-		_grabbing_from_right_stick = true
-	elif _right_stick_was_active:
-		# Release right-stick-specific locks after a short grace period.
-		if not right_active:
-			_rs_kata_grab_lock = false
-			debug_right_stick_active = false
-			_right_stick_release_frames += 1
-			if _right_stick_release_frames >= 2:
-				_rs_lr_selection_lock = false
-			if _right_stick_release_frames >= 4:
-				_right_stick_was_active = false
-				_right_stick_release_frames = 0
-				_right_stick_dir_when_fixed = Vector2.ZERO
-				_left_stick_used_while_right_held = false
-				_clear_right_stick_ray_state()
-				if not a_held and pad_grabbing and _grabbing_from_right_stick:
-					pad_grabbing = false
-					_grabbing_from_right_stick = false
-					_game.is_dragging = false
-					_end_active_drag(false)
-					_game.queue_redraw()
-
-	# Left stick: move the grabbed point while grab input is active.
-	if left_vec != Vector2.ZERO:
-		_last_input_method = "pad"
-		if pad_grabbing_modifier and _game.selected_indices.size() >= 1:
-			var left_len: float = left_vec.length()
-			var speed: float = pow(left_len, PAD_LEFT_STICK_SPEED_EXPONENT) * PAD_RIGHT_STICK_SPEED * delta
-			var move: Vector2 = left_vec.normalized() * speed
-			drag_target_position += move
-			pad_cursor = drag_target_position
-			_game.queue_redraw()
-			if _game.game_state != "playing" and _game.game_state != "rules":
-				return
-			if _grabbing_from_right_stick:
-				if not _left_stick_used_while_right_held:
-					_right_stick_dir_when_fixed = right_vec.normalized()
-				_left_stick_used_while_right_held = true
-			if right_active and _grabbing_from_right_stick and _right_stick_last_effective_ray_dir.length_squared() > 0.0001:
-				_right_stick_ray_pinned = true
-				_right_stick_locked_ray_dir = _right_stick_last_effective_ray_dir
-				if not _rs_kata_grab_lock:
-					_rs_kata_grab_lock = true
-					_rs_kata_grab_lock_ref_dir = _right_stick_last_effective_ray_dir.normalized()
-		else:
-			if not _grabbing_from_right_stick:
-				var left_cardinal: Vector2 = _stick_to_cardinal_direction(left_raw)
-				if left_cardinal != Vector2.ZERO and _left_stick_was_neutral:
-					_cycle_pad_point_direction(left_cardinal)
-
-	_left_stick_was_neutral = left_neutral
-
-	# D-pad also moves the grabbed point while grab input is active.
-	if pad_grabbing_modifier and _game.selected_indices.size() >= 1:
-		var dpad: Vector2 = Vector2.ZERO
-		if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_UP):
-			dpad.y -= 1
-		if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_DOWN):
-			dpad.y += 1
-		if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_LEFT):
-			dpad.x -= 1
-		if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_RIGHT):
-			dpad.x += 1
-		if dpad != Vector2.ZERO:
-			_last_input_method = "pad"
-			var move: Vector2 = dpad.normalized() * PAD_A_DPAD_SPEED * delta
-			drag_target_position += move
-			pad_cursor = drag_target_position
-			_game.queue_redraw()
-			if right_active and _right_stick_last_effective_ray_dir.length_squared() > 0.0001:
-				_right_stick_ray_pinned = true
-				_right_stick_locked_ray_dir = _right_stick_last_effective_ray_dir
-			if _grabbing_from_right_stick and right_active and _right_stick_last_effective_ray_dir.length_squared() > 0.0001:
-				if not _rs_kata_grab_lock:
-					_rs_kata_grab_lock = true
-					_rs_kata_grab_lock_ref_dir = _right_stick_last_effective_ray_dir.normalized()
-			if _game.game_state != "playing" and _game.game_state != "rules":
-				_prev_shoulder_l_pressed = shoulder_l_now
-				_prev_shoulder_r_pressed = shoulder_r_now
-				return
-
-	# ?????E ???E???E???A?????????????????
-	if _game.game_state != "playing" and _game.game_state != "rules":
-		grab_input_active = false
-		_prev_shoulder_l_pressed = shoulder_l_now
-		_prev_shoulder_r_pressed = shoulder_r_now
-		return
-	if not pad_grabbing_modifier and _last_input_method == "pad":
-		_game.is_dragging = false
-		_end_active_drag(false)
-	grab_input_active = pad_grabbing_modifier or (_game.is_dragging and _last_input_method == "mouse")
-	_prev_shoulder_l_pressed = shoulder_l_now
-	_prev_shoulder_r_pressed = shoulder_r_now
+		_game.queue_redraw()
+	_refresh_hovered_point()
+	grab_input_active = _get_player_force_mode() != 0 or player_force_active
+	_game.is_dragging = false
 
 
 # =============================================================================
@@ -1054,7 +862,9 @@ func process_pad(delta: float) -> void:
 
 func update_drag_physics(delta: float) -> void:
 	_ensure_drag_state_arrays()
-	if not drag_target_active and not _has_active_point_velocity():
+	if not player_position_initialized:
+		_reset_player_position()
+	if not player_force_active and not _has_points_within_player_force() and not _has_active_point_velocity():
 		return
 
 	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
@@ -1070,42 +880,32 @@ func update_drag_physics(delta: float) -> void:
 
 func _step_drag_physics(delta: float) -> bool:
 	if _game.point_positions.is_empty():
+		player_force_active = false
+		player_influenced_point_count = 0
 		return false
 
 	var before: Array[Vector2] = _game.point_positions.duplicate()
 	var guide_loops: Array = _build_fixed_guide_snap_loops()
 	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
-	var occupied_vertices: Dictionary = _compute_occupied_guide_vertices(nearest_features)
+	var vertex_locks: Dictionary = _compute_vertex_locks(nearest_features)
 	var forces: Array[Vector2] = []
 	forces.resize(_game.point_positions.size())
 	for i in range(forces.size()):
 		forces[i] = Vector2.ZERO
 
-	if drag_target_active and _is_drag_point_valid():
-		var drag_delta: Vector2 = drag_target_position - drag_start_positions[drag_point_idx]
-		var drag_loop_bounds: Vector2i = _get_loop_bounds_for_index(drag_point_idx)
-		var follow_speed_factor: float = _get_drag_follow_speed_factor()
-		for i in range(_game.point_positions.size()):
-			if _is_locked(i):
-				point_velocities[i] = Vector2.ZERO
-				continue
-			if i == drag_point_idx:
-				var to_target: Vector2 = drag_target_position - _game.point_positions[i]
-				forces[i] += to_target * DRAG_CURSOR_SPRING - point_velocities[i] * DRAG_CURSOR_DAMPING
-				continue
-			var weight: float = drag_influence_weights[i]
-			if weight <= 0.0:
-				continue
-			if _is_drag_link_blocked(drag_point_idx, i, drag_loop_bounds.x, drag_loop_bounds.y, occupied_vertices):
-				continue
-			var effective_weight: float = weight * follow_speed_factor
-			if effective_weight <= 0.0:
-				continue
-			var desired: Vector2 = drag_start_positions[i] + drag_delta * effective_weight
-			var to_desired: Vector2 = desired - _game.point_positions[i]
-			forces[i] += to_desired * DRAG_FOLLOW_SPRING - point_velocities[i] * (DRAG_FOLLOW_DAMPING * effective_weight)
-		_apply_local_angle_spring(forces)
-	_apply_guide_snap_and_repulsion(forces, nearest_features, occupied_vertices)
+	player_influenced_point_count = 0
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			point_velocities[i] = Vector2.ZERO
+			continue
+		var player_force: Vector2 = _compute_player_force(i)
+		if player_force.length_squared() > 0.0001:
+			forces[i] += player_force
+			player_influenced_point_count += 1
+	_apply_point_pair_repulsion(forces)
+	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
+	player_force_active = player_influenced_point_count > 0
+	grab_input_active = player_force_active or _get_player_force_mode() != 0 or mouse_force_pressed
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
 	var vp: Vector2 = _game.get_viewport_rect().size
@@ -1122,11 +922,92 @@ func _step_drag_physics(delta: float) -> bool:
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
 
-	if not drag_target_active and not _has_active_point_velocity():
+	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
 
 	for i in range(_game.point_positions.size()):
 		if before[i].distance_squared_to(_game.point_positions[i]) > DRAG_POSITION_EPSILON * DRAG_POSITION_EPSILON:
+			return true
+	return false
+
+
+func _compute_player_force(point_idx: int) -> Vector2:
+	var force_mode: int = _get_player_force_mode()
+	if force_mode == 0 and not mouse_force_pressed:
+		return Vector2.ZERO
+	var point_pos: Vector2 = _game.point_positions[point_idx]
+	var from_player: Vector2 = point_pos - player_position
+	var dist: float = maxf(from_player.length(), PLAYER_MIN_FORCE_DISTANCE)
+	var influence_limit: float = PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS
+	if dist > influence_limit:
+		return Vector2.ZERO
+	var falloff: float = 1.0 - dist / influence_limit
+	var direction: Vector2 = from_player / dist
+	if force_mode > 0 or mouse_force_pressed:
+		direction = -direction
+	var base_strength: float = PLAYER_ATTRACT_STRENGTH if (force_mode > 0 or mouse_force_pressed) else PLAYER_REPEL_STRENGTH
+	var force: Vector2 = direction * (base_strength * falloff * falloff)
+	if _is_player_touching_point(point_idx):
+		force += direction * PLAYER_CONTACT_FORCE
+	return force
+
+
+func _is_player_touching_point(point_idx: int) -> bool:
+	if point_idx < 0 or point_idx >= _game.point_positions.size():
+		return false
+	var contact_radius: float = PLAYER_RADIUS + _game.ui_renderer.POINT_RADIUS
+	return player_position.distance_to(_game.point_positions[point_idx]) <= contact_radius
+
+
+func _apply_point_pair_repulsion(forces: Array[Vector2]) -> void:
+	var threshold_sq: float = POINT_PAIR_REPULSE_DISTANCE * POINT_PAIR_REPULSE_DISTANCE
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			continue
+		for j in range(i + 1, _game.point_positions.size()):
+			if _is_locked(j):
+				continue
+			var delta: Vector2 = _game.point_positions[j] - _game.point_positions[i]
+			var dist_sq: float = delta.length_squared()
+			if dist_sq > threshold_sq:
+				continue
+			var dist: float = maxf(sqrt(dist_sq), POINT_PAIR_REPULSE_MIN_DISTANCE)
+			var falloff: float = 1.0 - dist / POINT_PAIR_REPULSE_DISTANCE
+			var dir: Vector2 = delta / dist
+			var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
+			forces[i] -= force
+			forces[j] += force
+
+
+func _get_player_force_mode() -> int:
+	if mouse_force_pressed:
+		return 1
+	if player_force_attracting == player_force_repelling:
+		return 0
+	return 1 if player_force_attracting else -1
+
+
+func _get_player_speed_multiplier() -> float:
+	var boost_count: int = 0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER):
+		boost_count += 1
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER):
+		boost_count += 1
+	if absf(Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)) > 0.35:
+		boost_count += 1
+	if absf(Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT)) > 0.35:
+		boost_count += 1
+	return 1.0 + float(boost_count) * PLAYER_SPEED_BOOST_PER_BUTTON
+
+
+func _has_points_within_player_force() -> bool:
+	if _get_player_force_mode() == 0 and not mouse_force_pressed:
+		return false
+	var influence_limit: float = PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			continue
+		if player_position.distance_to(_game.point_positions[i]) <= influence_limit:
 			return true
 	return false
 
@@ -1163,6 +1044,8 @@ func _end_active_drag(clear_velocity: bool) -> void:
 	drag_angle_prev_idx = -1
 	drag_angle_next_idx = -1
 	drag_angle_reference = 0.0
+	player_force_active = false
+	player_influenced_point_count = 0
 	if clear_velocity:
 		_zero_all_point_velocities()
 
@@ -1189,8 +1072,6 @@ func _has_active_point_velocity() -> bool:
 	for velocity in point_velocities:
 		if velocity.length() > DRAG_STOP_SPEED:
 			return true
-	if drag_target_active:
-		return true
 	for i in range(point_velocities.size()):
 		if point_velocities[i].length_squared() > 0.01:
 			return true
@@ -1262,7 +1143,7 @@ func _apply_local_angle_spring(forces: Array[Vector2]) -> void:
 	forces[drag_point_idx] += angle_center_force * DRAG_ANGLE_SPRING - point_velocities[drag_point_idx] * DRAG_ANGLE_DAMPING * 0.5
 
 
-func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: Array, occupied_vertices: Dictionary) -> void:
+func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
@@ -1280,29 +1161,14 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 			var vertex_target: Vector2 = feature.get("vertex_pos", pos) as Vector2
 			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength)
 			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength)
-		for occupied in occupied_vertices.values():
-			var occupied_data: Dictionary = occupied as Dictionary
-			var occupied_point_idx: int = int(occupied_data.get("point_idx", -1))
-			var occupied_pos: Vector2 = occupied_data.get("vertex_pos", pos) as Vector2
-			if occupied_point_idx == i:
-				if drag_target_active and drag_point_idx == i:
-					continue
-				var settle_strength: float = clampf(float(point_stop_frames[i]) / float(maxi(GUIDE_VERTEX_OCCUPY_FRAMES, 1)), 0.0, 1.0)
-				forces[i] += (occupied_pos - pos) * (GUIDE_VERTEX_OCCUPIED_SPRING * settle_strength)
-				forces[i] -= point_velocities[i] * (GUIDE_VERTEX_OCCUPIED_DAMPING * settle_strength)
-				continue
-			if not _feature_is_on_same_vertex_or_edge(feature, occupied_data):
-				continue
-			var delta: Vector2 = pos - occupied_pos
-			var dist: float = delta.length()
-			if dist >= GUIDE_VERTEX_REPULSE_RADIUS:
-				continue
-			var repel_dir: Vector2 = delta.normalized()
-			if dist < 0.001:
-				var fallback: Vector2 = pos - (feature.get("edge_point", occupied_pos) as Vector2)
-				repel_dir = fallback.normalized() if fallback.length_squared() > 0.0001 else Vector2.RIGHT
-			var repel_strength: float = 1.0 - minf(dist, GUIDE_VERTEX_REPULSE_RADIUS) / GUIDE_VERTEX_REPULSE_RADIUS
-			forces[i] += repel_dir * (GUIDE_VERTEX_REPULSE_STRENGTH * repel_strength * repel_strength)
+		var lock_data: Dictionary = vertex_locks.get(i, {}) as Dictionary
+		if lock_data.is_empty():
+			continue
+		var lock_pos: Vector2 = lock_data.get("vertex_pos", pos) as Vector2
+		var player_touching: bool = _is_player_touching_point(i)
+		var lock_mul: float = GUIDE_VERTEX_CONTACT_RELEASE_MUL if player_touching else 1.0
+		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul)
+		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul)
 
 
 func _build_fixed_guide_snap_loops() -> Array:
@@ -1393,37 +1259,24 @@ func _compute_nearest_guide_features(guide_loops: Array) -> Array:
 	return features
 
 
-func _compute_occupied_guide_vertices(nearest_features: Array) -> Dictionary:
-	var occupied_vertices: Dictionary = {}
+func _compute_vertex_locks(nearest_features: Array) -> Dictionary:
+	var vertex_locks: Dictionary = {}
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
-			point_stop_frames[i] = 0
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
 		var vertex_idx: int = feature.get("vertex_idx", -1) as int
 		var vertex_loop: int = feature.get("vertex_loop", -1) as int
 		var vertex_dist: float = feature.get("vertex_dist", INF) as float
-		if vertex_idx < 0 or vertex_loop < 0 or vertex_dist > GUIDE_VERTEX_SNAP_RADIUS:
-			point_stop_frames[i] = 0
+		if vertex_idx < 0 or vertex_loop < 0 or vertex_dist > GUIDE_VERTEX_LOCK_RADIUS:
 			continue
-		if point_velocities[i].length() <= GUIDE_VERTEX_OCCUPY_SPEED:
-			point_stop_frames[i] += 1
-		else:
-			point_stop_frames[i] = 0
-		if point_stop_frames[i] < GUIDE_VERTEX_OCCUPY_FRAMES:
-			continue
-		var feature_id: String = _guide_vertex_feature_id(vertex_loop, vertex_idx)
-		var current_best: Dictionary = occupied_vertices.get(feature_id, {}) as Dictionary
-		if current_best.is_empty() or vertex_dist < (current_best.get("vertex_dist", INF) as float):
-			occupied_vertices[feature_id] = {
-				"point_idx": i,
-				"vertex_loop": vertex_loop,
-				"vertex_idx": vertex_idx,
-				"vertex_pos": feature.get("vertex_pos", _game.point_positions[i]),
-				"vertex_dist": vertex_dist,
-				"loop_size": feature.get("loop_size", 0),
-			}
-	return occupied_vertices
+		vertex_locks[i] = {
+			"vertex_loop": vertex_loop,
+			"vertex_idx": vertex_idx,
+			"vertex_pos": feature.get("vertex_pos", _game.point_positions[i]),
+			"vertex_dist": vertex_dist,
+		}
+	return vertex_locks
 
 
 func _feature_is_on_same_vertex_or_edge(feature: Dictionary, occupied_data: Dictionary) -> bool:
@@ -1600,6 +1453,38 @@ func _clamp_points_to_viewport() -> void:
 	var hi := Vector2(vp.x - margin, vp.y - margin)
 	for i in range(_game.point_positions.size()):
 		_game.point_positions[i] = _game.point_positions[i].clamp(lo, hi)
+
+
+func _clamp_player_to_viewport() -> void:
+	var vp: Vector2 = _game.get_viewport_rect().size
+	var margin: float = PLAYER_RADIUS
+	player_position = player_position.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
+
+
+func has_player_avatar() -> bool:
+	return player_position_initialized
+
+
+func get_player_position() -> Vector2:
+	return player_position
+
+
+func is_player_attracting() -> bool:
+	return _get_player_force_mode() > 0
+
+
+func is_player_force_active() -> bool:
+	return player_force_active
+
+
+func is_player_repelling() -> bool:
+	return _get_player_force_mode() < 0
+
+
+func get_player_focus_index(max_dist: float = PLAYER_FORCE_RADIUS) -> int:
+	if not player_position_initialized:
+		return -1
+	return _find_point_at(player_position, max_dist)
 
 
 func _find_point_at(pos: Vector2, max_dist: float = HOVER_DISTANCE) -> int:

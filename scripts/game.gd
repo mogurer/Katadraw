@@ -731,8 +731,8 @@ func _selection_centroid() -> Vector2:
 
 func _is_move_grab_active_for_count() -> bool:
 	return (
-		is_dragging
-		or input_handler.grab_input_active
+		input_handler.grab_input_active
+		or input_handler.is_player_force_active()
 		or input_handler.is_bb_dragging()
 		or input_handler.is_pad_grabbing_modifier_now()
 	)
@@ -754,18 +754,13 @@ func _finalize_move_count() -> void:
 func _on_input_points_changed() -> void:
 	# InputHandler のコールバック: メトリクス計算とクリア判定を呼ぶ
 	# つかんで移動時は胞子増量なし（処理は残し、量は0）
-	if selected_indices.size() > 0:
-		var positions: Array[Vector2] = []
-		for idx in selected_indices:
-			if idx >= 0 and idx < point_positions.size():
-				positions.append(point_positions[idx])
-		if positions.size() > 0:
-			ui_renderer.spawn_spore_burst(positions, 0)
+	if input_handler.has_player_avatar():
+		ui_renderer.spawn_spore_burst([input_handler.get_player_position()], 0)
 	if game_state == "rules":
 		queue_redraw()
 		return
 	# プレイ中かつつかみ中のみ、「動いた」フラグを立てる（カウントは離した時点で行う）
-	if game_state == "playing" and _is_move_grab_active_for_count() and selected_indices.size() > 0:
+	if game_state == "playing" and _is_move_grab_active_for_count():
 		_move_count_track_valid = true
 	_calculate_metrics()
 	_check_clear()
@@ -3816,12 +3811,12 @@ func _process_pad(delta: float) -> void:
 	if game_state == "playing" and not ui_renderer.is_stage_intro_done():
 		return
 	if game_state == "playing" and preferred_input_method == "mouse":
-		# マウス利用時も grab_input_active を更新（つかみ中の実現率表示用）
+		# マウス利用時もプレイヤー円状態を反映する。
 		input_handler.update_grab_state_for_mouse()
 		return
 	var prev_grab: bool = input_handler.grab_input_active
 	input_handler.process_pad(delta)
-	# パッドでポイントをつかんだ瞬間にキャッチSE
+	# プレイヤー円が影響を与え始めた瞬間にキャッチSE
 	if not prev_grab and input_handler.grab_input_active:
 		_play_sfx(sfx_catch)
 
@@ -3848,8 +3843,7 @@ func _process(delta: float) -> void:
 		_move_grab_was_active = cur_move_grab
 	if stage_session.debug_test_mode and input_recorder and game_state == "playing" and ui_renderer.is_stage_intro_done():
 		input_recorder.record_pad_stick_if_needed()
-	# ポイント移動中のループSE管理（is_dragging ではなく grab_input_active）
-	# 左スティックのみの選択切替はつかみではないため鳴らさない。A/右スティック＋マウスドラッグがつかみ。
+	# プレイヤー円がポイントへ影響を与えている間はループSEを鳴らす。
 	# title_intro中はui_renderer側でsfx_moveを管理するため、ここでは停止しない
 	if (game_state == "playing" or game_state == "rules") and input_handler.grab_input_active:
 		_start_sfx_move()

@@ -1454,19 +1454,7 @@ func _draw_rules_demo_shape(vp: Vector2) -> void:
 		var pos: Vector2 = _game.point_positions[i]
 		var color: Color
 		var radius: float
-		if _game.input_handler.grab_input_active and _game._is_selected(i):
-			# つかみ状態: 白円 + 黒の同心円（1.2倍、外へ透過）
-			radius = _point_radius_by_guide(i)
-			_draw_selected_point(pos, radius)
-			_draw_grab_state_effect(pos, radius)
-			continue
-		elif _game._is_selected(i):
-			# 選択中: 白円 + 黒の同心円（1.2倍、外へ透過）
-			radius = _point_radius_by_guide(i)
-			_draw_selected_point(pos, radius)
-			_draw_point_position_effect(pos, radius)
-			continue
-		elif i == _game.hovered_index:
+		if i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
 			color = POINT_COLOR
 			radius = POINT_RADIUS
@@ -1474,6 +1462,7 @@ func _draw_rules_demo_shape(vp: Vector2) -> void:
 			color = POINT_COLOR
 			radius = POINT_RADIUS
 		_game.draw_circle(pos, radius, color)
+	_draw_player_avatar()
 	_draw_laser_effect()
 	_draw_spore_particles()
 	# 右スティックデバッグ: シアンの直線のみ
@@ -1515,6 +1504,7 @@ func _draw_game(vp: Vector2) -> void:
 	_stage_renderer.draw_group_cleared_rings()
 
 	_refresh_guide_point_distance_bounds()
+	var focus_idx: int = _game.input_handler.get_player_focus_index()
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var color: Color
@@ -1523,16 +1513,6 @@ func _draw_game(vp: Vector2) -> void:
 		if _game._is_locked(i):
 			color = Color(0.40, 0.33, 0.38, 0.5)
 			radius = r_guide
-		elif _game.input_handler.grab_input_active and _game._is_selected(i):
-			# つかみ状態: 白円 + 黒の同心円（1.2倍、外へ透過）
-			_draw_selected_point(pos, r_guide)
-			_draw_grab_state_effect(pos, r_guide)
-			continue
-		elif _game._is_selected(i):
-			# 選択中: 白円 + 黒の同心円（1.2倍、外へ透過）
-			_draw_selected_point(pos, r_guide)
-			_draw_point_position_effect(pos, r_guide)
-			continue
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
 			var alpha: float = _game._point_accuracy_alpha(i)
@@ -1545,15 +1525,17 @@ func _draw_game(vp: Vector2) -> void:
 			color = Color(base_c.r, base_c.g, base_c.b, alpha)
 			radius = r_guide
 		_game.draw_circle(pos, radius, color)
+		if i == focus_idx and _game.input_handler.grab_input_active:
+			_draw_point_position_effect(pos, r_guide)
 
-	_draw_laser_effect()
+	_draw_player_avatar()
 	_draw_spore_particles()
 
-	# 3. 実現率（最上層）: 「つかむ」操作をした時だけ、そのポイントのやや右下に表示
-	if _game.selected_indices.size() > 0 and _game.input_handler.grab_input_active:
-		var idx: int = _game.selected_indices[0]
+	# 3. 実現率（最上層）: 近傍力が働いている時だけ、プレイヤー円のやや右下に表示
+	if focus_idx >= 0 and _game.input_handler.grab_input_active:
+		var idx: int = focus_idx
 		if idx >= 0 and idx < _game.point_positions.size():
-			var pt: Vector2 = _game.point_positions[idx]
+			var pt: Vector2 = _game.input_handler.get_player_position()
 			var offset: Vector2 = Vector2(28.0, 32.0)
 			var circ_val: float
 			if _game.stage_type == "two_circles" and idx >= _game.group_split:
@@ -1617,7 +1599,8 @@ func _draw_spore_particles() -> void:
 
 
 func _draw_laser_effect() -> void:
-	"""選択ポイントから接続2点へ、青く光るレーザー状エフェクトを射出"""
+	"""隣接連動仕様の廃止に伴い、レーザー演出は無効化。"""
+	return
 	if _game.selected_indices.size() != 1:
 		return
 	var idx: int = _game.selected_indices[0]
@@ -1653,6 +1636,30 @@ func _draw_laser_effect() -> void:
 			# 細く白い線を重ねる
 			var white_c: Color = Color(LASER_WHITE.r, LASER_WHITE.g, LASER_WHITE.b, seg_alpha * 0.9)
 			_game.draw_line(p0, p1, white_c, LASER_WHITE_WIDTH, true)
+
+
+func _draw_player_avatar() -> void:
+	if not _game.input_handler.has_player_avatar():
+		return
+	var center: Vector2 = _game.input_handler.get_player_position()
+	var core_r: float = InputHandler.PLAYER_RADIUS
+	var field_r: float = InputHandler.PLAYER_FORCE_RADIUS
+	var attracting: bool = _game.input_handler.is_player_attracting()
+	var repelling: bool = _game.input_handler.is_player_repelling()
+	var ring_color: Color = Color(0.58, 0.62, 0.74, 0.08)
+	var edge_color: Color = Color(0.88, 0.9, 0.97, 0.18)
+	if attracting:
+		ring_color = Color(0.55, 0.78, 1.0, 0.16)
+		edge_color = Color(0.86, 0.93, 1.0, 0.36)
+	elif repelling:
+		ring_color = Color(1.0, 0.55, 0.62, 0.14)
+		edge_color = Color(1.0, 0.82, 0.86, 0.28)
+	_game.draw_circle(center, field_r, ring_color)
+	_game.draw_arc(center, field_r, 0.0, TAU, 64, edge_color, 2.0)
+	_game.draw_circle(center, core_r * 1.45, Color(0.06, 0.05, 0.08, 0.92))
+	_game.draw_circle(center, core_r, Color(0.01, 0.01, 0.02, 1.0))
+	_game.draw_arc(center, core_r * 0.72, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7), 2.5)
+	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95))
 
 
 func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:
