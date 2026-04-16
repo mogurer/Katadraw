@@ -137,6 +137,7 @@ const RESULT_TOTAL_LABEL_FS := 84  # 28 * 3
 var _guide_dist_min: float = 0.0
 var _guide_dist_max: float = 0.0
 var _guide_dist_have_bounds: bool = false
+var _guide_point_distances: Array[float] = []
 
 # --- Title Intro Animation（描画・タイムラインは title_intro_animation.gd）---
 var title_intro: TitleIntroAnimator
@@ -1404,16 +1405,20 @@ func _radius_from_guide_distance_provisional(dist: float) -> float:
 
 func _refresh_guide_point_distance_bounds() -> void:
 	_guide_dist_have_bounds = false
+	_guide_point_distances.clear()
 	if _game.game_state != "playing":
 		return
 	var n: int = _game.point_positions.size()
 	if n == 0:
 		return
+	_guide_point_distances.resize(n)
 	var first: bool = true
 	for i in range(n):
+		_guide_point_distances[i] = INF
 		if _game._is_locked(i):
 			continue
 		var d: float = _game.stage_manager.get_distance_to_hint_guide_outline(_game.point_positions[i])
+		_guide_point_distances[i] = d
 		if first:
 			_guide_dist_min = d
 			_guide_dist_max = d
@@ -1427,7 +1432,11 @@ func _refresh_guide_point_distance_bounds() -> void:
 func _point_radius_by_guide(idx: int) -> float:
 	if _game.game_state != "playing" or idx < 0 or idx >= _game.point_positions.size():
 		return POINT_RADIUS
-	var d: float = _game.stage_manager.get_distance_to_hint_guide_outline(_game.point_positions[idx])
+	var d: float = INF
+	if idx < _guide_point_distances.size():
+		d = _guide_point_distances[idx]
+	if is_inf(d):
+		d = _game.stage_manager.get_distance_to_hint_guide_outline(_game.point_positions[idx])
 	var base_r: float = _radius_from_guide_distance_provisional(d)
 	# ロック済み・比較対象がいないときは絶対距離のみ
 	if _game._is_locked(idx) or not _guide_dist_have_bounds:

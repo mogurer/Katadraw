@@ -43,6 +43,13 @@ const GUIDE_VERTEX_SNAP_RADIUS := 16.0
 const GUIDE_EDGE_SPRING := 9.0
 const GUIDE_VERTEX_SPRING := 22.0
 const GUIDE_SNAP_DAMPING := 4.8
+const GUIDE_EDGE_GLIDE_RADIUS := 8.0
+const GUIDE_EDGE_GLIDE_DAMPING := 22.0
+const GUIDE_EDGE_SUCTION_RADIUS := 5.0
+const GUIDE_EDGE_SUCTION_SPRING := 26.0
+const GUIDE_EDGE_PASS_THROUGH_SPEED := 240.0
+const GUIDE_EDGE_PASS_THROUGH_RATIO := 1.3
+const GUIDE_EDGE_SLIDE_TRACK_SPRING := 18.0
 const GUIDE_VERTEX_LOCK_RADIUS := 7.0
 const GUIDE_VERTEX_LOCK_SPRING := 220.0
 const GUIDE_VERTEX_LOCK_DAMPING := 30.0
@@ -62,6 +69,13 @@ const PLAYER_APPROACH_NEAR_DAMPING := 18.0
 const POINT_PAIR_REPULSE_DISTANCE := 64.0
 const POINT_PAIR_REPULSE_STRENGTH := 2600.0
 const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
+## 画面端付近でクランプと斥力が打ち消し合うのを防ぐ（内向きの補助力）
+const PLAYFIELD_EDGE_RETURN_ZONE := 72.0
+const PLAYFIELD_EDGE_RETURN_STRENGTH := 1500.0
+const PLAYFIELD_EDGE_RETURN_REPULSE_MUL := 1.65
+const PLAYFIELD_EDGE_RETURN_VEL_BOOST := 0.006
+## ガイド上・斥力が法線方向に強いとき接線へ逃がして滑らせる
+const GUIDE_REPEL_SLIDE_ASSIST := 0.42
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -888,6 +902,10 @@ func _step_drag_physics(delta: float) -> bool:
 		return false
 
 	var before: Array[Vector2] = _game.point_positions.duplicate()
+	var vp: Vector2 = _game.get_viewport_rect().size
+	var margin: float = _game.ui_renderer.POINT_RADIUS
+	var lo := Vector2(margin, margin)
+	var hi := Vector2(vp.x - margin, vp.y - margin)
 	var guide_loops: Array = _build_fixed_guide_snap_loops()
 	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
 	var vertex_locks: Dictionary = _compute_vertex_locks(nearest_features)
@@ -907,14 +925,12 @@ func _step_drag_physics(delta: float) -> bool:
 			player_influenced_point_count += 1
 	_apply_point_pair_repulsion(forces)
 	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
+	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
+	_apply_playfield_edge_return_forces(forces, lo, hi)
 	player_force_active = player_influenced_point_count > 0
 	grab_input_active = player_force_active or _get_player_force_mode() != 0 or mouse_force_pressed
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
-	var vp: Vector2 = _game.get_viewport_rect().size
-	var margin: float = _game.ui_renderer.POINT_RADIUS
-	var lo := Vector2(margin, margin)
-	var hi := Vector2(vp.x - margin, vp.y - margin)
 
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
@@ -925,6 +941,10 @@ func _step_drag_physics(delta: float) -> bool:
 		_apply_player_approach_brake(i, delta)
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
+
+	if not guide_loops.is_empty():
+		var post_features: Array = _compute_nearest_guide_features(guide_loops)
+		_apply_post_move_guide_constraints(post_features, vertex_locks)
 
 	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
@@ -1024,6 +1044,72 @@ func _get_player_force_mode() -> int:
 	if player_force_attracting == player_force_repelling:
 		return 0
 	return 1 if player_force_attracting else -1
+
+
+func _is_player_repelling_only() -> bool:
+	return _get_player_force_mode() == -1
+
+
+func _apply_playfield_edge_return_forces(forces: Array[Vector2], lo: Vector2, hi: Vector2) -> void:
+	var zone: float = PLAYFIELD_EDGE_RETURN_ZONE
+	if zone <= 0.001:
+		return
+	var repelling: bool = _is_player_repelling_only()
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			continue
+		var pos: Vector2 = _game.point_positions[i]
+		var vel: Vector2 = point_velocities[i]
+		var f_add := Vector2.ZERO
+		# 左端: 内向き +X
+		var dl: float = pos.x - lo.x
+		if dl < zone:
+			var vel_out: float = maxf(0.0, -vel.x)
+			if repelling or vel_out > 6.0:
+				var t: float = clampf(1.0 - dl / zone, 0.0, 1.0)
+				var mul: float = t * t * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out)
+				if repelling:
+					mul *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+				else:
+					mul *= 0.38
+				f_add.x += PLAYFIELD_EDGE_RETURN_STRENGTH * mul
+		# 右端: 内向き -X
+		var dr: float = hi.x - pos.x
+		if dr < zone:
+			var vel_out_r: float = maxf(0.0, vel.x)
+			if repelling or vel_out_r > 6.0:
+				var t2: float = clampf(1.0 - dr / zone, 0.0, 1.0)
+				var mul2: float = t2 * t2 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_r)
+				if repelling:
+					mul2 *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+				else:
+					mul2 *= 0.38
+				f_add.x -= PLAYFIELD_EDGE_RETURN_STRENGTH * mul2
+		# 上端: 内向き +Y
+		var db: float = pos.y - lo.y
+		if db < zone:
+			var vel_out_b: float = maxf(0.0, -vel.y)
+			if repelling or vel_out_b > 6.0:
+				var t3: float = clampf(1.0 - db / zone, 0.0, 1.0)
+				var mul3: float = t3 * t3 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_b)
+				if repelling:
+					mul3 *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+				else:
+					mul3 *= 0.38
+				f_add.y += PLAYFIELD_EDGE_RETURN_STRENGTH * mul3
+		# 下端: 内向き -Y
+		var dt: float = hi.y - pos.y
+		if dt < zone:
+			var vel_out_t: float = maxf(0.0, vel.y)
+			if repelling or vel_out_t > 6.0:
+				var t4: float = clampf(1.0 - dt / zone, 0.0, 1.0)
+				var mul4: float = t4 * t4 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_t)
+				if repelling:
+					mul4 *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+				else:
+					mul4 *= 0.38
+				f_add.y -= PLAYFIELD_EDGE_RETURN_STRENGTH * mul4
+		forces[i] += f_add
 
 
 func _get_player_speed_multiplier() -> float:
@@ -1189,12 +1275,22 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 		var feature: Dictionary = nearest_features[i] as Dictionary
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
-		if edge_dist < GUIDE_EDGE_SNAP_RADIUS:
-			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
-			var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
-			forces[i] += (edge_target - pos) * (GUIDE_EDGE_SPRING * edge_strength)
-			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * edge_strength)
 		var vertex_dist: float = feature.get("vertex_dist", INF) as float
+		var edge_pass_through: bool = _is_edge_pass_through(feature, pos, point_velocities[i])
+		if edge_dist < GUIDE_EDGE_SNAP_RADIUS and not edge_pass_through:
+			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
+			var edge_spring: float = GUIDE_EDGE_SPRING
+			if edge_dist < GUIDE_EDGE_SUCTION_RADIUS:
+				var suction_t: float = 1.0 - edge_dist / GUIDE_EDGE_SUCTION_RADIUS
+				edge_spring += GUIDE_EDGE_SUCTION_SPRING * suction_t * suction_t
+			var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
+			var edge_normal: Vector2 = _feature_edge_normal(feature, pos)
+			var normal_velocity: Vector2 = edge_normal * point_velocities[i].dot(edge_normal)
+			forces[i] += (edge_target - pos) * (edge_spring * edge_strength)
+			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength)
+			if edge_dist < GUIDE_EDGE_GLIDE_RADIUS and vertex_dist >= GUIDE_VERTEX_LOCK_RADIUS:
+				var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
+				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t)
 		if vertex_dist < GUIDE_VERTEX_SNAP_RADIUS:
 			var vertex_strength: float = 1.0 - vertex_dist / GUIDE_VERTEX_SNAP_RADIUS
 			var vertex_target: Vector2 = feature.get("vertex_pos", pos) as Vector2
@@ -1208,6 +1304,42 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 		var lock_mul: float = GUIDE_VERTEX_CONTACT_RELEASE_MUL if player_touching else 1.0
 		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul)
 		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul)
+
+
+func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			continue
+		if vertex_locks.has(i):
+			continue
+		var feature: Dictionary = nearest_features[i] as Dictionary
+		var pos: Vector2 = _game.point_positions[i]
+		var edge_dist: float = feature.get("edge_dist", INF) as float
+		if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
+			continue
+		if _is_edge_pass_through(feature, pos, point_velocities[i]):
+			continue
+		var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
+		var tangent: Vector2 = _feature_edge_tangent(feature)
+		var tangent_force: Vector2 = tangent * forces[i].dot(tangent)
+		var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
+		var track_force: Vector2 = (edge_target - pos) * (GUIDE_EDGE_SLIDE_TRACK_SPRING * glide_t)
+		forces[i] = tangent_force + track_force
+		if _is_player_repelling_only():
+			var pf: Vector2 = _compute_player_force(i)
+			var pl: float = pf.length()
+			if pl > 0.5:
+				var par: Vector2 = tangent * pf.dot(tangent)
+				var par_sq: float = par.length_squared()
+				var pf_sq: float = pl * pl
+				if par_sq < pf_sq * 0.14:
+					var crs: float = pf.cross(tangent)
+					var sign_slide: float = signf(crs)
+					if absf(sign_slide) < 0.001:
+						sign_slide = signf(pf.dot(tangent))
+					if absf(sign_slide) < 0.001:
+						sign_slide = 1.0
+					forces[i] += tangent * (pl * GUIDE_REPEL_SLIDE_ASSIST * sign_slide)
 
 
 func _build_fixed_guide_snap_loops() -> Array:
@@ -1272,6 +1404,7 @@ func _compute_nearest_guide_features(guide_loops: Array) -> Array:
 			"edge_point": pos,
 			"edge_start_idx": -1,
 			"edge_loop": -1,
+			"edge_tangent": Vector2.RIGHT,
 			"loop_size": 0,
 		}
 		for loop_idx in range(guide_loops.size()):
@@ -1289,13 +1422,75 @@ func _compute_nearest_guide_features(guide_loops: Array) -> Array:
 				var edge_point: Vector2 = _closest_point_on_segment(pos, vertex_pos, loop[next_idx] as Vector2)
 				var edge_dist: float = pos.distance_to(edge_point)
 				if edge_dist < (best.get("edge_dist", INF) as float):
+					var edge_tangent: Vector2 = (loop[next_idx] as Vector2) - vertex_pos
+					if edge_tangent.length_squared() > 0.0001:
+						edge_tangent = edge_tangent.normalized()
+					else:
+						edge_tangent = Vector2.RIGHT
 					best["edge_dist"] = edge_dist
 					best["edge_point"] = edge_point
 					best["edge_start_idx"] = vertex_idx
 					best["edge_loop"] = loop_idx
+					best["edge_tangent"] = edge_tangent
 					best["loop_size"] = loop_size
 		features.append(best)
 	return features
+
+
+func _apply_post_move_guide_constraints(nearest_features: Array, vertex_locks: Dictionary) -> void:
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			continue
+		var feature: Dictionary = nearest_features[i] as Dictionary
+		var pos: Vector2 = _game.point_positions[i]
+		if vertex_locks.has(i):
+			var lock_data: Dictionary = vertex_locks.get(i, {}) as Dictionary
+			var lock_pos: Vector2 = lock_data.get("vertex_pos", pos) as Vector2
+			var lock_dist: float = pos.distance_to(lock_pos)
+			if lock_dist <= GUIDE_VERTEX_LOCK_RADIUS:
+				var lock_t: float = 1.0 - lock_dist / maxf(GUIDE_VERTEX_LOCK_RADIUS, 0.001)
+				_game.point_positions[i] = pos.lerp(lock_pos, 0.18 + 0.42 * lock_t)
+				point_velocities[i] *= maxf(0.0, 1.0 - 0.82 * lock_t)
+				continue
+		var edge_dist: float = feature.get("edge_dist", INF) as float
+		if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
+			continue
+		if _is_edge_pass_through(feature, pos, point_velocities[i]):
+			continue
+		var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
+		var edge_tangent: Vector2 = _feature_edge_tangent(feature)
+		var tangent_speed: float = point_velocities[i].dot(edge_tangent)
+		var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
+		_game.point_positions[i] = pos.lerp(edge_target, 0.20 + 0.45 * glide_t)
+		point_velocities[i] = edge_tangent * tangent_speed * (1.0 - 0.10 * glide_t)
+
+
+func _feature_edge_tangent(feature: Dictionary) -> Vector2:
+	var tangent: Vector2 = feature.get("edge_tangent", Vector2.RIGHT) as Vector2
+	if tangent.length_squared() <= 0.0001:
+		return Vector2.RIGHT
+	return tangent.normalized()
+
+
+func _feature_edge_normal(feature: Dictionary, pos: Vector2) -> Vector2:
+	var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
+	var delta: Vector2 = edge_target - pos
+	if delta.length_squared() > 0.0001:
+		return delta.normalized()
+	var tangent: Vector2 = _feature_edge_tangent(feature)
+	return Vector2(-tangent.y, tangent.x)
+
+
+func _is_edge_pass_through(feature: Dictionary, pos: Vector2, velocity: Vector2) -> bool:
+	if velocity.length_squared() <= 0.0001:
+		return false
+	var tangent: Vector2 = _feature_edge_tangent(feature)
+	var normal: Vector2 = _feature_edge_normal(feature, pos)
+	var normal_speed: float = absf(velocity.dot(normal))
+	if normal_speed < GUIDE_EDGE_PASS_THROUGH_SPEED:
+		return false
+	var tangent_speed: float = absf(velocity.dot(tangent))
+	return normal_speed > tangent_speed * GUIDE_EDGE_PASS_THROUGH_RATIO
 
 
 func _compute_vertex_locks(nearest_features: Array) -> Dictionary:

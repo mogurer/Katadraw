@@ -86,6 +86,7 @@ var hud_guide_center: Vector2 = Vector2.ZERO
 var hud_guide_scale: float = 1.0
 var hud_guide_ref_px: float = 1.0
 var hud_guide_outline_world: Array = []
+var hud_guide_query_world: Array = []
 var hud_two_circle_r: float = 0.0
 var hud_two_circle_c1: Vector2 = Vector2.ZERO
 var hud_two_circle_c2: Vector2 = Vector2.ZERO
@@ -104,6 +105,7 @@ func recompute_hud_guide_layout_if_needed(shape_center: Vector2, viewport_size: 
 func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -> void:
 	hud_guide_center = shape_center
 	hud_guide_outline_world.clear()
+	hud_guide_query_world.clear()
 	hud_two_circle_r = 0.0
 	_hud_layout_vp = viewport_size
 	_hud_layout_sc = shape_center
@@ -163,6 +165,7 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_scale = s
 	for p in rotated:
 		hud_guide_outline_world.append(shape_center + p * s)
+	hud_guide_query_world = _make_runtime_query_polyline(hud_guide_outline_world)
 	hud_guide_ref_px = 0.001
 	for q in hud_guide_outline_world:
 		hud_guide_ref_px = maxf(hud_guide_ref_px, q.distance_to(shape_center))
@@ -226,6 +229,12 @@ func _resample_closed_polyline_points(polyline: Array, n: int) -> Array:
 				result.append(a.lerp(b, t))
 				break
 	return result
+
+
+func _make_runtime_query_polyline(polyline: Array) -> Array:
+	if polyline.size() <= 64:
+		return polyline.duplicate()
+	return _resample_closed_polyline_points(polyline, 64)
 
 
 func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) -> void:
@@ -1506,11 +1515,12 @@ func _calc_hud_screen_arc_metrics(
 		for i in range(from_idx, to_idx):
 			per_pt.append(_distance_point_to_circle_ring_outline(pts[i], ring_center, ring_r))
 	else:
+		var guide_outline_src: Array = hud_guide_query_world if hud_guide_query_world.size() >= 2 else hud_guide_outline_world
 		var sample_count: int = maxi(n * 4, 64)
 		var player_outline: Array = _resample_closed_polyline_points(group_pts, sample_count)
-		var guide_outline: Array = _resample_closed_polyline_points(hud_guide_outline_world, sample_count)
+		var guide_outline: Array = _resample_closed_polyline_points(guide_outline_src, sample_count)
 		for p in player_outline:
-			per_pt.append(_distance_to_polyline(p, hud_guide_outline_world))
+			per_pt.append(_distance_to_polyline(p, guide_outline_src))
 		for gp in guide_outline:
 			per_pt.append(_distance_to_polyline(gp, player_outline))
 	var avg_d: float = 0.0
@@ -1770,6 +1780,8 @@ func get_active_guide_loops_world() -> Array:
 			_circle_loop_world(hud_two_circle_c1, hud_two_circle_r),
 			_circle_loop_world(hud_two_circle_c2, hud_two_circle_r),
 		]
+	if hud_guide_query_world.size() >= 2:
+		return [hud_guide_query_world.duplicate()]
 	if hud_guide_outline_world.size() >= 2:
 		return [hud_guide_outline_world.duplicate()]
 	return get_fixed_guide_loops_world()
@@ -1818,6 +1830,8 @@ func get_distance_to_hint_guide_outline(p: Vector2) -> float:
 				var dh2: float = _distance_point_to_circle_ring_outline(p, hud_two_circle_c2, hud_two_circle_r)
 				return minf(dh1, dh2)
 			_:
+				if hud_guide_query_world.size() >= 2:
+					return _distance_to_polyline(p, hud_guide_query_world)
 				if hud_guide_outline_world.size() >= 2:
 					return _distance_to_polyline(p, hud_guide_outline_world)
 				return INF
