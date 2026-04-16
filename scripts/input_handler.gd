@@ -56,7 +56,10 @@ const PLAYER_REPEL_STRENGTH := 6400.0
 const PLAYER_ATTRACT_STRENGTH := 5600.0
 const PLAYER_CONTACT_FORCE := 9000.0
 const PLAYER_MIN_FORCE_DISTANCE := 8.0
-const POINT_PAIR_REPULSE_DISTANCE := 32.0
+const PLAYER_APPROACH_BRAKE_START_DISTANCE := 64.0
+const PLAYER_APPROACH_STOP_DISTANCE := 32.0
+const PLAYER_APPROACH_NEAR_DAMPING := 18.0
+const POINT_PAIR_REPULSE_DISTANCE := 64.0
 const POINT_PAIR_REPULSE_STRENGTH := 2600.0
 const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
 
@@ -919,6 +922,7 @@ func _step_drag_physics(delta: float) -> bool:
 			continue
 		point_velocities[i] += forces[i] * delta
 		point_velocities[i] *= damping
+		_apply_player_approach_brake(i, delta)
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
 
@@ -950,6 +954,41 @@ func _compute_player_force(point_idx: int) -> Vector2:
 	if _is_player_touching_point(point_idx):
 		force += direction * PLAYER_CONTACT_FORCE
 	return force
+
+
+func _apply_player_approach_brake(point_idx: int, delta: float) -> void:
+	if point_idx < 0 or point_idx >= _game.point_positions.size():
+		return
+	var force_mode: int = _get_player_force_mode()
+	var attract_active: bool = force_mode > 0 or mouse_force_pressed
+	if not attract_active:
+		return
+	var point_pos: Vector2 = _game.point_positions[point_idx]
+	var from_player: Vector2 = point_pos - player_position
+	var dist: float = from_player.length()
+	if dist > PLAYER_APPROACH_BRAKE_START_DISTANCE:
+		return
+	var dir: Vector2 = from_player / dist if dist > 0.0001 else Vector2.RIGHT
+	if dist <= PLAYER_APPROACH_STOP_DISTANCE:
+		_game.point_positions[point_idx] = player_position + dir * PLAYER_APPROACH_STOP_DISTANCE
+		point_velocities[point_idx] = Vector2.ZERO
+		return
+	var brake_range: float = maxf(
+		PLAYER_APPROACH_BRAKE_START_DISTANCE - PLAYER_APPROACH_STOP_DISTANCE,
+		0.0001
+	)
+	var brake_t: float = clampf(
+		(PLAYER_APPROACH_BRAKE_START_DISTANCE - dist) / brake_range,
+		0.0,
+		1.0
+	)
+	point_velocities[point_idx] *= exp(-PLAYER_APPROACH_NEAR_DAMPING * brake_t * delta)
+	var inward_speed: float = -point_velocities[point_idx].dot(dir)
+	if inward_speed <= 0.0:
+		return
+	var max_inward_speed: float = (dist - PLAYER_APPROACH_STOP_DISTANCE) / maxf(delta, 0.0001)
+	if inward_speed > max_inward_speed:
+		point_velocities[point_idx] += dir * (inward_speed - max_inward_speed)
 
 
 func _is_player_touching_point(point_idx: int) -> bool:
