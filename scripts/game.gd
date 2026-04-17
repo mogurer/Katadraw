@@ -449,6 +449,7 @@ func _ready() -> void:
 		call_deferred("_apply_window_pixel_size_impl", FIXED_WINDOW_CLIENT_SIZE)
 	game_state = "logo"
 	logo_start_time = Time.get_ticks_msec() / 1000.0
+	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 
 ## Translation.csv を直接読み込み、TranslationServer に登録する（.translation バイナリに依存しない）。
@@ -542,6 +543,43 @@ func _setup_game_cursor() -> void:
 	const CURSOR_SHAPE_COUNT := 17
 	for shape in range(CURSOR_SHAPE_COUNT):
 		Input.set_custom_mouse_cursor(tex, shape as Input.CursorShape, hotspot)
+
+
+const CURSOR_PAD_AXIS_HIDE_THRESHOLD := 0.22
+const CURSOR_IDLE_HIDE_SECONDS := 2.5
+var _cursor_last_mouse_activity_sec: float = -1_000_000.0
+var _cursor_pad_override_hidden: bool = false
+
+
+func _cursor_event_should_hide_for_pad(event: InputEvent) -> bool:
+	if event is InputEventJoypadButton:
+		return event.pressed
+	if event is InputEventJoypadMotion:
+		return absf(event.axis_value) >= CURSOR_PAD_AXIS_HIDE_THRESHOLD
+	return false
+
+
+func _cursor_register_mouse_activity() -> void:
+	_cursor_pad_override_hidden = false
+	_cursor_last_mouse_activity_sec = Time.get_ticks_msec() / 1000.0
+
+
+func _cursor_register_pad_activity() -> void:
+	_cursor_pad_override_hidden = true
+
+
+func _apply_cursor_policy() -> void:
+	if pause_active:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
+	var now: float = Time.get_ticks_msec() / 1000.0
+	if _cursor_pad_override_hidden:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		return
+	if (now - _cursor_last_mouse_activity_sec) > CURSOR_IDLE_HIDE_SECONDS:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 # =============================================================================
@@ -1196,6 +1234,11 @@ func _input(event: InputEvent) -> void:
 		event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
 	)
 	var is_confirm: bool = is_confirm_key or is_confirm_pad or is_confirm_click
+
+	if event is InputEventMouseMotion or event is InputEventMouseButton:
+		_cursor_register_mouse_activity()
+	elif _cursor_event_should_hide_for_pad(event):
+		_cursor_register_pad_activity()
 
 	# 押下アニメーション待機中は入力を無視
 	if ui_renderer._btn_press_pending:
@@ -3823,6 +3866,7 @@ func _process_pad(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	ui_renderer.update_animations(delta)
+	_apply_cursor_policy()
 	# ボタン押下アニメ待ちで _process_ui_menu_stick_navigation が return してもログが出るように先に実行
 	if DEBUG_UI_STICK_NAV and game_state == "config":
 		_debug_ui_stick_nav_poll_config(delta)

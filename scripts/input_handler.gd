@@ -43,7 +43,7 @@ const GUIDE_VERTEX_SNAP_RADIUS := 16.0
 const GUIDE_EDGE_SPRING := 9.0
 const GUIDE_VERTEX_SPRING := 22.0
 const GUIDE_SNAP_DAMPING := 4.8
-const GUIDE_EDGE_GLIDE_RADIUS := 8.0
+const GUIDE_EDGE_GLIDE_RADIUS := 10.0
 const GUIDE_EDGE_GLIDE_DAMPING := 22.0
 const GUIDE_EDGE_SUCTION_RADIUS := 5.0
 const GUIDE_EDGE_SUCTION_SPRING := 26.0
@@ -1310,8 +1310,6 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
-		if vertex_locks.has(i):
-			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
@@ -1493,24 +1491,10 @@ func _is_edge_pass_through(feature: Dictionary, pos: Vector2, velocity: Vector2)
 	return normal_speed > tangent_speed * GUIDE_EDGE_PASS_THROUGH_RATIO
 
 
-func _compute_vertex_locks(nearest_features: Array) -> Dictionary:
-	var vertex_locks: Dictionary = {}
-	for i in range(_game.point_positions.size()):
-		if _is_locked(i):
-			continue
-		var feature: Dictionary = nearest_features[i] as Dictionary
-		var vertex_idx: int = feature.get("vertex_idx", -1) as int
-		var vertex_loop: int = feature.get("vertex_loop", -1) as int
-		var vertex_dist: float = feature.get("vertex_dist", INF) as float
-		if vertex_idx < 0 or vertex_loop < 0 or vertex_dist > GUIDE_VERTEX_LOCK_RADIUS:
-			continue
-		vertex_locks[i] = {
-			"vertex_loop": vertex_loop,
-			"vertex_idx": vertex_idx,
-			"vertex_pos": feature.get("vertex_pos", _game.point_positions[i]),
-			"vertex_dist": vertex_dist,
-		}
-	return vertex_locks
+func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
+	# 旧: ガイド頂点へ GUIDE_VERTEX_LOCK_* で強固定していたが、角で「レール」が途切れるため無効化。
+	# 水色デバッグ点はガイド多角形の頂点位置の可視化であり、特別な吸着点ではない。
+	return {}
 
 
 func _feature_is_on_same_vertex_or_edge(feature: Dictionary, occupied_data: Dictionary) -> bool:

@@ -1474,7 +1474,7 @@ func _draw_rules_demo_shape(vp: Vector2) -> void:
 	_draw_player_avatar()
 	_draw_laser_effect()
 	_draw_spore_particles()
-	# 右スティックデバッグ: シアンの直線のみ
+	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
 
 
@@ -1570,7 +1570,7 @@ func _draw_game(vp: Vector2) -> void:
 
 	_draw_hud(vp)
 
-	# 右スティックデバッグ: シアンの直線のみ
+	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
 
 
@@ -1683,6 +1683,7 @@ func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void
 
 
 func _draw_actual_snap_vertices() -> void:
+	# デバッグ用: 目標ガイドの多角形頂点（ワールド座標）。強い吸着の別オブジェクトではない。
 	var snap_vertices: Array = _game.input_handler.get_debug_snap_vertices_world()
 	for point in snap_vertices:
 		var pos: Vector2 = point as Vector2
@@ -1739,7 +1740,7 @@ func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
 	var dir_n: Vector2 = dir.normalized()
 	var line_len: float = maxf(vp.x, vp.y) * 0.6
 	var half_rad: float = deg_to_rad(InputHandler.RIGHT_STICK_RAY_SHOULDER_CONE_HALF_ANGLE_DEG)
-	var fill_rgb: Color = Color(0.95, 0.42, 0.44)
+	var fill_rgb: Color = LASER_BLUE
 	var alpha_inner: float = 0.24
 	var alpha_outer: float = 0.0
 	var n_radial: int = 32
@@ -1780,7 +1781,7 @@ func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
 
 
 func _draw_right_stick_debug_line(vp: Vector2) -> void:
-	"""右スティック倒し中: コリドー帯 → 放電エフェクトで描画"""
+	"""右スティック倒し中: コリドー帯 → 放電エフェクトで描画（ピンクは根元→先へフェード）"""
 	if not _game.input_handler.debug_right_stick_active:
 		return
 	var ih: InputHandler = _game.input_handler
@@ -1792,6 +1793,7 @@ func _draw_right_stick_debug_line(vp: Vector2) -> void:
 	var line_len: float = maxf(vp.x, vp.y) * 0.6
 	var end_pos: Vector2 = center + dir * line_len
 	var perpendicular: Vector2 = Vector2(-dir.y, dir.x)  # 法線（ジグザグ用）
+	var pink: Color = LASER_BLUE
 
 	# 稲妻の経路をランダムなジグザグで生成（毎フレームで形が変わり放電風に）
 	var segs: int = 14
@@ -1805,17 +1807,20 @@ func _draw_right_stick_debug_line(vp: Vector2) -> void:
 		points.append(base_pos + perpendicular * jitter)
 	points.append(end_pos)
 
-	# 外側のグロー（太め・薄い）
-	var glow_color: Color = Color(0.95, 0.19, 0.32, 0.25)
-	for i in range(points.size() - 1):
+	var last: int = points.size() - 1
+	for i in range(last):
+		var t_mid: float = (float(i) + 0.5) / float(last)
+		var fade: float = pow(1.0 - t_mid, 0.85)
+		if fade < 0.02:
+			continue
+		# 外側のグロー（太め・薄い）
+		var glow_color: Color = Color(pink.r, pink.g, pink.b, 0.25 * fade)
 		_game.draw_line(points[i], points[i + 1], glow_color, 6.0, true)
-	# メインの稲妻（赤）
-	var bolt_color: Color = Color(0.95, 0.25, 0.35, 0.95)
-	for i in range(points.size() - 1):
+		# メイン（アクセントピンク）
+		var bolt_color: Color = Color(pink.r, pink.g, pink.b, 0.95 * fade)
 		_game.draw_line(points[i], points[i + 1], bolt_color, 2.5, true)
-	# 中心の白い芯
-	var core_color: Color = Color(1.0, 0.937, 0.89, 1.0)
-	for i in range(points.size() - 1):
+		# 中心の白い芯
+		var core_color: Color = Color(LASER_WHITE.r, LASER_WHITE.g, LASER_WHITE.b, 0.95 * fade)
 		_game.draw_line(points[i], points[i + 1], core_color, 1.0, true)
 
 	# 枝分かれスパーク（6本程度）
@@ -1825,7 +1830,8 @@ func _draw_right_stick_debug_line(vp: Vector2) -> void:
 		var branch_dir: Vector2 = (perpendicular * randf_range(-0.8, 0.8) + dir * randf_range(-0.2, 0.3)).normalized()
 		var branch_len: float = randf_range(18, 52)
 		var to_p: Vector2 = from_p + branch_dir * branch_len
-		_game.draw_line(from_p, to_p, Color(0.98, 0.45, 0.50, 0.55), 1.5, true)
+		var branch_fade: float = pow(1.0 - float(idx) / float(last), 0.85)
+		_game.draw_line(from_p, to_p, Color(pink.r, pink.g, pink.b, 0.55 * branch_fade), 1.5, true)
 
 
 func _draw_guide_info(vp: Vector2) -> void:
