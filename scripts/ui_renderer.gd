@@ -358,9 +358,6 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_config(vp)
 		"rules":
 			_draw_rules(vp)
-		"rules_confirm":
-			_draw_rules(vp)
-			_draw_rules_confirm(vp)
 		"guide_info":
 			_draw_guide_info(vp)
 		"guide_countdown":
@@ -648,29 +645,6 @@ func _draw_menu_quit_confirm(vp: Vector2) -> void:
 	var cbtn_cy: float = dlg_cy + 50.0
 	var yes_off: bool = _game.menu_confirm_index != 0
 	var no_off: bool = _game.menu_confirm_index != 1
-	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
-	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
-
-
-func _draw_rules_confirm(vp: Vector2) -> void:
-	# ルール画面の上に操作デバイス確認（メニュー終了確認と同レイアウト）
-	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
-	var cx: float = vp.x / 2.0
-	var dlg_cy: float = vp.y / 2.0
-	var dlg_w: float = 700.0
-	var dlg_h: float = 260.0
-	var dlg_rect := Rect2(Vector2(cx - dlg_w / 2.0, dlg_cy - dlg_h / 2.0), Vector2(dlg_w, dlg_h))
-	var dlg_shadow := Vector2(15.0, 15.0)
-	_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(0.26, 0.21, 0.28, 0.25))
-	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
-	_game.draw_rect(dlg_rect, Color(0.26, 0.21, 0.28), false, 5.75)
-	var title_key: String = "RULES_CONFIRM_MOUSE_TITLE" if _game.rules_confirm_kind == "mouse" else "RULES_CONFIRM_PAD_TITLE"
-	_game.draw_string(_game.font_bold, Vector2(cx - dlg_w / 2.0, dlg_cy - 45.0), tr(title_key), HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 42, Color(0.95, 0.19, 0.32))
-	var cbtn_w: float = 220.0
-	var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-	var cbtn_cy: float = dlg_cy + 50.0
-	var yes_off: bool = _game.rules_confirm_index != 0
-	var no_off: bool = _game.rules_confirm_index != 1
 	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
 	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
 
@@ -1216,13 +1190,16 @@ func _config_fit_label_text(font: Font, text: String, max_w: float, fs: int) -> 
 # --- 操作説明の共通定義（rules / ポーズの操作説明で共有） ---
 # 各要素: [key_tr, desc_tr, key_width]
 const _CTRL_MOUSE_ITEMS: Array[Array] = [
-	["CTRL_MOUSE_DRAG_KEY", "CTRL_MOUSE_DRAG_DESC", 180],
+	["CTRL_MOUSE_REPEL_KEY", "CTRL_MOUSE_REPEL_DESC", 200],
+	["CTRL_MOUSE_ATTRACT_KEY", "CTRL_MOUSE_ATTRACT_DESC", 200],
 ]
 const _CTRL_PAD_ITEMS: Array[Array] = [
 	["CTRL_PAD_LSTICK_KEY", "CTRL_PAD_LSTICK_DESC", 180],
 	["CTRL_PAD_RSTICK_KEY", "CTRL_PAD_RSTICK_DESC", 180],
 	["CTRL_PAD_DPAD_KEY", "CTRL_PAD_DPAD_DESC", 180],
-	["CTRL_PAD_A_KEY", "CTRL_PAD_A_DESC", 180],
+	["CTRL_PAD_A_KEY", "CTRL_PAD_A_REPEL_DESC", 180],
+	["CTRL_PAD_X_KEY", "CTRL_PAD_X_ATTRACT_DESC", 180],
+	["CTRL_PAD_B_KEY", "CTRL_PAD_B_CANCEL_DESC", 180],
 	["CTRL_PAD_LBRB_KEY", "CTRL_PAD_LBRB_DESC", 180],
 ]
 
@@ -1248,17 +1225,20 @@ func _draw_controls_stacked(vp: Vector2, top_y: float) -> float:
 	var y: float = top_y
 	var ascent_h: float = _game.font.get_ascent(fs_h)
 
-	# --- マウスセクション（ヘッダーと項目を同一行に） ---
+	# --- マウスセクション（ヘッダー行 + 項目を下に続ける） ---
 	var mouse_section_top: float = y
 	_game.draw_string(_game.font, Vector2(label_x, y), tr("CTRL_MOUSE_HEADER"), HORIZONTAL_ALIGNMENT_LEFT, -1, fs_h, head_c)
-	# マウスは項目1つだけ → ヘッダーと同じ行に描画
 	if _CTRL_MOUSE_ITEMS.size() > 0:
-		var item: Array = _CTRL_MOUSE_ITEMS[0]
-		_game.draw_string(_game.font, Vector2(key_x, y), tr(item[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, key_c)
-		_game.draw_string(_game.font, Vector2(desc_x, y), tr(item[1]), HORIZONTAL_ALIGNMENT_LEFT, desc_w, fs, text_c)
-	# 縦線（マウスセクション、1行分）
-	_game.draw_line(Vector2(bar_x, y - ascent_h + 4.0), Vector2(bar_x, y + 8.0), bar_c, 2.0, true)
+		var item0: Array = _CTRL_MOUSE_ITEMS[0]
+		_game.draw_string(_game.font, Vector2(key_x, y), tr(item0[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, key_c)
+		_game.draw_string(_game.font, Vector2(desc_x, y), tr(item0[1]), HORIZONTAL_ALIGNMENT_LEFT, desc_w, fs, text_c)
 	y += line_h
+	for mi in range(1, _CTRL_MOUSE_ITEMS.size()):
+		var item_m: Array = _CTRL_MOUSE_ITEMS[mi]
+		_game.draw_string(_game.font, Vector2(key_x, y), tr(item_m[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, key_c)
+		_game.draw_string(_game.font, Vector2(desc_x, y), tr(item_m[1]), HORIZONTAL_ALIGNMENT_LEFT, desc_w, fs, text_c)
+		y += line_h
+	_game.draw_line(Vector2(bar_x, mouse_section_top - ascent_h + 4.0), Vector2(bar_x, y - line_h + 8.0), bar_c, 2.0, true)
 
 	y += section_gap
 
@@ -1309,13 +1289,19 @@ func _draw_controls_stacked_in_panel(panel_rect: Rect2, top_y: float, sc: float 
 	var ascent_h: float = _game.font.get_ascent(fs_h)
 
 	# --- マウスセクション ---
+	var mouse_panel_top: float = y
 	_game.draw_string(_game.font, Vector2(label_x, y), tr("CTRL_MOUSE_HEADER"), HORIZONTAL_ALIGNMENT_LEFT, -1, fs_h, head_c)
 	if _CTRL_MOUSE_ITEMS.size() > 0:
-		var item: Array = _CTRL_MOUSE_ITEMS[0]
-		_game.draw_string(_game.font, Vector2(key_x, y), tr(item[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, key_c)
-		_game.draw_string(_game.font, Vector2(desc_x, y), tr(item[1]), HORIZONTAL_ALIGNMENT_LEFT, desc_w, fs, text_c)
-	_game.draw_line(Vector2(bar_x, y - ascent_h + 4.0), Vector2(bar_x, y + 8.0), bar_c, 2.0, true)
+		var item0p: Array = _CTRL_MOUSE_ITEMS[0]
+		_game.draw_string(_game.font, Vector2(key_x, y), tr(item0p[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, key_c)
+		_game.draw_string(_game.font, Vector2(desc_x, y), tr(item0p[1]), HORIZONTAL_ALIGNMENT_LEFT, desc_w, fs, text_c)
 	y += line_h
+	for mip in range(1, _CTRL_MOUSE_ITEMS.size()):
+		var item_p: Array = _CTRL_MOUSE_ITEMS[mip]
+		_game.draw_string(_game.font, Vector2(key_x, y), tr(item_p[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, key_c)
+		_game.draw_string(_game.font, Vector2(desc_x, y), tr(item_p[1]), HORIZONTAL_ALIGNMENT_LEFT, desc_w, fs, text_c)
+		y += line_h
+	_game.draw_line(Vector2(bar_x, mouse_panel_top - ascent_h + 4.0), Vector2(bar_x, y - line_h + 8.0), bar_c, 2.0, true)
 
 	y += section_gap
 
@@ -1379,8 +1365,13 @@ func _draw_rules(vp: Vector2) -> void:
 	# 操作説明（縦スタック）— さらに7%上へ
 	_draw_controls_stacked(vp, vp.y * 0.12 + shift_down - vp.y * 0.07)
 
-	# 中央: デモ図形（自由に操作可能）
-	_draw_rules_demo_shape(vp)
+	# 本編と同じ HUD 円形ガイド（物理の get_active_guide_loops と一致させるため shape_center で再計算）
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
+		_game.stage_manager.recompute_hud_guide_layout_if_needed(_game.shape_center, vp)
+		_stage_renderer.draw_hud_overlay_guide(0.7)
+
+	# 中央: デモ図形の線・頂点（自キャラは [つぎへ] の上に重ねる）
+	_draw_rules_demo_lines_only(vp)
 
 	# ヒントテキスト（Bold、大きめ）
 	var hint_y: float = vp.y - 120.0 - shift_up
@@ -1396,6 +1387,8 @@ func _draw_rules(vp: Vector2) -> void:
 		btn_highlight = 0.5 + 0.5 * sin(Time.get_ticks_msec() / 200.0 * 0.001 * TAU)
 	var rules_btn_w: float = vp.x * 0.35
 	_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, vp.y - 48.0 - shift_up), tr("BTN_NEXT"), BTN_FONT_SIZE, alpha * btn_highlight, false, rules_btn_w)
+
+	_draw_rules_demo_player_layer(vp)
 
 
 func _radius_from_guide_distance_provisional(dist: float) -> float:
@@ -1450,31 +1443,25 @@ func _point_radius_by_guide(idx: int) -> float:
 	return clampf(r, POINT_RADIUS_GUIDE_NEAR_MIN * 0.85, POINT_RADIUS_GUIDE_FAR_MAX * (1.0 + POINT_RADIUS_RELATIVE_SPREAD))
 
 
-func _draw_rules_demo_shape(vp: Vector2) -> void:
-	"""rules画面の中央にデモ図形を描画（操作可能）"""
+func _draw_rules_demo_lines_only(vp: Vector2) -> void:
+	"""デモの線・頂点のみ（UIボタンより下のレイヤー）"""
 	var n: int = _game.point_positions.size()
 	if n == 0:
 		return
-	# 線
 	for i in range(n):
 		_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
-	# ポイント
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
-		var color: Color
-		var radius: float
-		if i == _game.hovered_index:
-			# ホバー時も通常表示（赤いポイントは廃止）
-			color = POINT_COLOR
-			radius = POINT_RADIUS
-		else:
-			color = POINT_COLOR
-			radius = POINT_RADIUS
-		_game.draw_circle(pos, radius, color)
+		_game.draw_circle(pos, POINT_RADIUS, POINT_COLOR)
+
+
+func _draw_rules_demo_player_layer(vp: Vector2) -> void:
+	"""自キャラ・エフェクト（[つぎへ] より手前）"""
+	if _game.point_positions.is_empty():
+		return
 	_draw_player_avatar()
 	_draw_laser_effect()
 	_draw_spore_particles()
-	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
 
 
@@ -1647,12 +1634,50 @@ func _draw_laser_effect() -> void:
 			_game.draw_line(p0, p1, white_c, LASER_WHITE_WIDTH, true)
 
 
+func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r: float, attracting: bool) -> void:
+	"""影響範囲：半径方向グラデーション＋周方向の明暗で引力／斥力の向きを示す。"""
+	var inner_r: float = maxf(core_r * 1.2, field_r * 0.2)
+	if inner_r >= field_r - 3.0:
+		inner_r = maxf(core_r * 1.08, field_r * 0.32)
+	var n_bands: int = 8
+	var band_w: float = maxf(1.15, (field_r - inner_r) / float(n_bands) * 0.95)
+	for k in range(n_bands):
+		var t_mid: float = (float(k) + 0.5) / float(n_bands)
+		var rr: float = lerpf(inner_r, field_r, t_mid)
+		var u: float = float(k) / float(max(n_bands - 1, 1))
+		var col: Color
+		if attracting:
+			var c_out := Color(0.52, 0.74, 1.0, 0.05)
+			var c_in := Color(0.28, 0.62, 1.0, 0.22)
+			col = c_out.lerp(c_in, u)
+		else:
+			var c_in2 := Color(0.72, 0.76, 0.86, 0.06)
+			var c_out2 := Color(1.0, 0.38, 0.52, 0.22)
+			col = c_in2.lerp(c_out2, u)
+		_game.draw_arc(center, rr, 0.0, TAU, 72, col, band_w)
+	var t_ms: float = Time.get_ticks_msec() * 0.0012
+	var nseg: int = 36
+	for s in range(nseg):
+		var a0: float = TAU * float(s) / float(nseg)
+		var a1: float = TAU * float(s + 1) / float(nseg)
+		var ang_mid: float = (a0 + a1) * 0.5
+		var swirl: float = 1.0 if attracting else -1.0
+		var pulse: float = 0.5 + 0.5 * sin(t_ms * 5.5 + ang_mid * 3.0 * swirl)
+		var eb: Color
+		if attracting:
+			eb = Color(0.75, 0.9, 1.0, 0.42)
+		else:
+			eb = Color(1.0, 0.65, 0.72, 0.45)
+		var cseg: Color = Color(eb.r, eb.g, eb.b, eb.a * pulse)
+		_game.draw_arc(center, field_r, a0, a1, 3, cseg, 2.5)
+
+
 func _draw_player_avatar() -> void:
 	if not _game.input_handler.has_player_avatar():
 		return
 	var center: Vector2 = _game.input_handler.get_player_position()
 	var core_r: float = InputHandler.PLAYER_RADIUS
-	var field_r: float = InputHandler.PLAYER_FORCE_RADIUS
+	var field_r: float = _game.input_handler.get_effective_player_force_visual_radius()
 	var attracting: bool = _game.input_handler.is_player_attracting()
 	var repelling: bool = _game.input_handler.is_player_repelling()
 	var ring_color: Color = Color(0.58, 0.62, 0.74, 0.08)
@@ -1663,8 +1688,11 @@ func _draw_player_avatar() -> void:
 	elif repelling:
 		ring_color = Color(1.0, 0.55, 0.62, 0.14)
 		edge_color = Color(1.0, 0.82, 0.86, 0.28)
-	_game.draw_circle(center, field_r, ring_color)
-	_game.draw_arc(center, field_r, 0.0, TAU, 64, edge_color, 2.0)
+	if attracting or repelling:
+		_draw_player_force_influence_visual(center, core_r, field_r, attracting)
+	else:
+		_game.draw_circle(center, field_r, ring_color)
+		_game.draw_arc(center, field_r, 0.0, TAU, 64, edge_color, 2.0)
 	_game.draw_circle(center, core_r * 1.45, Color(0.06, 0.05, 0.08, 0.92))
 	_game.draw_circle(center, core_r, Color(0.01, 0.01, 0.02, 1.0))
 	_game.draw_arc(center, core_r * 0.72, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7), 2.5)

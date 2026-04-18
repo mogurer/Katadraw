@@ -92,6 +92,8 @@ var hud_two_circle_c1: Vector2 = Vector2.ZERO
 var hud_two_circle_c2: Vector2 = Vector2.ZERO
 var _hud_layout_vp: Vector2 = Vector2(-1.0, -1.0)
 var _hud_layout_sc: Vector2 = Vector2.ZERO
+## 画面フィット後の HUD ガイド半径に乗算（1=従来）。rules デモ等で目標円の見た目だけ縮小する。
+var hud_guide_layout_scale_mul: float = 1.0
 
 
 func recompute_hud_guide_layout_if_needed(shape_center: Vector2, viewport_size: Vector2) -> void:
@@ -136,8 +138,8 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 		return
 
 	if ideal_outline_points.is_empty():
-		hud_guide_scale = guide_radius_val
-		hud_guide_ref_px = maxf(guide_radius_val, 1.0)
+		hud_guide_scale = guide_radius_val * hud_guide_layout_scale_mul
+		hud_guide_ref_px = maxf(hud_guide_scale, 1.0)
 		_apply_hud_correspondence_scale()
 		return
 
@@ -161,7 +163,7 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 		max_y = maxf(max_y, p.y)
 	var bb_w: float = maxf(max_x - min_x, 0.001)
 	var bb_h: float = maxf(max_y - min_y, 0.001)
-	var s: float = minf(inner_w / bb_w, inner_h / bb_h)
+	var s: float = minf(inner_w / bb_w, inner_h / bb_h) * hud_guide_layout_scale_mul
 	hud_guide_scale = s
 	for p in rotated:
 		hud_guide_outline_world.append(shape_center + p * s)
@@ -346,6 +348,7 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 	current_stage = int(cfg.get("stage_index", -1))
 	ideal_outline_points.clear()
 	effective_config = cfg.duplicate(true)
+	hud_guide_layout_scale_mul = float(cfg.get("hud_guide_layout_scale_mul", 1.0))
 	stage_type = str(cfg.get("shape_type", cfg.get("type", "circle")))
 	min_radius = cfg["min_radius"]
 	max_radius = cfg["max_radius"]

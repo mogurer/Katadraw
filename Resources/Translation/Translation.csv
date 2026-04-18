@@ -5,7 +5,7 @@ TITLE_COPYRIGHT,©2026 meseed-software,©2026 meseed-software,©2026 meseed-soft
 RULES_MAIN,点を操作して、お手本の形に近づけましょう,Move points to match the target shape,移动点来匹配目标形状,移動點來匹配目標形狀
 RULES_START,Start!,Start!,Start!,Start!
 BTN_NEXT,つぎへ,Next,下一步,下一步
-RULES_DEMO_HINT,Start でゲーム開始　マウスで [ つぎへ ] クリック,Start to start game　Click [Next] with mouse,Start 开始游戏　鼠标点击 [下一步],Start 開始遊戲　滑鼠點擊 [下一步]
+RULES_DEMO_HINT,自キャラを [ つぎへ ] に重ねて A　または Start でゲーム開始,Overlap your cursor on [Next] and press A or Start,将角色移到 [下一步] 上按 A 或 Start,將角色移到 [下一步] 上按 A 或 Start
 RULES_BTN_FOCUS_HINT,↑でデモへ　A で次へ,↑ for demo　A for next,↑ 查看演示　A 下一步,↑ 查看演示　A 下一步
 RULES_CONFIRM_MOUSE_TITLE,マウスでプレイしますか？,Play with the mouse?,用鼠标进行游戏吗？,用滑鼠進行遊戲嗎？
 RULES_CONFIRM_PAD_TITLE,コントローラでプレイしますか？,Play with the controller?,用手柄进行游戏吗？,用手把玩遊戲嗎？
@@ -13,6 +13,10 @@ BTN_TO_TITLE,タイトルへ,To Title,返回标题,返回標題
 CTRL_MOUSE_HEADER,マウス,Mouse,鼠标,滑鼠
 CTRL_MOUSE_DRAG_KEY,ドラッグ,Drag,拖拽,拖曳
 CTRL_MOUSE_DRAG_DESC,ポイントを移動,Move points,移动点,移動點
+CTRL_MOUSE_REPEL_KEY,左クリック,Left Click,左键点击,左鍵點擊
+CTRL_MOUSE_REPEL_DESC,斥力（はじく）,Repel,斥力,斥力
+CTRL_MOUSE_ATTRACT_KEY,右クリック,Right Click,右键点击,右鍵點擊
+CTRL_MOUSE_ATTRACT_DESC,引力（引き寄せる）,Attract,引力,引力
 CTRL_MOUSE_RECT_KEY,矩形選択,Box Select,框选,框選
 CTRL_MOUSE_RECT_DESC,範囲内のポイントをまとめて選択,Select points within area,选择区域内的点,選擇區域內的點
 CTRL_MOUSE_SHIFT_CLICK_KEY,Shift + クリック,Shift + Click,Shift + 点击,Shift + 點擊
@@ -34,6 +38,11 @@ CTRL_PAD_RSTICK_KEY,右スティック,Right Stick,右摇杆,右搖桿
 CTRL_PAD_RSTICK_DESC,ダイレクト移動 + ポイントをつかむ,Move cursor / Move points,直接移动 + 抓取点,直接移動 + 抓取點
 CTRL_PAD_A_KEY,A ボタン,A Button,A 按钮,A 按鈕
 CTRL_PAD_A_DESC,ポイントをつかむ / 離す,Grab / release point,抓取 / 释放点,抓取 / 釋放點
+CTRL_PAD_A_REPEL_DESC,斥力（はじく）,Repel,斥力,斥力
+CTRL_PAD_X_KEY,X ボタン,X Button,X 按钮,X 按鈕
+CTRL_PAD_X_ATTRACT_DESC,引力（引き寄せる）,Attract,引力,引力
+CTRL_PAD_B_KEY,B ボタン,B Button,B 按钮,B 按鈕
+CTRL_PAD_B_CANCEL_DESC,キャンセル（力を解除）,Cancel (release forces),取消（解除施力）,取消（解除施力）
 CTRL_PAD_LBRB_KEY,LB / RB,LB / RB,LB / RB,LB / RB
 CTRL_PAD_LBRB_DESC,前 / 次のポイントへジャンプ,Jump to prev / next point,跳转到上一个/下一个点,跳轉到上一個/下一個點
 CTRL_PAD_LT_KEY,LT 押しながら,Hold LT,按住 LT,按住 LT

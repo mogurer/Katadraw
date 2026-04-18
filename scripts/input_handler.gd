@@ -56,8 +56,6 @@ const GUIDE_VERTEX_LOCK_DAMPING := 30.0
 const GUIDE_VERTEX_CONTACT_RELEASE_MUL := 0.35
 const PLAYER_RADIUS := 16.0
 const PLAYER_FORCE_RADIUS := 128.0
-const PLAYER_MOVE_SPEED := 320.0
-const PLAYER_DPAD_SPEED := 220.0
 const PLAYER_SPEED_BOOST_PER_BUTTON := 0.35
 const PLAYER_REPEL_STRENGTH := 6400.0
 const PLAYER_ATTRACT_STRENGTH := 5600.0
@@ -76,6 +74,28 @@ const PLAYFIELD_EDGE_RETURN_REPULSE_MUL := 1.65
 const PLAYFIELD_EDGE_RETURN_VEL_BOOST := 0.006
 ## ガイド上・斥力が法線方向に強いとき接線へ逃がして滑らせる
 const GUIDE_REPEL_SLIDE_ASSIST := 0.42
+## この距離以内ならプレイヤー引力・斥力でガイド拘束を弱め、剥がしやすくする（px）
+const GUIDE_PEEL_DISTANCE_PX := 32.0
+## peel_mul の下限（小さいほどガイドに吸い付く力が弱く剥がれやすい）。旧 0.18 から約 3 倍外れやすく
+const GUIDE_PEEL_SNAP_FLOOR := 0.06
+## 自キャラ中心に近いほど引力・斥力を強める（端での倍率 1、重なりに近いほど上乗せ）
+const PLAYER_FORCE_PROXIMITY_BOOST := 1.55
+
+const PLAYER_ACCEL := 3400.0
+const PLAYER_VEL_FRICTION := 9.0
+const PLAYER_SPEED_SOFT_CAP := 260.0
+const PLAYER_SPEED_HARD_CAP := 640.0
+## 現在速度が大きいほど上限を少し上げる（移動量に応じて最高速が上がる）
+const PLAYER_SPEED_CAP_VEL_BLEND := 0.42
+
+## この速度以下なら「静止」とみなし、引力・斥力の影響半径チャージを進める（px/秒）
+const PLAYER_FORCE_CHARGE_STATIONARY_EPS := 14.0
+## 静止中、A/X 長押しで影響半径を幾何級数的に拡張（移動中は成長停止し、既に拡がった分は維持）
+const EMPTY_FORCE_RADIUS_TICK_MS := 200
+const EMPTY_FORCE_RADIUS_TICK_CAP := 22
+## 引力＋ガイド上の頂点を 16px 以内で掴んだとき、ガイド拘束を無効化（edge_dist がこれ以下なら「ガイド上」）
+const GUIDE_ATTRACT_FREE_PROXIMITY_PX := 16.0
+const GUIDE_ATTRACT_FREE_EDGE_DIST_PX := 10.0
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -138,6 +158,15 @@ var player_has_motion_input: bool = false
 var player_force_active: bool = false
 var player_influenced_point_count: int = 0
 var mouse_force_pressed: bool = false
+
+## パッド移動の速度（マウス操作時は毎フレームゼロに戻す）
+var player_velocity: Vector2 = Vector2.ZERO
+## 斥力ホールド中、静止していた累積時間（ms）。移動中は増えず、再静止で続きから成長
+var _empty_repulse_stationary_ms: float = 0.0
+## 引力ホールド中の静止累積（ms）
+var _empty_attract_stationary_ms: float = 0.0
+var _empty_repulse_radius_bonus: float = 0.0
+var _empty_attract_radius_bonus: float = 0.0
 
 # --- game reference ---
 var _game: Node2D
@@ -212,6 +241,11 @@ func reset_for_stage() -> void:
 	player_force_active = false
 	player_influenced_point_count = 0
 	mouse_force_pressed = false
+	player_velocity = Vector2.ZERO
+	_empty_repulse_stationary_ms = 0.0
+	_empty_attract_stationary_ms = 0.0
+	_empty_repulse_radius_bonus = 0.0
+	_empty_attract_radius_bonus = 0.0
 	_reset_player_position()
 
 
@@ -223,10 +257,16 @@ func _reset_player_position() -> void:
 func _default_player_position() -> Vector2:
 	if _game.point_positions.is_empty():
 		return _game.shape_center
-	var spawn_offset_y: float = maxf(_game.guide_radius_val, 96.0) + PLAYER_FORCE_RADIUS + 24.0
-	var spawn_pos: Vector2 = _game.shape_center + Vector2(0.0, spawn_offset_y)
 	var vp: Vector2 = _game.get_viewport_rect().size
 	var margin: float = PLAYER_RADIUS
+	if _game.game_state == "rules":
+		var c := Vector2.ZERO
+		for p in _game.point_positions:
+			c += p
+		c /= float(_game.point_positions.size())
+		return c.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
+	var spawn_offset_y: float = maxf(_game.guide_radius_val, 96.0) + PLAYER_FORCE_RADIUS + 24.0
+	var spawn_pos: Vector2 = _game.shape_center + Vector2(0.0, spawn_offset_y)
 	return spawn_pos.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
 
 
@@ -240,19 +280,27 @@ func handle_mouse_motion(mouse: Vector2) -> void:
 		return
 	player_position = mouse
 	player_position_initialized = true
+	player_velocity = Vector2.ZERO
 	player_has_motion_input = false
 	_last_input_method = "mouse"
 	_refresh_hovered_point()
 	_game.queue_redraw()
 
 
-func handle_mouse_press(mouse: Vector2) -> void:
+func handle_mouse_press(mouse: Vector2, button: int = MOUSE_BUTTON_LEFT) -> void:
 	_last_input_method = "mouse"
 	player_position = mouse
 	player_position_initialized = true
+	player_velocity = Vector2.ZERO
+	if button == MOUSE_BUTTON_LEFT:
+		player_force_repelling = true
+		player_force_attracting = false
+	elif button == MOUSE_BUTTON_RIGHT:
+		player_force_attracting = true
+		player_force_repelling = false
+	else:
+		return
 	mouse_force_pressed = true
-	player_force_attracting = true
-	player_force_repelling = false
 	grab_input_active = true
 	_game.is_dragging = false
 	_game.queue_redraw()
@@ -267,16 +315,18 @@ func _begin_drag(mouse: Vector2) -> void:
 		_begin_point_drag(_game.selected_indices[0], mouse + drag_offsets[0], "mouse")
 
 
-func handle_mouse_release(_mouse: Vector2) -> void:
+func handle_mouse_release(_mouse: Vector2, button: int = MOUSE_BUTTON_LEFT) -> void:
 	_last_input_method = "mouse"
 	if bb_dragging:
 		_end_bb_drag()
 		return
 
-	mouse_force_pressed = false
-	player_force_attracting = false
-	player_force_repelling = false
-	grab_input_active = player_force_active
+	if button == MOUSE_BUTTON_LEFT:
+		player_force_repelling = false
+	elif button == MOUSE_BUTTON_RIGHT:
+		player_force_attracting = false
+	mouse_force_pressed = player_force_attracting or player_force_repelling
+	grab_input_active = mouse_force_pressed or player_force_active
 	_game.is_dragging = false
 	_game.queue_redraw()
 
@@ -460,9 +510,12 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 		return
 	_last_input_method = "pad"
 	if btn == JOY_BUTTON_A:
-		player_force_attracting = pressed
-	elif btn == JOY_BUTTON_B:
 		player_force_repelling = pressed
+	elif btn == JOY_BUTTON_X:
+		player_force_attracting = pressed
+	elif btn == JOY_BUTTON_B and pressed:
+		player_force_repelling = false
+		player_force_attracting = false
 	grab_input_active = _get_player_force_mode() != 0 or player_force_active
 
 
@@ -818,18 +871,24 @@ func process_pad(delta: float) -> void:
 		player_force_attracting = false
 		player_force_repelling = false
 		grab_input_active = false
+		_empty_repulse_stationary_ms = 0.0
+		_empty_attract_stationary_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
 		grab_input_active = false
+		_empty_repulse_stationary_ms = 0.0
+		_empty_attract_stationary_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
 		grab_input_active = false
+		_empty_repulse_stationary_ms = 0.0
+		_empty_attract_stationary_ms = 0.0
 		return
 	if not player_position_initialized:
 		_reset_player_position()
@@ -849,16 +908,94 @@ func process_pad(delta: float) -> void:
 	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_RIGHT):
 		dpad.x += 1.0
 
-	player_force_attracting = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
-	player_force_repelling = Input.is_joy_button_pressed(0, JOY_BUTTON_B)
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_B):
+		player_force_repelling = false
+		player_force_attracting = false
+	elif (
+		_game.game_state == "rules"
+		and _game.get_rules_next_button_rect().has_point(player_position)
+		and Input.is_joy_button_pressed(0, JOY_BUTTON_A)
+	):
+		# [つぎへ] 上では A は遷移用 — 斥力にしない
+		player_force_repelling = false
+		player_force_attracting = false
+	else:
+		player_force_repelling = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
+		player_force_attracting = Input.is_joy_button_pressed(0, JOY_BUTTON_X)
+
+	# マウス左右は毎フレームここでも維持する。上の代入は「パッドの A/X が押されていない」とき 0 になり、
+	# handle_mouse_press だけでは次の _process で力が消える（コントローラ操作後にマウスが効かない原因）。
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		player_force_repelling = true
+		player_force_attracting = false
+	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		player_force_attracting = true
+		player_force_repelling = false
+
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_B):
+		player_force_repelling = false
+		player_force_attracting = false
+
+	mouse_force_pressed = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+
+	# 静止中のみ影響半径が成長。移動中は成長停止し、既に拡がった分は維持。頂点との距離は不問。
+	_empty_repulse_radius_bonus = 0.0
+	_empty_attract_radius_bonus = 0.0
+	var in_play_ef: bool = _game.game_state == "playing" or _game.game_state == "rules"
+	var max_charge_ms: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
+	if in_play_ef:
+		var stationary: bool = player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
+		if player_force_repelling:
+			if stationary:
+				_empty_repulse_stationary_ms = minf(
+					_empty_repulse_stationary_ms + delta * 1000.0,
+					max_charge_ms
+				)
+			var tr_f: float = 1.0 + _empty_repulse_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
+			tr_f = minf(tr_f, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+			_empty_repulse_radius_bonus = _force_radius_bonus_smooth(tr_f)
+		else:
+			_empty_repulse_stationary_ms = 0.0
+		if player_force_attracting:
+			if stationary:
+				_empty_attract_stationary_ms = minf(
+					_empty_attract_stationary_ms + delta * 1000.0,
+					max_charge_ms
+				)
+			var ta_f: float = 1.0 + _empty_attract_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
+			ta_f = minf(ta_f, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+			_empty_attract_radius_bonus = _force_radius_bonus_smooth(ta_f)
+		else:
+			_empty_attract_stationary_ms = 0.0
+	else:
+		_empty_repulse_stationary_ms = 0.0
+		_empty_attract_stationary_ms = 0.0
+
 	var speed_mul: float = _get_player_speed_multiplier()
 	var moved: bool = false
-	if move_vec != Vector2.ZERO:
-		var speed: float = pow(clampf(move_vec.length(), 0.0, 1.0), PAD_LEFT_STICK_SPEED_EXPONENT) * PLAYER_MOVE_SPEED * speed_mul
-		player_position += move_vec.normalized() * speed * delta
-		moved = true
+	var wish: Vector2 = Vector2.ZERO
+	if move_vec.length_squared() > 0.0001:
+		wish = move_vec.normalized() * pow(clampf(move_vec.length(), 0.0, 1.0), PAD_LEFT_STICK_SPEED_EXPONENT)
 	if dpad != Vector2.ZERO:
-		player_position += dpad.normalized() * PLAYER_DPAD_SPEED * speed_mul * delta
+		var ddn: Vector2 = dpad.normalized()
+		wish = ddn if wish.length_squared() < 0.0001 else (wish + ddn).normalized()
+	if wish.length_squared() > 0.0001:
+		player_velocity += wish * (PLAYER_ACCEL * delta * speed_mul)
+		var sp: float = player_velocity.length()
+		var cap: float = lerpf(
+			PLAYER_SPEED_SOFT_CAP,
+			PLAYER_SPEED_HARD_CAP,
+			clampf(sp * PLAYER_SPEED_CAP_VEL_BLEND / maxf(PLAYER_SPEED_HARD_CAP, 1.0), 0.0, 1.0)
+		)
+		cap = minf(cap, PLAYER_SPEED_HARD_CAP)
+		if sp > cap:
+			player_velocity *= cap / sp
+		moved = true
+	else:
+		player_velocity *= exp(-PLAYER_VEL_FRICTION * delta)
+
+	player_position += player_velocity * delta
+	if wish.length_squared() > 0.0001 or player_velocity.length_squared() > 400.0:
 		moved = true
 
 	player_has_motion_input = moved
@@ -928,7 +1065,7 @@ func _step_drag_physics(delta: float) -> bool:
 	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 	player_force_active = player_influenced_point_count > 0
-	grab_input_active = player_force_active or _get_player_force_mode() != 0 or mouse_force_pressed
+	grab_input_active = player_force_active or _get_player_force_mode() != 0
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
 
@@ -955,22 +1092,46 @@ func _step_drag_physics(delta: float) -> bool:
 	return false
 
 
+func _get_effective_player_force_limit() -> float:
+	var bonus: float = 0.0
+	var fm: int = _get_player_force_mode()
+	if fm > 0:
+		bonus = _empty_attract_radius_bonus
+	elif fm < 0:
+		bonus = _empty_repulse_radius_bonus
+	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS + bonus
+
+
+func _is_guide_attract_free_pull(point_idx: int, feature: Dictionary) -> bool:
+	if _get_player_force_mode() <= 0:
+		return false
+	if point_idx < 0 or point_idx >= _game.point_positions.size():
+		return false
+	if player_position.distance_to(_game.point_positions[point_idx]) > GUIDE_ATTRACT_FREE_PROXIMITY_PX:
+		return false
+	var ed: float = feature.get("edge_dist", INF) as float
+	return ed <= GUIDE_ATTRACT_FREE_EDGE_DIST_PX
+
+
 func _compute_player_force(point_idx: int) -> Vector2:
 	var force_mode: int = _get_player_force_mode()
-	if force_mode == 0 and not mouse_force_pressed:
+	if force_mode == 0:
 		return Vector2.ZERO
 	var point_pos: Vector2 = _game.point_positions[point_idx]
 	var from_player: Vector2 = point_pos - player_position
 	var dist: float = maxf(from_player.length(), PLAYER_MIN_FORCE_DISTANCE)
-	var influence_limit: float = PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS
+	var influence_limit: float = _get_effective_player_force_limit()
 	if dist > influence_limit:
 		return Vector2.ZERO
 	var falloff: float = 1.0 - dist / influence_limit
 	var direction: Vector2 = from_player / dist
-	if force_mode > 0 or mouse_force_pressed:
+	if force_mode > 0:
 		direction = -direction
-	var base_strength: float = PLAYER_ATTRACT_STRENGTH if (force_mode > 0 or mouse_force_pressed) else PLAYER_REPEL_STRENGTH
+	var base_strength: float = PLAYER_ATTRACT_STRENGTH if force_mode > 0 else PLAYER_REPEL_STRENGTH
 	var force: Vector2 = direction * (base_strength * falloff * falloff)
+	# 自キャラに近いほど強い（中心付近で最大約 (1+PROXIMITY_BOOST) 倍）
+	var prox_t: float = clampf(1.0 - dist / influence_limit, 0.0, 1.0)
+	force *= 1.0 + PLAYER_FORCE_PROXIMITY_BOOST * prox_t * prox_t
 	if _is_player_touching_point(point_idx):
 		force += direction * PLAYER_CONTACT_FORCE
 	return force
@@ -980,7 +1141,7 @@ func _apply_player_approach_brake(point_idx: int, delta: float) -> void:
 	if point_idx < 0 or point_idx >= _game.point_positions.size():
 		return
 	var force_mode: int = _get_player_force_mode()
-	var attract_active: bool = force_mode > 0 or mouse_force_pressed
+	var attract_active: bool = force_mode > 0
 	if not attract_active:
 		return
 	var point_pos: Vector2 = _game.point_positions[point_idx]
@@ -1018,20 +1179,45 @@ func _is_player_touching_point(point_idx: int) -> bool:
 	return player_position.distance_to(_game.point_positions[point_idx]) <= contact_radius
 
 
+func _force_radius_geometric_step_sum(ticks: int) -> float:
+	# ティックごとの加算が +2,+4,+8,… のとき、ticks 回分の累計 = sum_{i=1}^{ticks} 2^i = 2^(ticks+1) - 2
+	if ticks <= 0:
+		return 0.0
+	var t: int = mini(ticks, EMPTY_FORCE_RADIUS_TICK_CAP)
+	return pow(2.0, float(t + 1)) - 2.0
+
+
+## 0.2s 相当の段を連続化（隣接段の累計値を線形補間）
+func _force_radius_bonus_smooth(tr_float: float) -> float:
+	if tr_float <= 0.0:
+		return 0.0
+	var tf: float = minf(tr_float, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+	var lo: int = int(floor(tf))
+	var hi: int = int(ceil(tf))
+	var alpha: float = tf - float(lo)
+	return lerpf(
+		_force_radius_geometric_step_sum(lo),
+		_force_radius_geometric_step_sum(hi),
+		alpha
+	)
+
+
 func _apply_point_pair_repulsion(forces: Array[Vector2]) -> void:
-	var threshold_sq: float = POINT_PAIR_REPULSE_DISTANCE * POINT_PAIR_REPULSE_DISTANCE
-	for i in range(_game.point_positions.size()):
+	var n_vert: int = _game.point_positions.size()
+	for i in range(n_vert):
 		if _is_locked(i):
 			continue
-		for j in range(i + 1, _game.point_positions.size()):
+		for j in range(i + 1, n_vert):
 			if _is_locked(j):
 				continue
+			var thr: float = POINT_PAIR_REPULSE_DISTANCE
+			var threshold_sq: float = thr * thr
 			var delta: Vector2 = _game.point_positions[j] - _game.point_positions[i]
 			var dist_sq: float = delta.length_squared()
 			if dist_sq > threshold_sq:
 				continue
 			var dist: float = maxf(sqrt(dist_sq), POINT_PAIR_REPULSE_MIN_DISTANCE)
-			var falloff: float = 1.0 - dist / POINT_PAIR_REPULSE_DISTANCE
+			var falloff: float = 1.0 - dist / thr
 			var dir: Vector2 = delta / dist
 			var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
 			forces[i] -= force
@@ -1039,8 +1225,6 @@ func _apply_point_pair_repulsion(forces: Array[Vector2]) -> void:
 
 
 func _get_player_force_mode() -> int:
-	if mouse_force_pressed:
-		return 1
 	if player_force_attracting == player_force_repelling:
 		return 0
 	return 1 if player_force_attracting else -1
@@ -1126,9 +1310,9 @@ func _get_player_speed_multiplier() -> float:
 
 
 func _has_points_within_player_force() -> bool:
-	if _get_player_force_mode() == 0 and not mouse_force_pressed:
+	if _get_player_force_mode() == 0:
 		return false
-	var influence_limit: float = PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS
+	var influence_limit: float = _get_effective_player_force_limit()
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
@@ -1269,14 +1453,21 @@ func _apply_local_angle_spring(forces: Array[Vector2]) -> void:
 
 
 func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
+	var pf_mode_peel: int = _get_player_force_mode()
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
+		if _is_guide_attract_free_pull(i, feature):
+			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		var vertex_dist: float = feature.get("vertex_dist", INF) as float
 		var edge_pass_through: bool = _is_edge_pass_through(feature, pos, point_velocities[i])
+		# ガイド付近 32px 以内ではプレイヤー引力・斥力で剥がしやすいよう拘束を弱める
+		var peel_mul: float = 1.0
+		if pf_mode_peel != 0 and edge_dist < GUIDE_PEEL_DISTANCE_PX:
+			peel_mul = clampf(edge_dist / GUIDE_PEEL_DISTANCE_PX, GUIDE_PEEL_SNAP_FLOOR, 1.0)
 		if edge_dist < GUIDE_EDGE_SNAP_RADIUS and not edge_pass_through:
 			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
 			var edge_spring: float = GUIDE_EDGE_SPRING
@@ -1286,24 +1477,24 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 			var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
 			var edge_normal: Vector2 = _feature_edge_normal(feature, pos)
 			var normal_velocity: Vector2 = edge_normal * point_velocities[i].dot(edge_normal)
-			forces[i] += (edge_target - pos) * (edge_spring * edge_strength)
-			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength)
+			forces[i] += (edge_target - pos) * (edge_spring * edge_strength * peel_mul)
+			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength * peel_mul)
 			if edge_dist < GUIDE_EDGE_GLIDE_RADIUS and vertex_dist >= GUIDE_VERTEX_LOCK_RADIUS:
 				var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
-				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t)
+				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t * peel_mul)
 		if vertex_dist < GUIDE_VERTEX_SNAP_RADIUS:
 			var vertex_strength: float = 1.0 - vertex_dist / GUIDE_VERTEX_SNAP_RADIUS
 			var vertex_target: Vector2 = feature.get("vertex_pos", pos) as Vector2
-			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength)
-			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength)
+			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength * peel_mul)
+			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength * peel_mul)
 		var lock_data: Dictionary = vertex_locks.get(i, {}) as Dictionary
 		if lock_data.is_empty():
 			continue
 		var lock_pos: Vector2 = lock_data.get("vertex_pos", pos) as Vector2
 		var player_touching: bool = _is_player_touching_point(i)
 		var lock_mul: float = GUIDE_VERTEX_CONTACT_RELEASE_MUL if player_touching else 1.0
-		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul)
-		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul)
+		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul * peel_mul)
+		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul * peel_mul)
 
 
 func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
@@ -1311,6 +1502,8 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		if _is_locked(i):
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
+		if _is_guide_attract_free_pull(i, feature):
+			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
@@ -1440,6 +1633,8 @@ func _apply_post_move_guide_constraints(nearest_features: Array, vertex_locks: D
 		if _is_locked(i):
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
+		if _is_guide_attract_free_pull(i, feature):
+			continue
 		var pos: Vector2 = _game.point_positions[i]
 		if vertex_locks.has(i):
 			var lock_data: Dictionary = vertex_locks.get(i, {}) as Dictionary
@@ -1685,6 +1880,11 @@ func has_player_avatar() -> bool:
 
 func get_player_position() -> Vector2:
 	return player_position
+
+
+func get_effective_player_force_visual_radius() -> float:
+	"""薄い影響円用。静止チャージの幾何拡張を含む実効距離（中心〜ポイント側の限界）。"""
+	return _get_effective_player_force_limit()
 
 
 func is_player_attracting() -> bool:

@@ -183,13 +183,9 @@ var bgm_volume: int = 5         # 0(ミュート)〜10(最大), デフォルト5
 var se_volume: int = 5          # 0(ミュート)〜10(最大), デフォルト5
 
 # --- Rules デモ ---
-var rules_focus_button: bool = false  # false=デモ操作, true=[次へ]にフォーカス
-var preferred_input_method: String = ""  # "mouse" or "pad" - デモで次へを選んだ操作にロック。""は未設定
+var rules_focus_button: bool = false  # false=デモ操作, true=[次へ]にフォーカス（未使用だが互換のため保持）
 var rules_demo_center: Vector2 = Vector2.ZERO
 var rules_demo_radius: float = 90.0
-# rules_confirm: ゲーム開始前の操作デバイス確認（"mouse" | "pad"）
-var rules_confirm_kind: String = ""
-var rules_confirm_index: int = 0  # 0=はい 1=いいえ
 
 # --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
@@ -1211,14 +1207,6 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 					queue_redraw()
 		"config":
 			_process_config_stick_navigation(delta)
-		"rules_confirm":
-			var nav_rc: Vector2i = _ui_menu_stick_nav_horizontal_first(delta)
-			if nav_rc.x < 0 or nav_rc.y < 0:
-				rules_confirm_index = (rules_confirm_index - 1 + 2) % 2
-				queue_redraw()
-			elif nav_rc.x > 0 or nav_rc.y > 0:
-				rules_confirm_index = (rules_confirm_index + 1) % 2
-				queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
@@ -1286,10 +1274,6 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "stage_debug":
 		_input_stage_debug(event)
-		return
-
-	if game_state == "rules_confirm":
-		_input_rules_confirm(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
 
 	if game_state == "rules":
@@ -1400,20 +1384,18 @@ func _input(event: InputEvent) -> void:
 		if _hit_debug_log_button(event.position):
 			_flush_debug_input_log()
 			return
-	var allow_mouse: bool = preferred_input_method != "pad"
-	var allow_pad: bool = preferred_input_method != "mouse"
-	if allow_mouse and event is InputEventMouseMotion:
+	if event is InputEventMouseMotion:
 		input_handler.handle_mouse_motion(event.position)
-	if allow_mouse and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
 			var prev_dragging: bool = is_dragging
-			input_handler.handle_mouse_press(event.position)
+			input_handler.handle_mouse_press(event.position, event.button_index)
 			if not prev_dragging and is_dragging:
 				_play_sfx(sfx_catch)
 		else:
-			input_handler.handle_mouse_release(event.position)
+			input_handler.handle_mouse_release(event.position, event.button_index)
 			_stop_sfx_move()
-	if allow_pad and event is InputEventJoypadButton:
+	if event is InputEventJoypadButton:
 		input_handler.handle_pad_button(event.button_index, event.pressed)
 	if stage_session.debug_test_mode and input_recorder:
 		input_recorder.record_event(event)
@@ -1436,7 +1418,6 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			moved = true
 		elif event.keycode == KEY_ESCAPE:
 			game_state = "title"
-			preferred_input_method = ""
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			queue_redraw()
 			return
@@ -1444,7 +1425,6 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 	if event is InputEventJoypadButton and event.pressed:
 		if event.button_index == JOY_BUTTON_B:
 			game_state = "title"
-			preferred_input_method = ""
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			queue_redraw()
 			return
@@ -1760,14 +1740,12 @@ func _volume_offset_db(level: int) -> float:
 func _enter_rules() -> void:
 	game_state = "rules"
 	rules_focus_button = false
-	rules_confirm_kind = ""
-	rules_confirm_index = 0
 	var vp: Vector2 = get_viewport_rect().size
 	var guide_h: float = 270.0
 	var btn_h: float = 100.0
 	var shift_down: float = vp.y * 0.15
 	rules_demo_center = Vector2(vp.x / 2.0, guide_h + shift_down + (vp.y - guide_h - shift_down - btn_h) / 2.0)
-	rules_demo_radius = minf(vp.x, vp.y) * 0.12
+	rules_demo_radius = minf(vp.x, vp.y) * 0.03
 	var demo_cfg: Dictionary = StageConfig.build_effective_config({
 		"type": "circle",
 		"num_points": RULES_DEMO_POINTS,
@@ -1776,12 +1754,15 @@ func _enter_rules() -> void:
 		"variance": 0.0,
 		"clear_pct": 100.0,
 		"display_rate_min_pct": 0.0,
+		# min/max だけでは縮まない（HUD フィット後に点が再配置される）。見た目の目標円をここで縮小。
+		"hud_guide_layout_scale_mul": 0.5,
 	})
-	demo_cfg["skip_hud_initial_layout"] = true
+	# skip_hud を付けない: 通常ステージ同様に HUD エリアへフィットした円形ガイドを組み立てる。
+	# skip ありだと hud_guide が再計算されず、前画面のガイドが残って拘束が強く不自然になることがある。
 	_begin_stage_with_config(-1, demo_cfg, rules_demo_center, "rules", false)
 
 
-func _input_rules(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
+func _input_rules(event: InputEvent, _is_confirm_key: bool, _is_confirm_pad: bool, _is_confirm_click: bool) -> void:
 	var is_start: bool = (
 		event is InputEventJoypadButton and event.pressed
 		and event.button_index == JOY_BUTTON_START
@@ -1798,141 +1779,57 @@ func _input_rules(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool,
 		queue_redraw()
 		return
 
-	# Start → コントローラ確認ダイアログ
+	# Start → ゲーム開始（つぎへと同等）
 	if is_start:
-		_open_rules_confirm("pad")
+		ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _start_game())
 		queue_redraw()
 		return
 
-	# Enter / Space（キーボード）→ マウス確認ダイアログ（Space はマウス扱い）
-	if is_confirm_key:
-		_open_rules_confirm("mouse")
-		queue_redraw()
-		return
+	# [つぎへ] 上に自キャラを重ねた状態で A → ゲーム開始
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A:
+		if _player_on_rules_next_button():
+			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _start_game())
+			queue_redraw()
+			return
 
 	# デモ操作: マウス/コントローラを input_handler へ
 	if event is InputEventMouseMotion:
 		input_handler.handle_mouse_motion(event.position)
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
 			if _hit_rules_button(event.position):
-				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					_open_rules_confirm("mouse")
-				)
+				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _start_game())
 				queue_redraw()
 				return
 			var prev_dragging: bool = is_dragging
-			input_handler.handle_mouse_press(event.position)
+			input_handler.handle_mouse_press(event.position, event.button_index)
 			if not prev_dragging and is_dragging:
 				_play_sfx(sfx_catch)
 		else:
-			input_handler.handle_mouse_release(event.position)
+			input_handler.handle_mouse_release(event.position, event.button_index)
 			_stop_sfx_move()
 	if event is InputEventJoypadButton:
 		input_handler.handle_pad_button(event.button_index, event.pressed)
 	queue_redraw()
 
 
-func _open_rules_confirm(kind: String) -> void:
-	game_state = "rules_confirm"
-	rules_confirm_kind = kind
-	rules_confirm_index = 0
-	queue_redraw()
+func get_rules_next_button_rect() -> Rect2:
+	var vp: Vector2 = get_viewport_rect().size
+	var btn_w: float = vp.x * 0.35
+	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+	var shift_up: float = vp.y * 0.05
+	var center_y: float = vp.y - 48.0 - shift_up
+	return Rect2(vp.x / 2.0 - btn_w / 2.0, center_y - btn_h / 2.0, btn_w, btn_h)
 
 
-func _close_rules_confirm_no() -> void:
-	game_state = "rules"
-	rules_confirm_kind = ""
-	queue_redraw()
-
-
-func _apply_rules_confirm_yes() -> void:
-	var k: String = rules_confirm_kind
-	rules_confirm_kind = ""
-	preferred_input_method = "mouse" if k == "mouse" else "pad"
-	_start_game()
-
-
-func _input_rules_confirm(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
-	var is_confirm: bool = is_confirm_key or is_confirm_pad
-	# ESC / B → いいえ（ルール画面に戻る）
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		_close_rules_confirm_no()
-		return
-	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B:
-		_close_rules_confirm_no()
-		return
-	# 左右でフォーカス
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_LEFT:
-			rules_confirm_index = (rules_confirm_index - 1 + 2) % 2
-			queue_redraw()
-		elif event.keycode == KEY_RIGHT:
-			rules_confirm_index = (rules_confirm_index + 1) % 2
-			queue_redraw()
-	if event is InputEventJoypadButton and event.pressed:
-		if event.button_index == JOY_BUTTON_DPAD_LEFT:
-			rules_confirm_index = (rules_confirm_index - 1 + 2) % 2
-			queue_redraw()
-		elif event.button_index == JOY_BUTTON_DPAD_RIGHT:
-			rules_confirm_index = (rules_confirm_index + 1) % 2
-			queue_redraw()
-	# マウスホバー
-	if event is InputEventMouseMotion:
-		var vp: Vector2 = get_viewport_rect().size
-		var cx: float = vp.x / 2.0
-		var dlg_cy: float = vp.y / 2.0
-		var cbtn_w: float = 220.0
-		var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-		var cbtn_cy: float = dlg_cy + 50.0
-		var mouse: Vector2 = event.position
-		if mouse.y >= cbtn_cy - 35.0 and mouse.y <= cbtn_cy + 35.0:
-			if mouse.x >= cx - cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx - cbtn_gap + cbtn_w / 2.0:
-				rules_confirm_index = 0
-			elif mouse.x >= cx + cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx + cbtn_gap + cbtn_w / 2.0:
-				rules_confirm_index = 1
-	# 決定
-	if is_confirm or is_confirm_click:
-		var do_action: bool = false
-		if is_confirm:
-			do_action = true
-		elif is_confirm_click:
-			var vp2: Vector2 = get_viewport_rect().size
-			var cx2: float = vp2.x / 2.0
-			var dlg_cy2: float = vp2.y / 2.0
-			var cbtn_w2: float = 220.0
-			var cbtn_gap2: float = cbtn_w2 / 2.0 + 30.0
-			var cbtn_cy2: float = dlg_cy2 + 50.0
-			var mouse2: Vector2 = event.position
-			if mouse2.y >= cbtn_cy2 - 35.0 and mouse2.y <= cbtn_cy2 + 35.0:
-				if mouse2.x >= cx2 - cbtn_gap2 - cbtn_w2 / 2.0 and mouse2.x <= cx2 - cbtn_gap2 + cbtn_w2 / 2.0:
-					rules_confirm_index = 0
-					do_action = true
-				elif mouse2.x >= cx2 + cbtn_gap2 - cbtn_w2 / 2.0 and mouse2.x <= cx2 + cbtn_gap2 + cbtn_w2 / 2.0:
-					rules_confirm_index = 1
-					do_action = true
-		if do_action:
-			var confirm_label: String = tr("PAUSE_CONFIRM_YES") if rules_confirm_index == 0 else tr("PAUSE_CONFIRM_NO")
-			var cidx: int = rules_confirm_index
-			ui_renderer.set_btn_press_with_callback(confirm_label, func():
-				if cidx == 0:
-					_apply_rules_confirm_yes()
-				else:
-					_close_rules_confirm_no()
-				queue_redraw()
-			)
-			queue_redraw()
+func _player_on_rules_next_button() -> bool:
+	return get_rules_next_button_rect().has_point(input_handler.get_player_position())
 
 
 # --- ボタン/メニュー項目のヒット判定（意図しない遷移防止） ---
 
 func _hit_rules_button(pos: Vector2) -> bool:
-	var vp: Vector2 = get_viewport_rect().size
-	var btn_w: float = vp.x * 0.35
-	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
-	var center_y: float = vp.y - 48.0 - vp.y * 0.05
-	var rect := Rect2(vp.x / 2.0 - btn_w / 2.0, center_y - btn_h / 2.0, btn_w, btn_h)
-	return rect.has_point(pos)
+	return get_rules_next_button_rect().has_point(pos)
 
 
 func _hit_cleared_button(pos: Vector2) -> bool:
@@ -2308,7 +2205,6 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 	else:
 		debug_mode = false
 		game_state = "title"
-	preferred_input_method = ""
 	title_start_time = Time.get_ticks_msec() / 1000.0
 	if back_to_stage_debug:
 		_stop_bgm(bgm_title)
@@ -3853,10 +3749,6 @@ func _process_pad(delta: float) -> void:
 	# イントロ演出中はパッド処理もスキップ
 	if game_state == "playing" and not ui_renderer.is_stage_intro_done():
 		return
-	if game_state == "playing" and preferred_input_method == "mouse":
-		# マウス利用時もプレイヤー円状態を反映する。
-		input_handler.update_grab_state_for_mouse()
-		return
 	var prev_grab: bool = input_handler.grab_input_active
 	input_handler.process_pad(delta)
 	# プレイヤー円が影響を与え始めた瞬間にキャッチSE
@@ -3916,8 +3808,8 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	if game_state == "title" or game_state == "rules" or game_state == "rules_confirm" or game_state == "menu" or game_state == "config":
-		if game_state == "rules" or game_state == "rules_confirm":
+	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config":
+		if game_state == "rules":
 			ui_renderer.update_spore_particles(delta)
 		queue_redraw()
 
