@@ -20,6 +20,26 @@ func _init(game: Node2D, renderer: UIRenderer) -> void:
 
 func draw_stage_lines() -> void:
 	var n: int = _game.point_positions.size()
+	if _game.is_polygon_walk_order_active():
+		var ord: PackedInt32Array = _game.polygon_walk_order
+		match _game.stage_type:
+			"two_circles":
+				var split: int = _game.group_split
+				var g2: int = n - split
+				for k in range(split):
+					var a: int = ord[k]
+					var b: int = ord[(k + 1) % split]
+					_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
+				for t in range(g2):
+					var a2: int = ord[split + t]
+					var b2: int = ord[split + (t + 1) % g2]
+					_game.draw_line(_game.point_positions[a2], _game.point_positions[b2], _renderer.LINE_COLOR_2, _renderer.LINE_WIDTH, true)
+			_:
+				for k in range(n):
+					var a: int = ord[k]
+					var b: int = ord[(k + 1) % n]
+					_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
+		return
 	match _game.stage_type:
 		"triangle", "square", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			for i in range(n):
@@ -566,6 +586,26 @@ func _get_player_vertex_loops() -> Array:
 	var result: Array = []
 	var n: int = _game.point_positions.size()
 	if n < 2:
+		return result
+	if _game.is_polygon_walk_order_active():
+		var ord: PackedInt32Array = _game.polygon_walk_order
+		match _game.stage_type:
+			"two_circles":
+				var split: int = _game.group_split
+				var g2: int = n - split
+				var v1: Array[Vector2] = []
+				for k in range(split):
+					v1.append(_game.point_positions[ord[k]])
+				result.append(v1)
+				var v2: Array[Vector2] = []
+				for t in range(g2):
+					v2.append(_game.point_positions[ord[split + t]])
+				result.append(v2)
+			_:
+				var v: Array[Vector2] = []
+				for k in range(n):
+					v.append(_game.point_positions[ord[k]])
+				result.append(v)
 		return result
 	match _game.stage_type:
 		"two_circles":

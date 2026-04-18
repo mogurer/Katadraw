@@ -9,14 +9,10 @@
 class_name StageData
 
 const _StageConfigScript = preload("res://Resources/stage_config.gd")
-const MBUS_STAGE_JSON := "res://Resources/Stagedata/mbus.json"
 const MUG_STAGE_JSON := "res://Resources/Stagedata/mug.json"
-const HEPTAGRAM_STAGE_JSON := "res://Resources/Stagedata/heptagram_m.json"
 const HEPTAGRAM_SILHOUETTE_STAGE_JSON := "res://Resources/Stagedata/heptagramsil_j.json"
 
-static var _mbus_master_row: Dictionary = {}
 static var _mug_master_row: Dictionary = {}
-static var _heptagram_master_row: Dictionary = {}
 static var _heptagram_silhouette_master_row: Dictionary = {}
 
 
@@ -53,18 +49,6 @@ static func _load_custom_stage_master_row(
 	cfg["guide_type_label"] = guide_label
 	return cfg
 
-## Resources/Stagedata/mbus.json をマスタ1行分に変換（キャッシュ）
-static func _mbus_row() -> Dictionary:
-	if not _mbus_master_row.is_empty():
-		return _mbus_master_row.duplicate(true)
-	_mbus_master_row = _load_custom_stage_master_row(
-		MBUS_STAGE_JSON,
-		{"type": "fish", "stage_id": "mbus", "num_points": 20, "min_radius": 320.0, "max_radius": 560.0, "variance": 0.15, "display_rate_min_pct": 75.0, "clear_pct": 95.0, "guide_follows_player_radius": 1},
-		"メビウス"
-	)
-	return _mbus_master_row.duplicate(true)
-
-
 ## Resources/Stagedata/mug.json をマスタ1行分に変換（キャッシュ）
 static func _mug_row() -> Dictionary:
 	if not _mug_master_row.is_empty():
@@ -75,19 +59,6 @@ static func _mug_row() -> Dictionary:
 		"マグカップ"
 	)
 	return _mug_master_row.duplicate(true)
-
-
-static func _heptagram_row() -> Dictionary:
-	if not _heptagram_master_row.is_empty():
-		return _heptagram_master_row.duplicate(true)
-	_heptagram_master_row = _load_custom_stage_master_row(
-		HEPTAGRAM_STAGE_JSON,
-		{"type": "heptagram", "stage_id": "heptagram", "num_points": 7, "min_radius": 128.0, "max_radius": 420.0, "vertex_range": [3, 5], "variance": 0.55, "zigzag": 0.35, "clear_pct": 98.0},
-		"七芒星",
-		"heptagram",
-		"heptagram"
-	)
-	return _heptagram_master_row.duplicate(true)
 
 
 static func _heptagram_silhouette_row() -> Dictionary:
@@ -111,20 +82,14 @@ static func get_stages() -> Array:
 		{"type": "square", "stage_id": "test_square", "num_points": 12, "min_radius": 180.0, "max_radius": 260.0, "variance": 0.20, "clear_pct": 97.5},
 		# circle: 14点、難易度2
 		{"type": "circle", "stage_id": "circle_14", "num_points": 14, "min_radius": 195.0, "max_radius": 360.0, "vertex_range": [4, 6], "variance": 0.45, "zigzag": 0.22, "clear_pct": 93.0},
-		# メビウス（Stagedata/mbus.json の形状・パラメータ）
-		_mbus_row(),
 		# star: 20点
 		{"type": "star", "stage_id": "star_10", "num_points": 10, "min_radius": 128.0, "max_radius": 420.0, "vertex_range": [3, 5], "variance": 0.55, "zigzag": 0.35, "clear_pct": 98.0},
-		# テスト: さかな（細長いシルエットのため、同じ半径でも他図形より小さく見えやすい → 半径レンジを広めに）
-		{"type": "fish", "stage_id": "fish_7", "num_points": 7, "min_radius": 320.0, "max_radius": 560.0, "variance": 0.30, "display_rate_min_pct": 82.0, "clear_pct": 99.0},
 		# テスト: ねこの顔（16～20点）
 		{"type": "cat_face", "stage_id": "cat_face_18", "num_points": 18, "min_radius": 160.0, "max_radius": 280.0, "variance": 0.15, "display_rate_min_pct": 80.0, "clear_pct": 97.2},
 		# マグカップ（Stagedata/mug.json）
 		_mug_row(),
 		# heptagram_silhouette: 七芒星シルエット
 		_heptagram_silhouette_row(),
-		# heptagram: 七芒星
-		_heptagram_row(),
 	]
 	var result: Array = []
 	for i in range(overrides_list.size()):

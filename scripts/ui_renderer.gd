@@ -108,6 +108,8 @@ var _transition_speed: float = 4.0    # 1/秒（0.25秒で完了）
 var _pending_state: String = ""       # フェードアウト完了後に切り替えるステート
 
 var _result_mouse_pos: Vector2 = Vector2(-1.0, -1.0)  # リザルト画面のマウス座標
+## 0=スクリーンショット 1=Twitter 2=NEXT（マウスが各ボタン上ならそちらを優先）
+var results_action_focus_index: int = 2
 
 var _btn_hover_scales: Dictionary = {}  # ボタンID → 現在のスケール（1.0〜1.05）
 var _btn_hover_shadows: Dictionary = {} # ボタンID → 現在のシャドウ追加量
@@ -331,6 +333,9 @@ func on_state_changed(new_state: String) -> void:
 		_stage_intro_time = Time.get_ticks_msec() / 1000.0
 	if new_state == "results":
 		_results_anim_time = Time.get_ticks_msec() / 1000.0
+		results_action_focus_index = 2
+		if _game.has_method("_reset_ui_menu_stick_navigation"):
+			_game._reset_ui_menu_stick_navigation()
 	if new_state == "title_intro":
 		title_intro.reset()
 	_prev_state = new_state
@@ -1396,6 +1401,18 @@ func _radius_from_guide_distance_provisional(dist: float) -> float:
 	return lerpf(POINT_RADIUS_GUIDE_NEAR_MIN, POINT_RADIUS_GUIDE_FAR_MAX, t)
 
 
+func permute_guide_point_distances_for_vertex_reorder(ord: PackedInt32Array) -> void:
+	var n: int = ord.size()
+	if n == 0 or _guide_point_distances.size() != n:
+		return
+	var newd: Array[float] = []
+	newd.resize(n)
+	for i in range(n):
+		newd[i] = _guide_point_distances[ord[i]]
+	for i in range(n):
+		_guide_point_distances[i] = newd[i]
+
+
 func _refresh_guide_point_distance_bounds() -> void:
 	_guide_dist_have_bounds = false
 	_guide_point_distances.clear()
@@ -1448,8 +1465,27 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 	var n: int = _game.point_positions.size()
 	if n == 0:
 		return
-	for i in range(n):
-		_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
+	if _game.is_polygon_walk_order_active():
+		var ord: PackedInt32Array = _game.polygon_walk_order
+		if _game.stage_type == "two_circles":
+			var split: int = _game.group_split
+			var g2: int = n - split
+			for k in range(split):
+				var a: int = ord[k]
+				var b: int = ord[(k + 1) % split]
+				_game.draw_line(_game.point_positions[a], _game.point_positions[b], LINE_COLOR, LINE_WIDTH, true)
+			for t in range(g2):
+				var a2: int = ord[split + t]
+				var b2: int = ord[split + (t + 1) % g2]
+				_game.draw_line(_game.point_positions[a2], _game.point_positions[b2], LINE_COLOR, LINE_WIDTH, true)
+		else:
+			for k in range(n):
+				var a: int = ord[k]
+				var b: int = ord[(k + 1) % n]
+				_game.draw_line(_game.point_positions[a], _game.point_positions[b], LINE_COLOR, LINE_WIDTH, true)
+	else:
+		for i in range(n):
+			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		_game.draw_circle(pos, POINT_RADIUS, POINT_COLOR)
@@ -1506,9 +1542,22 @@ func _draw_game(vp: Vector2) -> void:
 		var color: Color
 		var radius: float
 		var r_guide: float = _point_radius_by_guide(i)
+		var d_outline: float = INF
+		if i < _guide_point_distances.size():
+			d_outline = _guide_point_distances[i]
+		var on_guide_outline: bool = (
+			not _game._is_locked(i)
+			and not is_inf(d_outline)
+			and d_outline <= InputHandler.GUIDE_ATTRACT_FREE_EDGE_DIST_PX
+		)
+		var skip_fill_circle: bool = false
 		if _game._is_locked(i):
 			color = Color(0.40, 0.33, 0.38, 0.5)
 			radius = r_guide
+		elif on_guide_outline:
+			var alpha_g: float = _game._point_accuracy_alpha(i)
+			_draw_guide_snapped_point_with_pink_halo(pos, r_guide, alpha_g)
+			skip_fill_circle = true
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
 			var alpha: float = _game._point_accuracy_alpha(i)
@@ -1520,7 +1569,8 @@ func _draw_game(vp: Vector2) -> void:
 			var base_c: Color = _stage_renderer.get_point_base_color(i)
 			color = Color(base_c.r, base_c.g, base_c.b, alpha)
 			radius = r_guide
-		_game.draw_circle(pos, radius, color)
+		if not skip_fill_circle:
+			_game.draw_circle(pos, radius, color)
 		if i == focus_idx and _game.input_handler.grab_input_active:
 			_draw_point_position_effect(pos, r_guide)
 
@@ -1549,8 +1599,6 @@ func _draw_game(vp: Vector2) -> void:
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
 		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
 		_stage_renderer.draw_hud_overlay_guide(hud_a)
-	if _game.game_state == "playing" and _game._debug_tools_enabled():
-		_draw_actual_snap_vertices()
 
 	if _game.game_state == "cleared":
 		_stage_renderer.draw_ideal_shape()
@@ -1710,13 +1758,32 @@ func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void
 	_game.draw_circle(center, r, SELECTED_POINT_WHITE)
 
 
-func _draw_actual_snap_vertices() -> void:
-	# デバッグ用: 目標ガイドの多角形頂点（ワールド座標）。強い吸着の別オブジェクトではない。
-	var snap_vertices: Array = _game.input_handler.get_debug_snap_vertices_world()
-	for point in snap_vertices:
-		var pos: Vector2 = point as Vector2
-		_game.draw_circle(pos, 5.5, Color(0.15, 0.85, 1.0, 0.92))
-		_game.draw_circle(pos, 2.4, Color(1.0, 1.0, 1.0, 0.95))
+## ガイド上の白丸: 外側へ薄くなるピンクのグラデーション + 縁取り
+func _draw_guide_snapped_point_with_pink_halo(center: Vector2, core_r: float, alpha_base: float) -> void:
+	if core_r < 0.5:
+		return
+	var pink_core := Color(1.0, 0.38, 0.62, 1.0)
+	const HALO_SEGMENTS := 56
+	const HALO_LAYERS := 14
+	const HALO_OUTER_PX := 22.0
+	# 外側ほど薄いリング（弧の重なりでぼかし）
+	for h in range(HALO_LAYERS):
+		var t: float = float(h) / float(maxi(HALO_LAYERS - 1, 1))
+		var rr: float = core_r + 2.5 + (HALO_OUTER_PX - 2.5) * t
+		var fall: float = (1.0 - t)
+		var a: float = fall * fall * 0.42 * alpha_base
+		var w: float = lerpf(2.2, 1.2, t)
+		_game.draw_arc(center, rr, 0.0, TAU, HALO_SEGMENTS, Color(pink_core.r, pink_core.g, pink_core.b, a), w)
+	_game.draw_circle(center, core_r, Color(1.0, 1.0, 1.0, alpha_base))
+	_game.draw_arc(
+		center,
+		core_r,
+		0.0,
+		TAU,
+		HALO_SEGMENTS,
+		Color(pink_core.r, pink_core.g, pink_core.b, 0.92 * alpha_base),
+		2.6
+	)
 
 
 func _effect_hover_base(base_r: float) -> float:
@@ -1945,8 +2012,9 @@ func _draw_guide_info(vp: Vector2) -> void:
 	# ステージ別見本サイズ調整（線幅は変更しない）
 	var guide_shape_scale: float = 1.0
 	match _game.stage_manager.current_stage:
-		1, 6: guide_shape_scale = 0.75  # STAGE2・STAGE7
-		7:    guide_shape_scale = 0.90  # STAGE8
+		1, 4: guide_shape_scale = 0.75  # 正方形・ねこ顔（旧 STAGE2 / STAGE7 相当）
+		5:    guide_shape_scale = 0.90  # マグカップ（旧 STAGE8）
+		6:    guide_shape_scale = 0.88  # 七芒星シルエット
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(
 			Vector2(play_cx, shape_cy),
@@ -2285,23 +2353,40 @@ func _draw_clear_fill() -> void:
 		# グループ1: 完成済みなら塗りつぶし
 		if _game.group1_cleared:
 			var poly1 := PackedVector2Array()
-			for i in range(_game.group_split):
-				poly1.append(positions[i])
+			if _game.is_polygon_walk_order_active():
+				var ord: PackedInt32Array = _game.polygon_walk_order
+				for k in range(_game.group_split):
+					poly1.append(positions[ord[k]])
+			else:
+				for i in range(_game.group_split):
+					poly1.append(positions[i])
 			if poly1.size() >= 3:
 				_game.draw_colored_polygon(poly1, fill_color)
 		# グループ2: 完成済みなら塗りつぶし
 		if _game.group2_cleared:
 			var poly2 := PackedVector2Array()
-			for i in range(_game.group_split, n):
-				poly2.append(positions[i])
+			if _game.is_polygon_walk_order_active():
+				var ord2: PackedInt32Array = _game.polygon_walk_order
+				var split: int = _game.group_split
+				var g2: int = n - split
+				for t in range(g2):
+					poly2.append(positions[ord2[split + t]])
+			else:
+				for i in range(_game.group_split, n):
+					poly2.append(positions[i])
 			if poly2.size() >= 3:
 				_game.draw_colored_polygon(poly2, fill_color)
 	else:
 		# 単一オブジェクト: clearedステートでのみ塗りつぶし
 		if _game.game_state == "cleared":
 			var poly := PackedVector2Array()
-			for i in range(n):
-				poly.append(positions[i])
+			if _game.is_polygon_walk_order_active():
+				var ord: PackedInt32Array = _game.polygon_walk_order
+				for k in range(n):
+					poly.append(positions[ord[k]])
+			else:
+				for i in range(n):
+					poly.append(positions[i])
 			_game.draw_colored_polygon(poly, fill_color)
 
 
@@ -2493,6 +2578,16 @@ func get_results_twitter_button_rect(vp: Vector2) -> Rect2:
 	return Rect2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5, icon_draw_size, icon_draw_size)
 
 
+func get_results_active_focus(vp: Vector2) -> int:
+	if get_results_camera_button_rect(vp).has_point(_result_mouse_pos):
+		return 0
+	if get_results_twitter_button_rect(vp).has_point(_result_mouse_pos):
+		return 1
+	if get_results_next_button_rect(vp).has_point(_result_mouse_pos):
+		return 2
+	return results_action_focus_index
+
+
 func _draw_results_title_justified(block_x: float, top_y: float, span_w: float, fs: int, color: Color, spacing_ratio: float = 1.0) -> void:
 	"""メイングリッド左端〜右端に RESULT_TITLE を字間均等で収める（カーニング込みの累進幅で字送り）"""
 	var font: Font = _game.font_din
@@ -2605,8 +2700,9 @@ func _draw_results(vp: Vector2) -> void:
 	var tw_cx: float = next_cx_new - ig_size - IG_GAP
 	var cam_cx: float = tw_cx - ig_size - IG_GAP
 	var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
-	_draw_result_camera_btn(Vector2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, a)
-	_draw_result_twitter_btn(Vector2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, a)
+	var res_act: int = get_results_active_focus(vp)
+	_draw_result_camera_btn(Vector2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, a, res_act == 0)
+	_draw_result_twitter_btn(Vector2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, a, res_act == 1)
 
 	# ═══ 左ダークカード（後に描画 → 右パネルより上レイヤー） ═══
 	var lp_rect := Rect2(lp_x, lp_y, lp_w, lp_h)
@@ -2742,12 +2838,12 @@ func _draw_results(vp: Vector2) -> void:
 	_game.draw_rect(lp_rect, Color(1.0, 1.0, 1.0, a), false, 5.0)
 
 	# ─── NEXTボタン（アイコングループ右端） ───
-	_draw_results_next_button(Vector2(next_cx_new, ig_cy), tr("RESULT_BTN_NEXT"), 35, a, NEXT_BTN_S)
+	_draw_results_next_button(Vector2(next_cx_new, ig_cy), tr("RESULT_BTN_NEXT"), 35, a, NEXT_BTN_S, res_act == 2)
 
 
-func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float) -> void:
+func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float, pad_focused: bool = false) -> void:
 	"""カメラアイコンボタン: ホバー中は result_icon01_on.png、通常は result_icon01_off.png"""
-	var hovered: bool = Rect2(pos, Vector2(size, size)).has_point(_result_mouse_pos)
+	var hovered: bool = Rect2(pos, Vector2(size, size)).has_point(_result_mouse_pos) or pad_focused
 	var tex: Texture2D = _game.result_icon01_on_texture if hovered else _game.result_icon01_off_texture
 	if tex:
 		_game.draw_texture_rect(tex, Rect2(pos, Vector2(size, size)), false, Color(1, 1, 1, alpha))
@@ -2756,9 +2852,9 @@ func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float) -> void:
 		_game.draw_rect(Rect2(pos, Vector2(size, size)), Color(0.26, 0.21, 0.28, alpha), false, 2.5)
 
 
-func _draw_result_twitter_btn(pos: Vector2, size: float, alpha: float) -> void:
+func _draw_result_twitter_btn(pos: Vector2, size: float, alpha: float, pad_focused: bool = false) -> void:
 	"""Twitterアイコンボタン: ホバー中は result_icon02_on.png、通常は result_icon02_off.png"""
-	var hovered: bool = Rect2(pos, Vector2(size, size)).has_point(_result_mouse_pos)
+	var hovered: bool = Rect2(pos, Vector2(size, size)).has_point(_result_mouse_pos) or pad_focused
 	var tex: Texture2D = _game.result_icon02_on_texture if hovered else _game.result_icon02_off_texture
 	if tex:
 		_game.draw_texture_rect(tex, Rect2(pos, Vector2(size, size)), false, Color(1, 1, 1, alpha))
@@ -2789,8 +2885,8 @@ func _results_rect_perimeter_point(r: Rect2, dist: float) -> Vector2:
 	return Vector2(x0, y0 + h - d)
 
 
-func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: float, side: float = 88.0) -> void:
-	"""Result 専用: 正方形・太枠・黒文字・枠上を移動する ●。ホバー時は白黒反転"""
+func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: float, side: float = 88.0, pad_focused: bool = false) -> void:
+	"""Result 専用: 正方形・太枠・枠上を移動する ●。ホバー／フォーカス時は RESULT 画面と同系の赤（c_red）とクリームの反転"""
 	var btn_w: float = side
 	var btn_h: float = side
 	var btn_id: String = text
@@ -2804,20 +2900,33 @@ func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: fl
 	if sc < 0.001 or alpha < 0.001:
 		return
 	var rect := Rect2(center.x - draw_w * 0.5, center.y - draw_h * 0.5, draw_w, draw_h)
-	var hovered: bool = rect.has_point(_result_mouse_pos)
-	var c_fill: Color  = Color(0.12, 0.12, 0.14, alpha) if hovered else Color(1.0, 0.99, 0.97, alpha)
-	var c_dark: Color  = Color(1.0, 0.99, 0.97, alpha)  if hovered else Color(0.12, 0.12, 0.14, alpha)
-	var c_text: Color  = Color(1.0, 1.0,  1.0,  alpha)  if hovered else Color(0.2,  0.2,  0.22, alpha)
+	var hovered: bool = rect.has_point(_result_mouse_pos) or pad_focused
+	# _draw_results のタイトル赤・グリッド文字色と揃える
+	var c_accent_red: Color = Color(0.9490, 0.1882, 0.3216, alpha)
+	var c_cream: Color = Color(1.0, 0.99, 0.97, alpha)
+	var c_muted_line: Color = Color(0.12, 0.12, 0.14, alpha)
+	var c_body_dark: Color = Color(0.2627, 0.2118, 0.2784, alpha)
+	var c_fill: Color
+	var c_outline: Color
+	var c_text: Color
+	if hovered:
+		c_fill = c_accent_red
+		c_outline = c_cream
+		c_text = c_cream
+	else:
+		c_fill = c_cream
+		c_outline = c_muted_line
+		c_text = c_body_dark
 	const LINE_W: float = 2.0 * 3.0
 	_game.draw_rect(rect, c_fill)
-	_game.draw_rect(rect, c_dark, false, LINE_W)
+	_game.draw_rect(rect, c_outline, false, LINE_W)
 	# 枠線は rect の辺を中心に描かれるため、● の中心も同じ周辺（rect の周長）上に乗せる
 	var per: float = 2.0 * rect.size.x + 2.0 * rect.size.y
 	var t_sec: float = Time.get_ticks_msec() / 1000.0
 	var dist: float = fmod(t_sec * 88.0, per)
 	var dot_center: Vector2 = _results_rect_perimeter_point(rect, dist)
 	var dot_r: float = LINE_W * 2.0
-	_game.draw_circle(dot_center, dot_r, c_dark)
+	_game.draw_circle(dot_center, dot_r, c_outline)
 	var ascent: float = _game.font_bold.get_ascent(fs)
 	var descent: float = _game.font_bold.get_descent(fs)
 	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5

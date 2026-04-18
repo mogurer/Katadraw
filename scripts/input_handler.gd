@@ -61,12 +61,22 @@ const PLAYER_REPEL_STRENGTH := 6400.0
 const PLAYER_ATTRACT_STRENGTH := 5600.0
 const PLAYER_CONTACT_FORCE := 9000.0
 const PLAYER_MIN_FORCE_DISTANCE := 8.0
+## X長押し引力: この距離以内で接近を減衰し、内側へ押し込み速度を制限
 const PLAYER_APPROACH_BRAKE_START_DISTANCE := 64.0
-const PLAYER_APPROACH_STOP_DISTANCE := 32.0
+## この距離でプレイヤー中心周りのリング上にクランプ（静止）
+const PLAYER_APPROACH_STOP_DISTANCE := 64.0
 const PLAYER_APPROACH_NEAR_DAMPING := 18.0
+## 辺が交差しているときの強制解消: 未ロック頂点をこの半径の円周に等間隔配置
+const PLAYER_CROSS_RESOLVE_RADIUS := 64.0
 const POINT_PAIR_REPULSE_DISTANCE := 64.0
 const POINT_PAIR_REPULSE_STRENGTH := 2600.0
 const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
+## 頂点と非隣接辺が近づいたときの斥力（線の交差を抑える）
+const POINT_EDGE_REPULSE_DISTANCE := 56.0
+const POINT_EDGE_REPULSE_STRENGTH := 3400.0
+const POINT_EDGE_REPULSE_MIN_DISTANCE := 3.0
+## 多角形の中心周り角順（CCW）を保ち、隣接インデックス間で cross<0 にならないよう補正（線の交差抑止）
+const POLYGON_CCW_ORDER_STRENGTH := 3200.0
 ## 画面端付近でクランプと斥力が打ち消し合うのを防ぐ（内向きの補助力）
 const PLAYFIELD_EDGE_RETURN_ZONE := 72.0
 const PLAYFIELD_EDGE_RETURN_STRENGTH := 1500.0
@@ -84,7 +94,7 @@ const PLAYER_FORCE_PROXIMITY_BOOST := 1.55
 const PLAYER_ACCEL := 3400.0
 const PLAYER_VEL_FRICTION := 9.0
 const PLAYER_SPEED_SOFT_CAP := 260.0
-const PLAYER_SPEED_HARD_CAP := 640.0
+const PLAYER_SPEED_HARD_CAP := 1280.0
 ## 現在速度が大きいほど上限を少し上げる（移動量に応じて最高速が上がる）
 const PLAYER_SPEED_CAP_VEL_BLEND := 0.42
 
@@ -93,9 +103,12 @@ const PLAYER_FORCE_CHARGE_STATIONARY_EPS := 14.0
 ## 静止中、A/X 長押しで影響半径を幾何級数的に拡張（移動中は成長停止し、既に拡がった分は維持）
 const EMPTY_FORCE_RADIUS_TICK_MS := 200
 const EMPTY_FORCE_RADIUS_TICK_CAP := 22
-## 引力＋ガイド上の頂点を 16px 以内で掴んだとき、ガイド拘束を無効化（edge_dist がこれ以下なら「ガイド上」）
-const GUIDE_ATTRACT_FREE_PROXIMITY_PX := 16.0
+## 自キャラ〜頂点がこの距離以内かつガイド上のとき、引力・斥力でガイド吸着を無視（edge_dist が EDGE 以下＝ガイド上）
+const GUIDE_ATTRACT_FREE_PROXIMITY_PX := 64.0
 const GUIDE_ATTRACT_FREE_EDGE_DIST_PX := 10.0
+## 自キャラが上記より遠く、かつガイド辺に乗っているときの引力・斥力: 法線を弱め接線を強めて剥がれにくく滑らせる
+const PLAYER_DISTANT_ON_GUIDE_NORMAL_SCALE := 0.28
+const PLAYER_DISTANT_ON_GUIDE_TANGENT_SCALE := 1.18
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -259,15 +272,11 @@ func _default_player_position() -> Vector2:
 		return _game.shape_center
 	var vp: Vector2 = _game.get_viewport_rect().size
 	var margin: float = PLAYER_RADIUS
-	if _game.game_state == "rules":
-		var c := Vector2.ZERO
-		for p in _game.point_positions:
-			c += p
-		c /= float(_game.point_positions.size())
-		return c.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
-	var spawn_offset_y: float = maxf(_game.guide_radius_val, 96.0) + PLAYER_FORCE_RADIUS + 24.0
-	var spawn_pos: Vector2 = _game.shape_center + Vector2(0.0, spawn_offset_y)
-	return spawn_pos.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
+	var c := Vector2.ZERO
+	for p in _game.point_positions:
+		c += p
+	c /= float(_game.point_positions.size())
+	return c.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
 
 
 func _refresh_hovered_point() -> void:
@@ -544,28 +553,12 @@ func get_connected_indices(idx: int) -> Array[int]:
 
 func _get_polygon_prev(idx: int) -> int:
 	"""Get previous index on the polygon loop."""
-	var n: int = _game.point_positions.size()
-	if _game.stage_manager.stage_type == "two_circles":
-		var split: int = _game.stage_manager.group_split
-		if idx < split:
-			return (idx - 1 + split) % split
-		else:
-			var g2: int = n - split
-			return split + (idx - split - 1 + g2) % g2
-	return (idx - 1 + n) % n
+	return _game.get_polygon_prev_vertex_index(idx)
 
 
 func _get_polygon_next(idx: int) -> int:
 	"""Get next index on the polygon loop."""
-	var n: int = _game.point_positions.size()
-	if _game.stage_manager.stage_type == "two_circles":
-		var split: int = _game.stage_manager.group_split
-		if idx < split:
-			return (idx + 1) % split
-		else:
-			var g2: int = n - split
-			return split + (idx - split + 1) % g2
-	return (idx + 1) % n
+	return _game.get_polygon_next_vertex_index(idx)
 
 
 func _apply_lr_grab_lock_after_shoulder_cycle() -> void:
@@ -1058,9 +1051,12 @@ func _step_drag_physics(delta: float) -> bool:
 			continue
 		var player_force: Vector2 = _compute_player_force(i)
 		if player_force.length_squared() > 0.0001:
+			player_force = _remap_player_force_when_distant_on_guide(i, nearest_features[i], player_force)
 			forces[i] += player_force
 			player_influenced_point_count += 1
 	_apply_point_pair_repulsion(forces)
+	_apply_point_edge_repulsion(forces)
+	_apply_polygon_ccw_order_constraint(forces)
 	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
 	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
@@ -1083,13 +1079,86 @@ func _step_drag_physics(delta: float) -> bool:
 		var post_features: Array = _compute_nearest_guide_features(guide_loops)
 		_apply_post_move_guide_constraints(post_features, vertex_locks)
 
+	var topology_changed: bool = false
+	if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
+		_game.rebuild_polygon_walk_order_centroid_angular()
+		topology_changed = true
+		if _game.is_polygon_walk_order_active():
+			var ord_perm: PackedInt32Array = _game.polygon_walk_order.duplicate()
+			_game.apply_vertex_permutation_reorder_positions_from_walk_order()
+			_permute_input_state_after_vertex_reorder(ord_perm)
+		# 円ステージは実現度が頂点位置のみで決まるため、プレイヤー周りへの強制配置で図形が崩れクリア不能になりやすい
+		if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
+			if _game.stage_type != "circle":
+				_resolve_polygon_edge_intersection_circle_around_player(lo, hi)
+
 	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
 
 	for i in range(_game.point_positions.size()):
 		if before[i].distance_squared_to(_game.point_positions[i]) > DRAG_POSITION_EPSILON * DRAG_POSITION_EPSILON:
 			return true
+	if topology_changed:
+		return true
 	return false
+
+
+## rebuild で得た walk 順を point_positions に焼いたあと、速度・選択・ガイド距離など index 連動状態を同じ置換で追従する
+func _permute_input_state_after_vertex_reorder(ord: PackedInt32Array) -> void:
+	var n: int = ord.size()
+	if n == 0:
+		return
+	var inv: PackedInt32Array = PackedInt32Array()
+	inv.resize(n)
+	for new_i in range(n):
+		inv[ord[new_i]] = new_i
+	_ensure_drag_state_arrays()
+	var new_vel: Array[Vector2] = []
+	new_vel.resize(n)
+	for i in range(n):
+		new_vel[i] = point_velocities[ord[i]]
+	for i in range(n):
+		point_velocities[i] = new_vel[i]
+	if point_stop_frames.size() == n:
+		var new_sf: Array[int] = []
+		new_sf.resize(n)
+		for i in range(n):
+			new_sf[i] = point_stop_frames[ord[i]]
+		for i in range(n):
+			point_stop_frames[i] = new_sf[i]
+	if drag_point_idx >= 0 and drag_point_idx < n:
+		drag_point_idx = inv[drag_point_idx]
+	if drag_angle_prev_idx >= 0 and drag_angle_prev_idx < n:
+		drag_angle_prev_idx = inv[drag_angle_prev_idx]
+	if drag_angle_next_idx >= 0 and drag_angle_next_idx < n:
+		drag_angle_next_idx = inv[drag_angle_next_idx]
+	if _game.hovered_index >= 0 and _game.hovered_index < n:
+		_game.hovered_index = inv[_game.hovered_index]
+	for si in range(_game.selected_indices.size()):
+		var oi: int = _game.selected_indices[si]
+		if oi >= 0 and oi < n:
+			_game.selected_indices[si] = inv[oi]
+	for bi in range(_right_stick_ray_bundle.size()):
+		var oi2: int = _right_stick_ray_bundle[bi]
+		if oi2 >= 0 and oi2 < n:
+			_right_stick_ray_bundle[bi] = inv[oi2]
+	if drag_start_positions.size() == n:
+		var new_ds: Array[Vector2] = []
+		new_ds.resize(n)
+		for i in range(n):
+			new_ds[i] = drag_start_positions[ord[i]]
+		drag_start_positions.clear()
+		for i in range(n):
+			drag_start_positions.append(new_ds[i])
+	if drag_influence_weights.size() == n:
+		var new_w: Array[float] = []
+		new_w.resize(n)
+		for i in range(n):
+			new_w[i] = drag_influence_weights[ord[i]]
+		drag_influence_weights.clear()
+		for i in range(n):
+			drag_influence_weights.append(new_w[i])
+	_game.ui_renderer.permute_guide_point_distances_for_vertex_reorder(ord)
 
 
 func _get_effective_player_force_limit() -> float:
@@ -1102,8 +1171,8 @@ func _get_effective_player_force_limit() -> float:
 	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS + bonus
 
 
-func _is_guide_attract_free_pull(point_idx: int, feature: Dictionary) -> bool:
-	if _get_player_force_mode() <= 0:
+func _is_guide_snap_bypassed_by_player_force(point_idx: int, feature: Dictionary) -> bool:
+	if _get_player_force_mode() == 0:
 		return false
 	if point_idx < 0 or point_idx >= _game.point_positions.size():
 		return false
@@ -1111,6 +1180,22 @@ func _is_guide_attract_free_pull(point_idx: int, feature: Dictionary) -> bool:
 		return false
 	var ed: float = feature.get("edge_dist", INF) as float
 	return ed <= GUIDE_ATTRACT_FREE_EDGE_DIST_PX
+
+
+func _remap_player_force_when_distant_on_guide(point_idx: int, feature: Dictionary, pf: Vector2) -> Vector2:
+	if pf.length_squared() < 0.0001:
+		return pf
+	if player_position.distance_to(_game.point_positions[point_idx]) <= GUIDE_ATTRACT_FREE_PROXIMITY_PX:
+		return pf
+	var edge_dist: float = feature.get("edge_dist", INF) as float
+	if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
+		return pf
+	var pos: Vector2 = _game.point_positions[point_idx]
+	var tangent: Vector2 = _feature_edge_tangent(feature)
+	var normal: Vector2 = _feature_edge_normal(feature, pos)
+	var fn: float = pf.dot(normal)
+	var ft: float = pf.dot(tangent)
+	return tangent * (ft * PLAYER_DISTANT_ON_GUIDE_TANGENT_SCALE) + normal * (fn * PLAYER_DISTANT_ON_GUIDE_NORMAL_SCALE)
 
 
 func _compute_player_force(point_idx: int) -> Vector2:
@@ -1222,6 +1307,224 @@ func _apply_point_pair_repulsion(forces: Array[Vector2]) -> void:
 			var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
 			forces[i] -= force
 			forces[j] += force
+
+
+func _get_polygon_edges_for_repulsion() -> Array[Vector2i]:
+	var edges: Array[Vector2i] = []
+	var n: int = _game.point_positions.size()
+	if n < 3:
+		return edges
+	if _game.is_polygon_walk_order_active():
+		var ord: PackedInt32Array = _game.polygon_walk_order
+		if _game.stage_manager.stage_type == "two_circles":
+			var split: int = _game.stage_manager.group_split
+			var g2: int = n - split
+			for k in range(split):
+				edges.append(Vector2i(ord[k], ord[(k + 1) % split]))
+			for t in range(g2):
+				edges.append(Vector2i(ord[split + t], ord[split + (t + 1) % g2]))
+		else:
+			for k in range(n):
+				edges.append(Vector2i(ord[k], ord[(k + 1) % n]))
+		return edges
+	if _game.stage_manager.stage_type == "two_circles":
+		var split: int = _game.stage_manager.group_split
+		for i in range(split):
+			edges.append(Vector2i(i, (i + 1) % split))
+		var g2: int = n - split
+		for i in range(g2):
+			var idx: int = split + i
+			edges.append(Vector2i(idx, split + (i + 1) % g2))
+	else:
+		for i in range(n):
+			edges.append(Vector2i(i, (i + 1) % n))
+	return edges
+
+
+func _polygon_edges_share_vertex(e1: Vector2i, e2: Vector2i) -> bool:
+	return e1.x == e2.x or e1.x == e2.y or e1.y == e2.x or e1.y == e2.y
+
+
+func _segment_intersect_strict_interior(a1: Vector2, a2: Vector2, b1: Vector2, b2: Vector2) -> bool:
+	var r: Vector2 = a2 - a1
+	var s: Vector2 = b2 - b1
+	var rxs: float = r.x * s.y - r.y * s.x
+	var qp: Vector2 = b1 - a1
+	if absf(rxs) < 1e-12:
+		return false
+	var t: float = (qp.x * s.y - qp.y * s.x) / rxs
+	var u: float = (qp.x * r.y - qp.y * r.x) / rxs
+	const eps: float = 1e-4
+	return t > eps and t < 1.0 - eps and u > eps and u < 1.0 - eps
+
+
+func _polygon_edges_have_interior_intersection() -> bool:
+	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
+	var n_edges: int = edges.size()
+	if n_edges < 4:
+		return false
+	for ii in range(n_edges):
+		var e1: Vector2i = edges[ii]
+		var p1: Vector2 = _game.point_positions[e1.x]
+		var p2: Vector2 = _game.point_positions[e1.y]
+		for jj in range(ii + 1, n_edges):
+			var e2: Vector2i = edges[jj]
+			if _polygon_edges_share_vertex(e1, e2):
+				continue
+			var p3: Vector2 = _game.point_positions[e2.x]
+			var p4: Vector2 = _game.point_positions[e2.y]
+			if _segment_intersect_strict_interior(p1, p2, p3, p4):
+				return true
+	return false
+
+
+func _has_any_unlocked_polygon_vertex() -> bool:
+	for i in range(_game.point_positions.size()):
+		if not _is_locked(i):
+			return true
+	return false
+
+
+func _resolve_polygon_edge_intersection_circle_around_player(lo: Vector2, hi: Vector2) -> void:
+	var n: int = _game.point_positions.size()
+	if n < 3:
+		return
+	var R: float = PLAYER_CROSS_RESOLVE_RADIUS
+	for i in range(n):
+		if _is_locked(i):
+			continue
+		var ang: float = TAU * float(i) / float(n)
+		var pos: Vector2 = player_position + Vector2(cos(ang), sin(ang)) * R
+		_game.point_positions[i] = pos.clamp(lo, hi)
+		point_velocities[i] = Vector2.ZERO
+
+
+func _apply_point_edge_repulsion(forces: Array[Vector2]) -> void:
+	var n: int = _game.point_positions.size()
+	if n < 3:
+		return
+	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
+	var thr: float = POINT_EDGE_REPULSE_DISTANCE
+	var thr_sq: float = thr * thr
+	for k in range(n):
+		if _is_locked(k):
+			continue
+		var p: Vector2 = _game.point_positions[k]
+		for e in edges:
+			var a: int = e.x
+			var b: int = e.y
+			if k == a or k == b:
+				continue
+			var pa: Vector2 = _game.point_positions[a]
+			var pb: Vector2 = _game.point_positions[b]
+			var ab: Vector2 = pb - pa
+			var ab_len_sq: float = ab.length_squared()
+			if ab_len_sq < 1e-10:
+				continue
+			var t: float = clampf((p - pa).dot(ab) / ab_len_sq, 0.0, 1.0)
+			var closest: Vector2 = pa + ab * t
+			var delta: Vector2 = p - closest
+			var dist_sq: float = delta.length_squared()
+			if dist_sq > thr_sq:
+				continue
+			var dist: float = maxf(sqrt(dist_sq), POINT_EDGE_REPULSE_MIN_DISTANCE)
+			var falloff: float = 1.0 - dist / thr
+			var dir: Vector2 = delta / dist
+			forces[k] += dir * (POINT_EDGE_REPULSE_STRENGTH * falloff * falloff)
+
+
+func _centroid_positions_range(start_idx: int, end_exclusive: int) -> Vector2:
+	var s := Vector2.ZERO
+	var c: int = 0
+	for i in range(start_idx, end_exclusive):
+		s += _game.point_positions[i]
+		c += 1
+	return s / float(maxi(c, 1))
+
+
+func _apply_polygon_ccw_order_constraint(forces: Array[Vector2]) -> void:
+	var n: int = _game.point_positions.size()
+	if n < 3:
+		return
+	if _game.is_polygon_walk_order_active():
+		if _game.stage_manager.stage_type == "two_circles":
+			var split: int = _game.stage_manager.group_split
+			var c1: Vector2 = _centroid_positions_range(0, split)
+			_apply_ccw_order_for_walk_segment(forces, 0, split, c1)
+			var c2: Vector2 = _centroid_positions_range(split, n)
+			_apply_ccw_order_for_walk_segment(forces, split, n - split, c2)
+		else:
+			var c: Vector2 = _centroid_positions_range(0, n)
+			_apply_ccw_order_for_walk_segment(forces, 0, n, c)
+		return
+	if _game.stage_manager.stage_type == "two_circles":
+		var split: int = _game.stage_manager.group_split
+		var c1: Vector2 = _centroid_positions_range(0, split)
+		_apply_ccw_order_for_loop(forces, 0, split, c1)
+		var c2: Vector2 = _centroid_positions_range(split, n)
+		_apply_ccw_order_for_loop(forces, split, n - split, c2)
+	else:
+		var c: Vector2 = _centroid_positions_range(0, n)
+		_apply_ccw_order_for_loop(forces, 0, n, c)
+
+
+func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count: int, center: Vector2) -> void:
+	if idx_count < 3:
+		return
+	for offset in range(idx_count):
+		var i: int = idx_start + offset
+		var nxt: int = idx_start + ((offset + 1) % idx_count)
+		if _is_locked(i) and _is_locked(nxt):
+			continue
+		var a: Vector2 = _game.point_positions[i] - center
+		var b: Vector2 = _game.point_positions[nxt] - center
+		var al: float = a.length()
+		var bl: float = b.length()
+		if al < 3.0 or bl < 3.0:
+			continue
+		var cr: float = a.x * b.y - a.y * b.x
+		if cr >= 0.0:
+			continue
+		var perp: Vector2 = Vector2(-a.y, a.x)
+		var pl: float = perp.length()
+		if pl < 1e-5:
+			continue
+		perp /= pl
+		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0)
+		if not _is_locked(nxt):
+			forces[nxt] += perp * mag
+		if not _is_locked(i):
+			forces[i] -= perp * mag * 0.42
+
+
+func _apply_ccw_order_for_walk_segment(forces: Array[Vector2], seg_start_in_order: int, seg_len: int, center: Vector2) -> void:
+	if seg_len < 3:
+		return
+	var order: PackedInt32Array = _game.polygon_walk_order
+	for t in range(seg_len):
+		var i: int = order[seg_start_in_order + t]
+		var nxt: int = order[seg_start_in_order + ((t + 1) % seg_len)]
+		if _is_locked(i) and _is_locked(nxt):
+			continue
+		var a: Vector2 = _game.point_positions[i] - center
+		var b: Vector2 = _game.point_positions[nxt] - center
+		var al: float = a.length()
+		var bl: float = b.length()
+		if al < 3.0 or bl < 3.0:
+			continue
+		var cr: float = a.x * b.y - a.y * b.x
+		if cr >= 0.0:
+			continue
+		var perp: Vector2 = Vector2(-a.y, a.x)
+		var pl: float = perp.length()
+		if pl < 1e-5:
+			continue
+		perp /= pl
+		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0)
+		if not _is_locked(nxt):
+			forces[nxt] += perp * mag
+		if not _is_locked(i):
+			forces[i] -= perp * mag * 0.42
 
 
 func _get_player_force_mode() -> int:
@@ -1458,16 +1761,18 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 		if _is_locked(i):
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
-		if _is_guide_attract_free_pull(i, feature):
+		if _is_guide_snap_bypassed_by_player_force(i, feature):
 			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		var vertex_dist: float = feature.get("vertex_dist", INF) as float
 		var edge_pass_through: bool = _is_edge_pass_through(feature, pos, point_velocities[i])
-		# ガイド付近 32px 以内ではプレイヤー引力・斥力で剥がしやすいよう拘束を弱める
+		# ガイド付近 32px 以内かつ自キャラが頂点に近いときだけ剥がしやすく弱める（遠距離からの力ではガイドを維持）
 		var peel_mul: float = 1.0
 		if pf_mode_peel != 0 and edge_dist < GUIDE_PEEL_DISTANCE_PX:
-			peel_mul = clampf(edge_dist / GUIDE_PEEL_DISTANCE_PX, GUIDE_PEEL_SNAP_FLOOR, 1.0)
+			var dist_player_pt: float = player_position.distance_to(pos)
+			if dist_player_pt <= GUIDE_ATTRACT_FREE_PROXIMITY_PX:
+				peel_mul = clampf(edge_dist / GUIDE_PEEL_DISTANCE_PX, GUIDE_PEEL_SNAP_FLOOR, 1.0)
 		if edge_dist < GUIDE_EDGE_SNAP_RADIUS and not edge_pass_through:
 			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
 			var edge_spring: float = GUIDE_EDGE_SPRING
@@ -1502,7 +1807,7 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		if _is_locked(i):
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
-		if _is_guide_attract_free_pull(i, feature):
+		if _is_guide_snap_bypassed_by_player_force(i, feature):
 			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
@@ -1516,8 +1821,10 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
 		var track_force: Vector2 = (edge_target - pos) * (GUIDE_EDGE_SLIDE_TRACK_SPRING * glide_t)
 		forces[i] = tangent_force + track_force
-		if _is_player_repelling_only():
+		if _get_player_force_mode() != 0:
 			var pf: Vector2 = _compute_player_force(i)
+			if player_position.distance_to(pos) > GUIDE_ATTRACT_FREE_PROXIMITY_PX:
+				pf = _remap_player_force_when_distant_on_guide(i, feature, pf)
 			var pl: float = pf.length()
 			if pl > 0.5:
 				var par: Vector2 = tangent * pf.dot(tangent)
@@ -1541,14 +1848,6 @@ func _build_fixed_guide_snap_loops() -> Array:
 		if points.size() >= 2:
 			filtered.append(points)
 	return filtered
-
-
-func get_debug_snap_vertices_world() -> Array:
-	var vertices: Array = []
-	for loop in _build_fixed_guide_snap_loops():
-		for point in loop:
-			vertices.append(point)
-	return vertices
 
 
 func _transform_fixed_guide_points(points: Array) -> Array:
@@ -1633,7 +1932,7 @@ func _apply_post_move_guide_constraints(nearest_features: Array, vertex_locks: D
 		if _is_locked(i):
 			continue
 		var feature: Dictionary = nearest_features[i] as Dictionary
-		if _is_guide_attract_free_pull(i, feature):
+		if _is_guide_snap_bypassed_by_player_force(i, feature):
 			continue
 		var pos: Vector2 = _game.point_positions[i]
 		if vertex_locks.has(i):
@@ -1688,7 +1987,6 @@ func _is_edge_pass_through(feature: Dictionary, pos: Vector2, velocity: Vector2)
 
 func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
 	# 旧: ガイド頂点へ GUIDE_VERTEX_LOCK_* で強固定していたが、角で「レール」が途切れるため無効化。
-	# 水色デバッグ点はガイド多角形の頂点位置の可視化であり、特別な吸着点ではない。
 	return {}
 
 
@@ -1733,6 +2031,15 @@ func _get_loop_bounds_for_index(idx: int) -> Vector2i:
 
 
 func _get_loop_perimeter(start_idx: int, end_idx: int) -> float:
+	if _game.is_polygon_walk_order_active():
+		var seg_len: int = end_idx - start_idx
+		var order: PackedInt32Array = _game.polygon_walk_order
+		var perimeter: float = 0.0
+		for s in range(seg_len):
+			var a: int = order[start_idx + s]
+			var b: int = order[start_idx + ((s + 1) % seg_len)]
+			perimeter += _game.point_positions[a].distance_to(_game.point_positions[b])
+		return perimeter
 	var perimeter: float = 0.0
 	for i in range(start_idx, end_idx):
 		var next_idx: int = i + 1
@@ -1765,6 +2072,18 @@ func _get_contour_distance(from_idx: int, to_idx: int, start_idx: int, end_idx: 
 
 
 func _advance_loop_index(idx: int, direction: int, start_idx: int, end_idx: int) -> int:
+	if _game.is_polygon_walk_order_active():
+		var seg_len: int = end_idx - start_idx
+		var order: PackedInt32Array = _game.polygon_walk_order
+		for s in range(seg_len):
+			if order[start_idx + s] != idx:
+				continue
+			var delta: int = 1 if direction >= 0 else -1
+			var ns: int = (s + delta) % seg_len
+			if ns < 0:
+				ns += seg_len
+			return order[start_idx + ns]
+		return idx
 	if direction >= 0:
 		var next_idx: int = idx + 1
 		return start_idx if next_idx >= end_idx else next_idx

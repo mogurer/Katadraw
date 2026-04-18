@@ -311,24 +311,11 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 		_keep_points_inside_playfield(point_positions, viewport_size)
 		return
 
-	var source_pts: Array = []
-	if ideal_points.size() == num_points:
-		source_pts = ideal_points
-	else:
-		var outline_src: Array = ideal_outline_points if not ideal_outline_points.is_empty() else ideal_points
-		source_pts = _resample_closed_polyline_points(outline_src, num_points)
-
-	var rot: float = _hud_outline_rotation_for_layout()
-	var cos_r: float = cos(rot)
-	var sin_r: float = sin(rot)
-	for i in range(source_pts.size()):
-		var ideal: Vector2 = source_pts[i] as Vector2
-		var rotated := Vector2(
-			ideal.x * cos_r - ideal.y * sin_r,
-			ideal.x * sin_r + ideal.y * cos_r
-		)
-		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
-		point_positions.append(hud_guide_center + (rotated + noise) * hud_guide_scale)
+	# 単一閉曲線ステージ: プレイ開始時は常に代表半径の円周上等間隔（理想ガイド上のランダム配置は使わない）
+	var n_pts: int = num_points
+	for i in range(n_pts):
+		var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
+		point_positions.append(hud_guide_center + Vector2(cos(ang), sin(ang)) * hud_guide_scale)
 
 	_keep_points_inside_playfield(point_positions, viewport_size)
 

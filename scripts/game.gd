@@ -35,6 +35,10 @@ var stage_type: String = "circle"
 var stage_effective_cfg: Dictionary = {}
 var shape_center: Vector2
 var point_positions: Array[Vector2] = []
+## プレイ中の KATA 辺の頂点訪問順。size==point_positions のとき有効。
+## 単一閉路: 辺は order[k]–order[(k+1)%n]。two_circles: order[0..split) がグループ1、order[split..n) がグループ2の各閉路。
+## 空のときは従来どおりインデックス 0→1→…→(n-1)→0（グループは group_split で分割）。
+var polygon_walk_order: PackedInt32Array = PackedInt32Array()
 var hovered_index: int = -1
 var game_state: String = "title"
 var start_time: float = 0.0
@@ -128,6 +132,138 @@ func get_display_reproduction_rate(current: float) -> float:
 func get_display_reproduction_rate_floor(current: float) -> float:
 	var raw: float = get_display_reproduction_rate(current)
 	return floor(raw * 10.0) / 10.0
+
+
+func clear_polygon_walk_order() -> void:
+	polygon_walk_order = PackedInt32Array()
+
+
+func is_polygon_walk_order_active() -> bool:
+	return polygon_walk_order.size() == point_positions.size() and point_positions.size() >= 3
+
+
+func _angular_sort_vertex_indices_by_centroid(start_inclusive: int, end_exclusive: int) -> PackedInt32Array:
+	var count: int = end_exclusive - start_inclusive
+	var out := PackedInt32Array()
+	if count < 1:
+		return out
+	var c := Vector2.ZERO
+	for i in range(start_inclusive, end_exclusive):
+		c += point_positions[i]
+	c /= float(count)
+	var items: Array[Dictionary] = []
+	for i in range(start_inclusive, end_exclusive):
+		var d: Vector2 = point_positions[i] - c
+		items.append({"idx": i, "ang": atan2(d.y, d.x)})
+	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var ad: float = a["ang"] as float
+		var bd: float = b["ang"] as float
+		if absf(ad - bd) < 1e-9:
+			return (a["idx"] as int) < (b["idx"] as int)
+		return ad < bd
+	)
+	out.resize(count)
+	for t in range(count):
+		out[t] = items[t]["idx"] as int
+	return out
+
+
+## 全頂点位置はそのまま、重心まわりの極角で閉路を再構成する（辺の交差解消の第一手段）。
+func rebuild_polygon_walk_order_centroid_angular() -> void:
+	var n: int = point_positions.size()
+	if n < 3:
+		clear_polygon_walk_order()
+		return
+	if stage_type == "two_circles":
+		var split: int = group_split
+		var g2: int = n - split
+		if split < 1 or g2 < 1:
+			clear_polygon_walk_order()
+			return
+		var o1: PackedInt32Array = _angular_sort_vertex_indices_by_centroid(0, split)
+		var o2: PackedInt32Array = _angular_sort_vertex_indices_by_centroid(split, n)
+		polygon_walk_order = PackedInt32Array()
+		polygon_walk_order.resize(n)
+		for i in range(split):
+			polygon_walk_order[i] = o1[i]
+		for j in range(g2):
+			polygon_walk_order[split + j] = o2[j]
+	else:
+		polygon_walk_order = _angular_sort_vertex_indices_by_centroid(0, n)
+
+
+## polygon_walk_order で定めた閉路順を、point_positions[0,1,…] の並びに焼き直す（座標はそのまま入れ替え）。その後 walk_order は空に戻す。
+func apply_vertex_permutation_reorder_positions_from_walk_order() -> void:
+	if not is_polygon_walk_order_active():
+		return
+	var n: int = point_positions.size()
+	var ord: PackedInt32Array = polygon_walk_order
+	var new_pts: Array[Vector2] = []
+	new_pts.resize(n)
+	for i in range(n):
+		new_pts[i] = point_positions[ord[i]]
+	for i in range(n):
+		point_positions[i] = new_pts[i]
+	clear_polygon_walk_order()
+
+
+func get_polygon_next_vertex_index(vert_idx: int) -> int:
+	var n: int = point_positions.size()
+	if n < 2:
+		return vert_idx
+	if is_polygon_walk_order_active():
+		if stage_type == "two_circles":
+			var split: int = group_split
+			if vert_idx < split:
+				for k in range(split):
+					if polygon_walk_order[k] == vert_idx:
+						return polygon_walk_order[(k + 1) % split]
+			else:
+				for k in range(split, n):
+					if polygon_walk_order[k] == vert_idx:
+						var g2: int = n - split
+						return polygon_walk_order[split + ((k - split + 1) % g2)]
+		else:
+			for k in range(n):
+				if polygon_walk_order[k] == vert_idx:
+					return polygon_walk_order[(k + 1) % n]
+	if stage_type == "two_circles":
+		var split: int = group_split
+		if vert_idx < split:
+			return (vert_idx + 1) % split
+		var g2: int = n - split
+		return split + (vert_idx - split + 1) % g2
+	return (vert_idx + 1) % n
+
+
+func get_polygon_prev_vertex_index(vert_idx: int) -> int:
+	var n: int = point_positions.size()
+	if n < 2:
+		return vert_idx
+	if is_polygon_walk_order_active():
+		if stage_type == "two_circles":
+			var split: int = group_split
+			if vert_idx < split:
+				for k in range(split):
+					if polygon_walk_order[k] == vert_idx:
+						return polygon_walk_order[(k - 1 + split) % split]
+			else:
+				var g2: int = n - split
+				for k in range(split, n):
+					if polygon_walk_order[k] == vert_idx:
+						return polygon_walk_order[split + ((k - split - 1 + g2) % g2)]
+		else:
+			for k in range(n):
+				if polygon_walk_order[k] == vert_idx:
+					return polygon_walk_order[(k - 1 + n) % n]
+	if stage_type == "two_circles":
+		var split: int = group_split
+		if vert_idx < split:
+			return (vert_idx - 1 + split) % split
+		var g2: int = n - split
+		return split + (vert_idx - split - 1 + g2) % g2
+	return (vert_idx - 1 + n) % n
+
 
 # --- Menu / Config ---
 var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
@@ -864,6 +1000,7 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	if reset_move_track:
 		stage_move_count = 0
 		_reset_stage_move_track_internal()
+	clear_polygon_walk_order()
 	input_handler.reset_for_stage()
 	ui_renderer.clear_spore_particles()
 	hint_alpha = 0.0
@@ -1207,6 +1344,12 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 					queue_redraw()
 		"config":
 			_process_config_stick_navigation(delta)
+		"results":
+			var hx: int = _ui_menu_stick_horizontal_step(delta, _ui_stick_lx)
+			if hx != 0:
+				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + hx + 3) % 3
+				_cursor_register_pad_activity()
+				queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
@@ -1293,30 +1436,54 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "results":
+		var vp_res: Vector2 = get_viewport_rect().size
 		if event is InputEventMouseMotion:
 			ui_renderer.update_result_mouse_pos(event.position)
 			queue_redraw()
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_LEFT:
+				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index - 1 + 3) % 3
+				queue_redraw()
+				return
+			if event.keycode == KEY_RIGHT:
+				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + 1) % 3
+				queue_redraw()
+				return
 		var is_start_pad: bool = (
 			event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START
 		)
+		# マウスで明示クリックしたボタンを優先
+		if is_confirm_click:
+			if _hit_results_camera_button(event.position):
+				_take_screenshot()
+				queue_redraw()
+				return
+			if _hit_results_twitter_button(event.position):
+				_open_twitter_post()
+				queue_redraw()
+				return
+			if _hit_results_button(event.position):
+				ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
+					_stop_bgm(bgm_result)
+					_return_to_title_or_stage_debug_from_test()
+					queue_redraw()
+				)
+				queue_redraw()
+				return
+		# キーボード／パッド決定: フォーカス（マウスホバーがあればそちら優先）に従う
 		if is_confirm_key or is_confirm_pad or is_start_pad:
-			ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
-				_stop_bgm(bgm_result)
-				_return_to_title_or_stage_debug_from_test()
-				queue_redraw()
-			)
+			var act: int = ui_renderer.get_results_active_focus(vp_res)
+			if act == 0:
+				_take_screenshot()
+			elif act == 1:
+				_open_twitter_post()
+			else:
+				ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
+					_stop_bgm(bgm_result)
+					_return_to_title_or_stage_debug_from_test()
+					queue_redraw()
+				)
 			queue_redraw()
-		elif is_confirm_click and _hit_results_button(event.position):
-			ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
-				_stop_bgm(bgm_result)
-				_return_to_title_or_stage_debug_from_test()
-				queue_redraw()
-			)
-			queue_redraw()
-		elif is_confirm_click and _hit_results_camera_button(event.position):
-			_take_screenshot()
-		elif is_confirm_click and _hit_results_twitter_button(event.position):
-			_open_twitter_post()
 		return
 
 	if game_state == "cleared":
