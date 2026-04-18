@@ -111,14 +111,14 @@ const GUIDE_PEEL_SNAP_FLOOR := 0.06
 ## 自キャラ中心に近いほど引力・斥力を強める（端での倍率 1、重なりに近いほど上乗せ）
 const PLAYER_FORCE_PROXIMITY_BOOST := 1.55
 
-const PLAYER_ACCEL := 5120.0
+const PLAYER_ACCEL := 2560.0
 const PLAYER_VEL_FRICTION := 9.0
 const PLAYER_SPEED_SOFT_CAP := 500.0
 const PLAYER_SPEED_HARD_CAP := 5120.0
 ## 現在速度が大きいほど上限を少し上げる（移動量に応じて最高速が上がる）
 const PLAYER_SPEED_CAP_VEL_BLEND := 0.42
 ## 左スティック／十字の連続移動: 入力を維持している間、加速度が滑らかに立ち上がる（この時間で頭打ち）
-const PLAYER_MOVE_RAMP_TIME_MS := 720.0
+const PLAYER_MOVE_RAMP_TIME_MS := 960.0
 ## 立ち上がり終端での PLAYER_ACCEL 倍率（先頭は 1.0）
 const PLAYER_MOVE_RAMP_ACCEL_MAX_MUL := 1.82
 
