@@ -1,0 +1,19 @@
+{
+	"schema_version": 1,
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "",
+		"stage_name": "星（10点）"
+	},
+	"config": {
+		"type": "star_10",
+		"shape_type": "star",
+		"num_points": 10,
+		"min_radius": 128.0,
+		"max_radius": 420.0,
+		"vertex_range": [3, 5],
+		"variance": 0.55,
+		"zigzag": 0.35,
+		"clear_pct": 99.5
+	}
+}

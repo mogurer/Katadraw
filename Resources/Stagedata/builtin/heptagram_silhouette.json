@@ -1,17 +1,21 @@
 {
 	"config": {
-		"clear_pct": 98.5,
+		"clear_pct": 99.0,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
-		"max_radius": 400.0,
-		"min_radius": 200.0,
+		"max_radius": 420.0,
+		"min_radius": 128.0,
 		"num_points": 14,
-		"shape_type": "fish",
-		"type": "heptagramsil_j",
-		"variance": 0.15
+		"shape_type": "heptagram_silhouette",
+		"type": "heptagram_silhouette",
+		"variance": 0.1875
 	},
 	"kind": "katadraw_custom_stage",
-	"schema_version": 1.0,
+	"meta": {
+		"description": "",
+		"stage_name": "七芒星シルエット"
+	},
+	"schema_version": 1,
 	"shape": {
 		"polygon_vertices": [
 			[

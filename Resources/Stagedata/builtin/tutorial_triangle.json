@@ -1,0 +1,19 @@
+{
+	"schema_version": 1,
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "",
+		"stage_name": "チュートリアル（三角形）"
+	},
+	"config": {
+		"type": "tutorial_triangle",
+		"shape_type": "triangle",
+		"num_points": 3,
+		"min_radius": 162.0,
+		"max_radius": 234.0,
+		"vertex_range": [3, 3],
+		"variance": 0.2,
+		"zigzag": 0.08,
+		"clear_pct": 99.0
+	}
+}

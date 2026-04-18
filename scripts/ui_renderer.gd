@@ -1600,6 +1600,9 @@ func _draw_game(vp: Vector2) -> void:
 		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
 		_stage_renderer.draw_hud_overlay_guide(hud_a)
 
+	# A+X 斥力の可視化: HUD 見本より手前に描く（下に隠れないように）
+	_draw_ax_spacing_repulsion_debug()
+
 	if _game.game_state == "cleared":
 		_stage_renderer.draw_ideal_shape()
 
@@ -1718,6 +1721,37 @@ func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r
 			eb = Color(1.0, 0.65, 0.72, 0.45)
 		var cseg: Color = Color(eb.r, eb.g, eb.b, eb.a * pulse)
 		_game.draw_arc(center, field_r, a0, a1, 3, cseg, 2.5)
+
+
+## A+X（またはマウス左右同時）長押し: 頂点同士の斥力（距離・長押しで変化）をシアン系の線で表示
+func _draw_ax_spacing_repulsion_debug() -> void:
+	if _game.game_state != "playing":
+		return
+	var ih: InputHandler = _game.input_handler
+	if not ih.is_ax_spacing_mode_active():
+		return
+	var segs: Array = ih.get_ax_spacing_repulsion_debug_segments()
+	var ref_mag: float = (
+		InputHandler.AX_SPACING_REPULSE_STRENGTH * InputHandler.AX_SPACING_MAX_STRENGTH_MUL
+	)
+	for item in segs:
+		var d: Dictionary = item as Dictionary
+		var a: Vector2 = d["from"] as Vector2
+		var b: Vector2 = d["to"] as Vector2
+		var mag: float = float(d.get("magnitude", 0.0))
+		var t: float = clampf(mag / maxf(ref_mag, 1.0), 0.0, 1.0)
+		var col := Color(0.15, 0.98, 0.92, 0.55 + 0.40 * t)
+		var w: float = lerpf(2.6, 6.5, t)
+		_game.draw_line(a, b, col, w, true)
+	# 斥力ゼロのときでも「どの辺を見ているか」が分かるよう、輪郭の辺をうっすら表示
+	if segs.is_empty() and ih.get_ax_spacing_hold_ms() > 0.5:
+		var edges: Array = ih.get_polygon_loop_edge_endpoints_world()
+		var dim := Color(0.55, 0.62, 0.68, 0.22)
+		for ed in edges:
+			var e: Dictionary = ed as Dictionary
+			var p0: Vector2 = e["from"] as Vector2
+			var p1: Vector2 = e["to"] as Vector2
+			_game.draw_line(p0, p1, dim, 1.25, true)
 
 
 func _draw_player_avatar() -> void:

@@ -1,0 +1,18 @@
+{
+	"schema_version": 1,
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "",
+		"stage_name": "ねこの顔（18点）"
+	},
+	"config": {
+		"type": "cat_face_18",
+		"shape_type": "cat_face",
+		"num_points": 18,
+		"min_radius": 160.0,
+		"max_radius": 280.0,
+		"variance": 0.15,
+		"display_rate_min_pct": 80.0,
+		"clear_pct": 99.0
+	}
+}

@@ -1,0 +1,19 @@
+{
+	"schema_version": 1,
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "",
+		"stage_name": "円（14点）"
+	},
+	"config": {
+		"type": "circle_14",
+		"shape_type": "circle",
+		"num_points": 24,
+		"min_radius": 195.0,
+		"max_radius": 360.0,
+		"vertex_range": [4, 6],
+		"variance": 0.45,
+		"zigzag": 0.22,
+		"clear_pct": 99.0
+	}
+}

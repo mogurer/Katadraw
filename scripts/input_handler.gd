@@ -71,6 +71,14 @@ const PLAYER_CROSS_RESOLVE_RADIUS := 64.0
 const POINT_PAIR_REPULSE_DISTANCE := 64.0
 const POINT_PAIR_REPULSE_STRENGTH := 2600.0
 const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
+## A+X 同時長押し: 頂点同士を押し広げて周上の等間隔に近づける追加斥力（長押しで増幅、上限あり）
+## 長押しは最大 3 秒で頭打ち。最大強さは旧実装（飽和時）比 2 倍。
+const AX_SPACING_HOLD_CAP_MS := 3000.0
+## この距離より遠い頂点同士には A+X 追加斥力は乗らない（大きい輪郭でも隣同士に効くよう余裕を持たせる）
+const AX_SPACING_REPULSE_DISTANCE := 400.0
+const AX_SPACING_REPULSE_STRENGTH := 5200.0
+const AX_SPACING_REPULSE_MIN_DISTANCE := 2.0
+const AX_SPACING_MAX_STRENGTH_MUL := 2.0
 ## 頂点と非隣接辺が近づいたときの斥力（線の交差を抑える）
 const POINT_EDGE_REPULSE_DISTANCE := 56.0
 const POINT_EDGE_REPULSE_STRENGTH := 3400.0
@@ -180,6 +188,9 @@ var _empty_repulse_stationary_ms: float = 0.0
 var _empty_attract_stationary_ms: float = 0.0
 var _empty_repulse_radius_bonus: float = 0.0
 var _empty_attract_radius_bonus: float = 0.0
+## A+X（またはマウス左右同時）長押しで等間隔用斥力を有効にしているフレーム
+var _ax_spacing_active: bool = false
+var _ax_spacing_hold_ms: float = 0.0
 
 # --- game reference ---
 var _game: Node2D
@@ -201,7 +212,7 @@ func is_bb_dragging() -> bool:
 func is_pad_grabbing_modifier_now() -> bool:
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		return false
-	return player_force_attracting or player_force_repelling or player_force_active
+	return player_force_attracting or player_force_repelling or player_force_active or _ax_spacing_active
 
 
 func update_grab_state_for_mouse() -> void:
@@ -259,6 +270,8 @@ func reset_for_stage() -> void:
 	_empty_attract_stationary_ms = 0.0
 	_empty_repulse_radius_bonus = 0.0
 	_empty_attract_radius_bonus = 0.0
+	_ax_spacing_active = false
+	_ax_spacing_hold_ms = 0.0
 	_reset_player_position()
 
 
@@ -866,6 +879,8 @@ func process_pad(delta: float) -> void:
 		grab_input_active = false
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
+		_ax_spacing_active = false
+		_ax_spacing_hold_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
 		player_has_motion_input = false
@@ -874,6 +889,8 @@ func process_pad(delta: float) -> void:
 		grab_input_active = false
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
+		_ax_spacing_active = false
+		_ax_spacing_hold_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
 		player_has_motion_input = false
@@ -882,6 +899,8 @@ func process_pad(delta: float) -> void:
 		grab_input_active = false
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
+		_ax_spacing_active = false
+		_ax_spacing_hold_ms = 0.0
 		return
 	if not player_position_initialized:
 		_reset_player_position()
@@ -901,35 +920,56 @@ func process_pad(delta: float) -> void:
 	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_RIGHT):
 		dpad.x += 1.0
 
-	if Input.is_joy_button_pressed(0, JOY_BUTTON_B):
+	var pad_a: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
+	var pad_x: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_X)
+	var pad_b: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_B)
+	var mouse_left: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var mouse_right: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	_ax_spacing_active = false
+
+	if pad_b:
 		player_force_repelling = false
 		player_force_attracting = false
 	elif (
 		_game.game_state == "rules"
 		and _game.get_rules_next_button_rect().has_point(player_position)
-		and Input.is_joy_button_pressed(0, JOY_BUTTON_A)
+		and pad_a
 	):
 		# [つぎへ] 上では A は遷移用 — 斥力にしない
 		player_force_repelling = false
 		player_force_attracting = false
+	elif (
+		_game.game_state == "playing"
+		and not pad_b
+		and ((pad_a and pad_x) or (mouse_left and mouse_right))
+	):
+		# A+X 同時（またはマウス左右同時）: 自キャラ引力・斥力はオフにし、頂点間斥力のみ
+		_ax_spacing_active = true
+		player_force_repelling = false
+		player_force_attracting = false
 	else:
-		player_force_repelling = Input.is_joy_button_pressed(0, JOY_BUTTON_A)
-		player_force_attracting = Input.is_joy_button_pressed(0, JOY_BUTTON_X)
+		player_force_repelling = pad_a
+		player_force_attracting = pad_x
+		# マウス左右は毎フレームここでも維持する。上の代入は「パッドの A/X が押されていない」とき 0 になり、
+		# handle_mouse_press だけでは次の _process で力が消える（コントローラ操作後にマウスが効かない原因）。
+		if mouse_left and not mouse_right:
+			player_force_repelling = true
+			player_force_attracting = false
+		elif mouse_right and not mouse_left:
+			player_force_attracting = true
+			player_force_repelling = false
 
-	# マウス左右は毎フレームここでも維持する。上の代入は「パッドの A/X が押されていない」とき 0 になり、
-	# handle_mouse_press だけでは次の _process で力が消える（コントローラ操作後にマウスが効かない原因）。
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		player_force_repelling = true
-		player_force_attracting = false
-	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-		player_force_attracting = true
+	if pad_b:
 		player_force_repelling = false
-
-	if Input.is_joy_button_pressed(0, JOY_BUTTON_B):
-		player_force_repelling = false
 		player_force_attracting = false
+		_ax_spacing_active = false
 
-	mouse_force_pressed = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	if _ax_spacing_active:
+		_ax_spacing_hold_ms = minf(_ax_spacing_hold_ms + delta * 1000.0, AX_SPACING_HOLD_CAP_MS)
+	else:
+		_ax_spacing_hold_ms = 0.0
+
+	mouse_force_pressed = mouse_left or mouse_right
 
 	# 静止中のみ影響半径が成長。移動中は成長停止し、既に拡がった分は維持。頂点との距離は不問。
 	_empty_repulse_radius_bonus = 0.0
@@ -999,7 +1039,7 @@ func process_pad(delta: float) -> void:
 		_last_input_method = "pad"
 		_game.queue_redraw()
 	_refresh_hovered_point()
-	grab_input_active = _get_player_force_mode() != 0 or player_force_active
+	grab_input_active = _get_player_force_mode() != 0 or player_force_active or _ax_spacing_active
 	_game.is_dragging = false
 
 
@@ -1011,7 +1051,12 @@ func update_drag_physics(delta: float) -> void:
 	_ensure_drag_state_arrays()
 	if not player_position_initialized:
 		_reset_player_position()
-	if not player_force_active and not _has_points_within_player_force() and not _has_active_point_velocity():
+	if (
+		not player_force_active
+		and not _has_points_within_player_force()
+		and not _has_active_point_velocity()
+		and not _ax_spacing_active
+	):
 		return
 
 	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
@@ -1055,13 +1100,15 @@ func _step_drag_physics(delta: float) -> bool:
 			forces[i] += player_force
 			player_influenced_point_count += 1
 	_apply_point_pair_repulsion(forces)
+	if _ax_spacing_active and _ax_spacing_hold_ms > 0.5:
+		_apply_ax_spacing_equal_spacing_repulsion(forces)
 	_apply_point_edge_repulsion(forces)
 	_apply_polygon_ccw_order_constraint(forces)
 	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
 	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 	player_force_active = player_influenced_point_count > 0
-	grab_input_active = player_force_active or _get_player_force_mode() != 0
+	grab_input_active = player_force_active or _get_player_force_mode() != 0 or _ax_spacing_active
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
 
@@ -1307,6 +1354,94 @@ func _apply_point_pair_repulsion(forces: Array[Vector2]) -> void:
 			var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
 			forces[i] -= force
 			forces[j] += force
+
+
+## ワールド座標の2頂点間。戻りは i→j 方向の斥力ベクトル（i に -v、j に +v を足す用）
+func _ax_spacing_pair_repulsion_force(pi: Vector2, pj: Vector2, strength_mul: float) -> Vector2:
+	var delta_v: Vector2 = pj - pi
+	var thr: float = AX_SPACING_REPULSE_DISTANCE
+	var dist_sq: float = delta_v.length_squared()
+	if dist_sq > thr * thr:
+		return Vector2.ZERO
+	var dist: float = maxf(sqrt(dist_sq), AX_SPACING_REPULSE_MIN_DISTANCE)
+	var falloff: float = 1.0 - dist / thr
+	var dir: Vector2 = delta_v / dist
+	return dir * (AX_SPACING_REPULSE_STRENGTH * strength_mul * falloff * falloff)
+
+
+func _ax_spacing_strength_mul_now() -> float:
+	var t_norm: float = clampf(_ax_spacing_hold_ms, 0.0, AX_SPACING_HOLD_CAP_MS) / maxf(AX_SPACING_HOLD_CAP_MS, 1.0)
+	var ramp: float = t_norm * t_norm
+	return ramp * AX_SPACING_MAX_STRENGTH_MUL
+
+
+func is_ax_spacing_mode_active() -> bool:
+	return _ax_spacing_active
+
+
+func get_ax_spacing_hold_ms() -> float:
+	return _ax_spacing_hold_ms
+
+
+## 多角形の辺（walk 順またはインデックス順）のワールド座標端点。可視化フォールバック用
+func get_polygon_loop_edge_endpoints_world() -> Array:
+	var out: Array = []
+	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
+	for e: Vector2i in edges:
+		var ia: int = e.x
+		var ib: int = e.y
+		if ia < 0 or ib < 0 or ia >= _game.point_positions.size() or ib >= _game.point_positions.size():
+			continue
+		out.append({"from": _game.point_positions[ia], "to": _game.point_positions[ib]})
+	return out
+
+
+func get_ax_spacing_repulsion_debug_segments() -> Array:
+	"""描画用: A+X 等間隔斥力が作用するペアごとに { from, to, magnitude }（ワールド座標）"""
+	var out: Array = []
+	if not _ax_spacing_active or _ax_spacing_hold_ms <= 0.5:
+		return out
+	var strength_mul: float = _ax_spacing_strength_mul_now()
+	if strength_mul < 0.001:
+		return out
+	var n_vert: int = _game.point_positions.size()
+	for i in range(n_vert):
+		if _is_locked(i):
+			continue
+		for j in range(i + 1, n_vert):
+			if _is_locked(j):
+				continue
+			var pi: Vector2 = _game.point_positions[i]
+			var pj: Vector2 = _game.point_positions[j]
+			var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, strength_mul)
+			var mag: float = fvec.length()
+			if mag < 0.05:
+				continue
+			out.append({"from": pi, "to": pj, "magnitude": mag})
+	return out
+
+
+func _apply_ax_spacing_equal_spacing_repulsion(forces: Array[Vector2]) -> void:
+	"""A+X 長押し: 既存の近距離斥力に加え、距離に応じた追加斥力（長押しで増幅）"""
+	var strength_mul: float = _ax_spacing_strength_mul_now()
+	if strength_mul < 0.001:
+		return
+	var n_vert: int = _game.point_positions.size()
+	for i in range(n_vert):
+		if _is_locked(i):
+			continue
+		for j in range(i + 1, n_vert):
+			if _is_locked(j):
+				continue
+			var fvec: Vector2 = _ax_spacing_pair_repulsion_force(
+				_game.point_positions[i],
+				_game.point_positions[j],
+				strength_mul
+			)
+			if fvec.length_squared() < 1e-12:
+				continue
+			forces[i] -= fvec
+			forces[j] += fvec
 
 
 func _get_polygon_edges_for_repulsion() -> Array[Vector2i]:
