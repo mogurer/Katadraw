@@ -90,6 +90,12 @@ var hud_guide_query_world: Array = []
 var hud_two_circle_r: float = 0.0
 var hud_two_circle_c1: Vector2 = Vector2.ZERO
 var hud_two_circle_c2: Vector2 = Vector2.ZERO
+## HUD ガイドの頂点平均などから求めたスポーン基準（自キャラ初期位置・単一閉曲線の KATA 初期円の中心）
+var hud_guide_spawn_centroid: Vector2 = Vector2.ZERO
+## 単一閉曲線: KATA を載せる初期円半径（ガイド輪郭から重心までの最大距離 × GameConfig.HUD_INITIAL_RING_SCALE_MUL など）
+var hud_guide_spawn_ring_radius: float = 1.0
+## two_circles: 各グループの円半径に hud_two_circle_r へ掛ける
+var hud_spawn_two_circle_r_mul: float = 1.0
 var _hud_layout_vp: Vector2 = Vector2(-1.0, -1.0)
 var _hud_layout_sc: Vector2 = Vector2.ZERO
 ## 画面フィット後の HUD ガイド半径に乗算（1=従来）。rules デモ等で目標円の見た目だけ縮小する。
@@ -134,12 +140,18 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 		hud_two_circle_c2 = Vector2(start_x + diameter + obj_gap, shape_center.y)
 		hud_guide_ref_px = maxf(rr, 1.0)
 		hud_guide_scale = rr
+		hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
+		hud_guide_spawn_centroid = (hud_two_circle_c1 + hud_two_circle_c2) * 0.5
+		hud_guide_spawn_ring_radius = hud_two_circle_r * hud_spawn_two_circle_r_mul
 		_apply_hud_correspondence_scale()
 		return
 
 	if ideal_outline_points.is_empty():
 		hud_guide_scale = guide_radius_val * hud_guide_layout_scale_mul
 		hud_guide_ref_px = maxf(hud_guide_scale, 1.0)
+		hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
+		hud_guide_spawn_centroid = shape_center
+		hud_guide_spawn_ring_radius = maxf(hud_guide_scale, 1.0) * GameConfig.HUD_INITIAL_RING_SCALE_MUL
 		_apply_hud_correspondence_scale()
 		return
 
@@ -172,6 +184,15 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	for q in hud_guide_outline_world:
 		hud_guide_ref_px = maxf(hud_guide_ref_px, q.distance_to(shape_center))
 	hud_guide_ref_px = maxf(hud_guide_ref_px, 1.0)
+	var acc_c := Vector2.ZERO
+	for q in hud_guide_outline_world:
+		acc_c += q as Vector2
+	hud_guide_spawn_centroid = acc_c / float(hud_guide_outline_world.size())
+	var max_from_c: float = 0.001
+	for q in hud_guide_outline_world:
+		max_from_c = maxf(max_from_c, hud_guide_spawn_centroid.distance_to(q as Vector2))
+	hud_guide_spawn_ring_radius = maxf(max_from_c * GameConfig.HUD_INITIAL_RING_SCALE_MUL, 12.0)
+	hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
 	_apply_hud_correspondence_scale()
 
 
@@ -299,23 +320,25 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 	if stage_type == "two_circles":
 		var sizes: Array = cfg.get("group_sizes", [num_points / 2, num_points - num_points / 2])
 		group_split = int(sizes[0])
+		var rr_spawn: float = hud_two_circle_r * hud_spawn_two_circle_r_mul
 		for i in range(group_split):
 			var ang1: float = TAU * float(i) / float(maxi(group_split, 1))
-			var noise1: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * hud_two_circle_r
-			point_positions.append(hud_two_circle_c1 + Vector2(cos(ang1), sin(ang1)) * hud_two_circle_r + noise1)
+			var noise1: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * rr_spawn
+			point_positions.append(hud_two_circle_c1 + Vector2(cos(ang1), sin(ang1)) * rr_spawn + noise1)
 		var g2_size: int = int(sizes[1]) if sizes.size() > 1 else maxi(num_points - group_split, 0)
 		for i in range(g2_size):
 			var ang2: float = TAU * float(i) / float(maxi(g2_size, 1))
-			var noise2: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * hud_two_circle_r
-			point_positions.append(hud_two_circle_c2 + Vector2(cos(ang2), sin(ang2)) * hud_two_circle_r + noise2)
+			var noise2: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * rr_spawn
+			point_positions.append(hud_two_circle_c2 + Vector2(cos(ang2), sin(ang2)) * rr_spawn + noise2)
 		_keep_points_inside_playfield(point_positions, viewport_size)
 		return
 
-	# 単一閉曲線ステージ: プレイ開始時は常に代表半径の円周上等間隔（理想ガイド上のランダム配置は使わない）
+	# 単一閉曲線ステージ: ガイド幾何重心を中心に、ガイドより大きめの円周上等間隔
 	var n_pts: int = num_points
+	var ring_r: float = maxf(hud_guide_spawn_ring_radius, 12.0)
 	for i in range(n_pts):
 		var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
-		point_positions.append(hud_guide_center + Vector2(cos(ang), sin(ang)) * hud_guide_scale)
+		point_positions.append(hud_guide_spawn_centroid + Vector2(cos(ang), sin(ang)) * ring_r)
 
 	_keep_points_inside_playfield(point_positions, viewport_size)
 
@@ -323,7 +346,7 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
 	var cfg: Dictionary = cfg_override
 	if cfg.is_empty():
-		var stages: Array = StageDebugOverrides.get_effective_stages()
+		var stages: Array = GameConfig.get_play_stage_rows()
 		if idx < 0 or idx >= stages.size():
 			push_error("StageManager: 無効なステージ index %d" % idx)
 			return
@@ -346,6 +369,9 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 
 	guide_radius_val = (min_radius + max_radius) / 2.0
 	guide_center_1 = shape_center
+	hud_guide_spawn_centroid = shape_center
+	hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
+	hud_guide_spawn_ring_radius = maxf(guide_radius_val * GameConfig.HUD_INITIAL_RING_SCALE_MUL, 12.0)
 
 	_cfg_shape_polygon.clear()
 	_cfg_shape_arc.clear()
@@ -396,8 +422,9 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 	ideal_display_radius = guide_radius_val
 	ideal_display_radius_2 = guide_radius_val
 	var skip_hud_initial_layout: bool = bool(cfg.get("skip_hud_initial_layout", false))
-	if not skip_hud_initial_layout:
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		recompute_hud_guide_layout(shape_center, viewport_size)
+	if not skip_hud_initial_layout:
 		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
 	calculate_metrics(point_positions)
 

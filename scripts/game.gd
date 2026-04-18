@@ -679,8 +679,11 @@ func _setup_game_cursor() -> void:
 
 const CURSOR_PAD_AXIS_HIDE_THRESHOLD := 0.22
 const CURSOR_IDLE_HIDE_SECONDS := 2.5
+## マウスを「操作した」とみなしてカーソルを出すまでの累積移動量（px）。微小な振動は相殺されにくくなる
+const CURSOR_MOUSE_REVEAL_MOVE_PX := 14.0
 var _cursor_last_mouse_activity_sec: float = -1_000_000.0
 var _cursor_pad_override_hidden: bool = false
+var _cursor_mouse_motion_accum: Vector2 = Vector2.ZERO
 
 
 func _cursor_event_should_hide_for_pad(event: InputEvent) -> bool:
@@ -694,10 +697,12 @@ func _cursor_event_should_hide_for_pad(event: InputEvent) -> bool:
 func _cursor_register_mouse_activity() -> void:
 	_cursor_pad_override_hidden = false
 	_cursor_last_mouse_activity_sec = Time.get_ticks_msec() / 1000.0
+	_cursor_mouse_motion_accum = Vector2.ZERO
 
 
 func _cursor_register_pad_activity() -> void:
 	_cursor_pad_override_hidden = true
+	_cursor_mouse_motion_accum = Vector2.ZERO
 
 
 func _apply_cursor_policy() -> void:
@@ -1012,7 +1017,8 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 
 func _start_stage(idx: int) -> void:
 	var vp: Vector2 = get_viewport_rect().size
-	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(idx)
+	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
+	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
 	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp))
 
 
@@ -1366,8 +1372,14 @@ func _input(event: InputEvent) -> void:
 	)
 	var is_confirm: bool = is_confirm_key or is_confirm_pad or is_confirm_click
 
-	if event is InputEventMouseMotion or event is InputEventMouseButton:
+	if event is InputEventMouseButton:
 		_cursor_register_mouse_activity()
+	elif event is InputEventMouseMotion:
+		var mm: InputEventMouseMotion = event as InputEventMouseMotion
+		_cursor_mouse_motion_accum += mm.relative
+		var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
+		if _cursor_mouse_motion_accum.length_squared() >= thr_sq:
+			_cursor_register_mouse_activity()
 	elif _cursor_event_should_hide_for_pad(event):
 		_cursor_register_pad_activity()
 
@@ -2241,7 +2253,8 @@ func _do_pause_retry() -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var cfg: Dictionary = stage_session.debug_test_restart_cfg
 	if cfg.is_empty():
-		cfg = StageDebugOverrides.build_config_for_index(current_stage)
+		var master_idx_r: int = GameConfig.resolve_play_stage_to_master_index(current_stage)
+		cfg = StageDebugOverrides.build_config_for_index(master_idx_r)
 	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(vp))
 
 
@@ -3800,7 +3813,7 @@ func _start_stage_debug_test() -> void:
 	input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
 
 
-## 現在選択行の pending をファイル／オーバーライドに書き出す（保存ボタンと同一ロジック）
+## 現在選択行: カスタム JSON の保存、または組み込み行のときはディスクへ書かない（Tab 遷移などの no-op 用）
 func _stage_debug_write_selected_row_to_disk(show_success_message: bool = true) -> void:
 	var idx: int = stage_debug_state.selected
 	if _stage_debug_is_custom_row(idx):
@@ -3819,15 +3832,7 @@ func _stage_debug_write_selected_row_to_disk(show_success_message: bool = true) 
 			else:
 				stage_debug_state.last_error = ""
 		return
-	var p: Dictionary = stage_debug_state.pending.get(idx, {})
-	var err2: String = StageDebugOverrides.save_stage_override(idx, p)
-	if err2 != "":
-		stage_debug_state.last_error = err2
-	else:
-		if show_success_message:
-			stage_debug_state.last_error = "保存しました: %s" % StageDebugOverrides.path_for_index(idx)
-		else:
-			stage_debug_state.last_error = ""
+	stage_debug_state.last_error = ""
 
 
 func _stage_debug_save_selected() -> void:
@@ -3858,18 +3863,16 @@ func _stage_debug_reset_selected_row() -> void:
 		queue_redraw()
 		return
 	stage_debug_state.pending.erase(idx)
-	StageDebugOverrides.delete_stage_override(idx)
 	_sync_stage_debug_field_buffers()
-	stage_debug_state.last_error = "ステージ %d をマスターに戻しました" % idx
+	stage_debug_state.last_error = "ステージ %d の未保存の編集を破棄しました（組み込み JSON は res:// を直接編集）" % idx
 	queue_redraw()
 
 
 func _stage_debug_reset_all_files() -> void:
 	stage_debug_state.pending.clear()
 	stage_debug_state.custom_pending.clear()
-	StageDebugOverrides.delete_all_overrides()
 	_sync_stage_debug_field_buffers()
-	stage_debug_state.last_error = "マスタのオーバーライドを削除し、カスタム行の未保存編集も破棄しました（user://custom_stages の JSON は削除していません）"
+	stage_debug_state.last_error = "一覧の未保存編集を破棄しました（組み込みは res:// の JSON、カスタムはファイル本体は変更していません）"
 	queue_redraw()
 
 

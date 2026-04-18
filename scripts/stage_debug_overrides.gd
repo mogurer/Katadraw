@@ -1,77 +1,19 @@
 # =============================================================================
-# StageDebugOverrides - user:// のステージ別 JSON オーバーライド
+# StageDebugOverrides - ステージ設定の検証とマスター行からのビルド
 # =============================================================================
-# マスターは Resources/stage_data.gd（merge_config 済み行）。外部ファイルは差分のみ。
+# マスターは StageData.get_stages()（builtin JSON をマージ済み）。セッション内の pending のみ差分適用。
+# user:// の恒久的オーバーライドは廃止（builtin と二重管理で混乱するため）。
 
 class_name StageDebugOverrides
 extends RefCounted
 
-const OVERRIDE_DIR := "user://debug_stage_overrides"
-const SCHEMA_VERSION := 1
-
-
-static func path_for_index(idx: int) -> String:
-	return "%s/stage_%d.json" % [OVERRIDE_DIR, idx]
-
-
-static func ensure_dir() -> void:
-	DirAccess.make_dir_recursive_absolute(OVERRIDE_DIR)
-
-
-static func load_stage_file(idx: int) -> Dictionary:
-	var p: String = path_for_index(idx)
-	if not FileAccess.file_exists(p):
-		return {}
-	var f: FileAccess = FileAccess.open(p, FileAccess.READ)
-	if f == null:
-		return {}
-	var text: String = f.get_as_text()
-	var parsed: Variant = JSON.parse_string(text)
-	if typeof(parsed) != TYPE_DICTIONARY:
-		return {}
-	return parsed
-
-
-static func overrides_from_file_payload(raw: Dictionary) -> Dictionary:
-	if raw.has("overrides") and raw["overrides"] is Dictionary:
-		return (raw["overrides"] as Dictionary).duplicate(true)
-	var o: Dictionary = {}
-	for k in raw:
-		if str(k) in ["schema_version", "stage_index"]:
-			continue
-		o[k] = raw[k]
-	return o
-
-
-static func fill_missing_from_type_defaults(cfg: Dictionary) -> Dictionary:
-	return StageConfig.build_effective_config(cfg)
-
-
-static func merge_with_master(master_row: Dictionary, file_raw: Dictionary) -> Dictionary:
-	var cfg: Dictionary = master_row.duplicate(true)
-	var ov: Dictionary = overrides_from_file_payload(file_raw)
-	for k in ov:
-		cfg[k] = ov[k]
-	return StageConfig.build_effective_config(cfg)
-
-
-static func get_effective_stages() -> Array:
-	var master: Array = StageData.get_stages()
-	var out: Array = []
-	for i in range(master.size()):
-		var file_raw: Dictionary = load_stage_file(i)
-		if file_raw.is_empty():
-			out.append((master[i] as Dictionary).duplicate(true))
-		else:
-			out.append(merge_with_master((master[i] as Dictionary).duplicate(true), file_raw))
-	return out
-
 
 static func build_config_for_index(idx: int, pending: Dictionary = {}) -> Dictionary:
-	var base: Dictionary = (StageData.get_stages()[idx] as Dictionary).duplicate(true)
-	var file_raw: Dictionary = load_stage_file(idx)
-	if not file_raw.is_empty():
-		base = merge_with_master(base, file_raw)
+	var master: Array = StageData.get_stages()
+	if idx < 0 or idx >= master.size():
+		push_error("StageDebugOverrides: 無効なステージ index %d" % idx)
+		return {}
+	var base: Dictionary = (master[idx] as Dictionary).duplicate(true)
 	for k in pending:
 		base[k] = pending[k]
 	return StageConfig.build_effective_config(base)
@@ -141,46 +83,6 @@ static func validate_effective_config(cfg: Dictionary) -> String:
 	return ""
 
 
-static func save_stage_override(idx: int, overrides: Dictionary) -> String:
-	if overrides.is_empty():
-		delete_stage_override(idx)
-		return ""
-	var err: String = validate_partial_with_master(idx, overrides)
-	if err != "":
-		return err
-	ensure_dir()
-	var payload: Dictionary = {
-		"schema_version": SCHEMA_VERSION,
-		"stage_index": idx,
-		"overrides": overrides.duplicate(true),
-	}
-	var p: String = path_for_index(idx)
-	var f: FileAccess = FileAccess.open(p, FileAccess.WRITE)
-	if f == null:
-		return "保存に失敗しました: %s" % p
-	f.store_string(JSON.stringify(payload))
-	return ""
-
-
 static func validate_partial_with_master(idx: int, overrides: Dictionary) -> String:
 	var merged: Dictionary = build_config_for_index(idx, overrides)
 	return validate_effective_config(merged)
-
-
-static func delete_stage_override(idx: int) -> void:
-	var p: String = path_for_index(idx)
-	if FileAccess.file_exists(p):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
-
-
-static func delete_all_overrides() -> void:
-	ensure_dir()
-	var da: DirAccess = DirAccess.open(OVERRIDE_DIR)
-	if da == null:
-		return
-	da.list_dir_begin()
-	var fn: String = da.get_next()
-	while fn != "":
-		if not da.current_is_dir() and fn.ends_with(".json"):
-			da.remove(fn)
-		fn = da.get_next()

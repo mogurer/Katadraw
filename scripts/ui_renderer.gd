@@ -748,7 +748,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 	var text_c: Color = Color(0.26, 0.21, 0.28)
 	var guide_w: float = minf(vp.x - 280.0, 560.0)
 	_game.draw_string(_game.font_bold, Vector2(24, 48), "STAGE DEBUG (F2)", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 36, accent)
-	_game.draw_string(_game.font, Vector2(24, 86), "ホイール: 慣性スクロール / バーで位置 | ESC: タイトル | [C]=custom | 左で選択 | 右で編集 | Tab/Enter", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.35, 0.28, 0.35))
+	_game.draw_string(_game.font, Vector2(24, 86), "ホイール: 慣性スクロール | ESC: タイトル | [C]=custom | 組み込みの恒久変更は res://…/builtin/*.json を編集（保存はカスタム行のみ）", HORIZONTAL_ALIGNMENT_LEFT, guide_w, 17, Color(0.35, 0.28, 0.35))
 	if _game.stage_debug_state.last_error != "":
 		_game.draw_string(_game.font, Vector2(24, 112), _game.stage_debug_state.last_error, HORIZONTAL_ALIGNMENT_LEFT, guide_w, 18, Color(0.95, 0.3, 0.2))
 	if _game._debug_tools_enabled():
@@ -822,7 +822,7 @@ func _draw_stage_debug(vp: Vector2) -> void:
 		var thumb_sb: Rect2 = _game._stage_debug_scrollbar_thumb_rect(vp)
 		_game.draw_rect(thumb_sb, Color(0.78, 0.75, 0.82))
 		_game.draw_rect(thumb_sb, Color(0.42, 0.36, 0.48), false, 1.0)
-	# ボタン（テスト・保存・図形編集・設定リセット・フォルダを開く | 右上 全リセット・戻る）
+	# ボタン（テスト・保存・… | 右上 全リセット・戻る）— 保存はカスタム行のみ有効、組み込み行は無反応
 	var rects: Array[Rect2] = _game._stage_debug_button_rects(vp)
 	var bl: Array[String] = ["テスト", "保存", "図形編集", "設定リセット", "フォルダを開く", "全リセット", "戻る"]
 	for bi in range(rects.size()):
@@ -1723,7 +1723,52 @@ func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r
 		_game.draw_arc(center, field_r, a0, a1, 3, cseg, 2.5)
 
 
-## A+X（またはマウス左右同時）長押し: 頂点同士の斥力（距離・長押しで変化）をシアン系の線で表示
+## 右スティックのデバッグ線／A+X 斥力可視化の共用: 2 点間の稲妻状放電
+func _draw_discharge_lightning_between(
+	p0: Vector2, p1: Vector2, alpha_mul: float = 1.0, jitter_scale: float = 1.0
+) -> void:
+	var delta: Vector2 = p1 - p0
+	var dist: float = delta.length()
+	if dist < 1.5:
+		return
+	var dir: Vector2 = delta / dist
+	var perpendicular: Vector2 = Vector2(-dir.y, dir.x)
+	var pink: Color = LASER_BLUE
+	var segs: int = clampi(int(dist / 42.0) + 7, 7, 18)
+	var points: Array[Vector2] = []
+	points.append(p0)
+	for i in range(1, segs):
+		var t: float = float(i) / float(segs)
+		var base_pos: Vector2 = p0.lerp(p1, t)
+		var jitter: float = randf_range(-14.0, 14.0) * jitter_scale * (1.2 - t * 0.4)
+		points.append(base_pos + perpendicular * jitter)
+	points.append(p1)
+	var last: int = points.size() - 1
+	for i in range(last):
+		var t_mid: float = (float(i) + 0.5) / float(last)
+		var fade: float = pow(1.0 - t_mid, 0.85) * alpha_mul
+		if fade < 0.02:
+			continue
+		var glow_color: Color = Color(pink.r, pink.g, pink.b, 0.25 * fade)
+		_game.draw_line(points[i], points[i + 1], glow_color, 6.0, true)
+		var bolt_color: Color = Color(pink.r, pink.g, pink.b, 0.95 * fade)
+		_game.draw_line(points[i], points[i + 1], bolt_color, 2.5, true)
+		var core_color: Color = Color(LASER_WHITE.r, LASER_WHITE.g, LASER_WHITE.b, 0.95 * fade)
+		_game.draw_line(points[i], points[i + 1], core_color, 1.0, true)
+	var n_branch: int = clampi(int(dist / 100.0) + 3, 2, 8)
+	for _j in range(n_branch):
+		var idx: int = randi_range(1, points.size() - 2)
+		var from_p: Vector2 = points[idx]
+		var branch_dir: Vector2 = (
+			perpendicular * randf_range(-0.8, 0.8) + dir * randf_range(-0.2, 0.3)
+		).normalized()
+		var branch_len: float = randf_range(18.0, 52.0) * jitter_scale
+		var to_p: Vector2 = from_p + branch_dir * branch_len
+		var branch_fade: float = pow(1.0 - float(idx) / float(last), 0.85) * alpha_mul
+		_game.draw_line(from_p, to_p, Color(pink.r, pink.g, pink.b, 0.55 * branch_fade), 1.5, true)
+
+
+## A+X（またはマウス左右同時）長押し: 頂点間斥力を右スティックと同系の放電で表示
 func _draw_ax_spacing_repulsion_debug() -> void:
 	if _game.game_state != "playing":
 		return
@@ -1740,18 +1785,16 @@ func _draw_ax_spacing_repulsion_debug() -> void:
 		var b: Vector2 = d["to"] as Vector2
 		var mag: float = float(d.get("magnitude", 0.0))
 		var t: float = clampf(mag / maxf(ref_mag, 1.0), 0.0, 1.0)
-		var col := Color(0.15, 0.98, 0.92, 0.55 + 0.40 * t)
-		var w: float = lerpf(2.6, 6.5, t)
-		_game.draw_line(a, b, col, w, true)
-	# 斥力ゼロのときでも「どの辺を見ているか」が分かるよう、輪郭の辺をうっすら表示
+		var alpha: float = lerpf(0.42, 1.0, t)
+		var jitter_s: float = lerpf(0.75, 1.15, t)
+		_draw_discharge_lightning_between(a, b, alpha, jitter_s)
 	if segs.is_empty() and ih.get_ax_spacing_hold_ms() > 0.5:
 		var edges: Array = ih.get_polygon_loop_edge_endpoints_world()
-		var dim := Color(0.55, 0.62, 0.68, 0.22)
 		for ed in edges:
 			var e: Dictionary = ed as Dictionary
-			var p0: Vector2 = e["from"] as Vector2
-			var p1: Vector2 = e["to"] as Vector2
-			_game.draw_line(p0, p1, dim, 1.25, true)
+			var ep0: Vector2 = e["from"] as Vector2
+			var ep1: Vector2 = e["to"] as Vector2
+			_draw_discharge_lightning_between(ep0, ep1, 0.28, 0.65)
 
 
 func _draw_player_avatar() -> void:
@@ -1921,46 +1964,7 @@ func _draw_right_stick_debug_line(vp: Vector2) -> void:
 	_draw_right_stick_shoulder_corridor_guide(vp)
 	var line_len: float = maxf(vp.x, vp.y) * 0.6
 	var end_pos: Vector2 = center + dir * line_len
-	var perpendicular: Vector2 = Vector2(-dir.y, dir.x)  # 法線（ジグザグ用）
-	var pink: Color = LASER_BLUE
-
-	# 稲妻の経路をランダムなジグザグで生成（毎フレームで形が変わり放電風に）
-	var segs: int = 14
-	var points: Array[Vector2] = []
-	points.append(center)
-	for i in range(1, segs):
-		var t: float = float(i) / float(segs)
-		var base_pos: Vector2 = center.lerp(end_pos, t)
-		# 法線方向にランダムオフセット（根元でやや大きめ）
-		var jitter: float = randf_range(-14.0, 14.0) * (1.2 - t * 0.4)
-		points.append(base_pos + perpendicular * jitter)
-	points.append(end_pos)
-
-	var last: int = points.size() - 1
-	for i in range(last):
-		var t_mid: float = (float(i) + 0.5) / float(last)
-		var fade: float = pow(1.0 - t_mid, 0.85)
-		if fade < 0.02:
-			continue
-		# 外側のグロー（太め・薄い）
-		var glow_color: Color = Color(pink.r, pink.g, pink.b, 0.25 * fade)
-		_game.draw_line(points[i], points[i + 1], glow_color, 6.0, true)
-		# メイン（アクセントピンク）
-		var bolt_color: Color = Color(pink.r, pink.g, pink.b, 0.95 * fade)
-		_game.draw_line(points[i], points[i + 1], bolt_color, 2.5, true)
-		# 中心の白い芯
-		var core_color: Color = Color(LASER_WHITE.r, LASER_WHITE.g, LASER_WHITE.b, 0.95 * fade)
-		_game.draw_line(points[i], points[i + 1], core_color, 1.0, true)
-
-	# 枝分かれスパーク（6本程度）
-	for _j in range(6):
-		var idx: int = randi_range(1, points.size() - 2)
-		var from_p: Vector2 = points[idx]
-		var branch_dir: Vector2 = (perpendicular * randf_range(-0.8, 0.8) + dir * randf_range(-0.2, 0.3)).normalized()
-		var branch_len: float = randf_range(18, 52)
-		var to_p: Vector2 = from_p + branch_dir * branch_len
-		var branch_fade: float = pow(1.0 - float(idx) / float(last), 0.85)
-		_game.draw_line(from_p, to_p, Color(pink.r, pink.g, pink.b, 0.55 * branch_fade), 1.5, true)
+	_draw_discharge_lightning_between(center, end_pos, 1.0, 1.0)
 
 
 func _draw_guide_info(vp: Vector2) -> void:
