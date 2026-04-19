@@ -81,18 +81,6 @@ const AX_SPACING_REPULSE_DISTANCE := 400.0
 const AX_SPACING_REPULSE_STRENGTH := 10240.0
 const AX_SPACING_REPULSE_MIN_DISTANCE := 2.0
 const AX_SPACING_MAX_STRENGTH_MUL := 2.0
-## A+X+L/R: 未ロック頂点を全体回転（ガイド上はレール方向へスライド）
-const AX_ROTATE_RIGID_RAD_PER_SEC := 1.25
-const AX_ROTATE_GUIDE_SPEED_PX_PER_SEC := 125.0
-## ガイド頂点／辺への距離がこれ以下なら「ガイド上」として接線移動（それ以外は重心周り剛体回転）
-const AX_ROTATE_GUIDE_ON_MAX_DIST_PX := 28.0
-## これ未満なら頂点コーナー扱いし、隣接2辺から接線を選ぶ（来辺から隣へ折れて進める）
-const AX_ROTATE_VERTEX_CORNER_PX := 19.0
-## A+X 回転中のペア斥力に掛ける倍率（硬い分離と併用）
-const AX_ROTATE_PAIR_REPULSE_MUL := 2.35
-## 回転中に中心間距離がこれ未満にならないよう位置を直接補正（POINT_RADIUS 考慮）
-const AX_ROTATE_SEP_EXTRA_PX := 5.0
-const AX_ROTATE_SEPARATION_ITERATIONS := 7
 ## 頂点と非隣接辺が近づいたときの斥力（線の交差を抑える）
 const POINT_EDGE_REPULSE_DISTANCE := 56.0
 const POINT_EDGE_REPULSE_STRENGTH := 3400.0
@@ -206,13 +194,15 @@ var _pad_move_ramp_ms: float = 0.0
 var _empty_repulse_stationary_ms: float = 0.0
 ## 引力ホールド中の静止累積（ms）
 var _empty_attract_stationary_ms: float = 0.0
+## X 引力を押し続けている時間（移動中も加算）。視覚エフェクトの波速にのみ使用。
+var _attract_visual_hold_ms: float = 0.0
+## A 斥力を押し続けている時間（移動中も加算）。視覚エフェクトの波速にのみ使用。
+var _repulse_visual_hold_ms: float = 0.0
 var _empty_repulse_radius_bonus: float = 0.0
 var _empty_attract_radius_bonus: float = 0.0
 ## A+X（またはマウス左右同時）長押しで等間隔用斥力を有効にしているフレーム
 var _ax_spacing_active: bool = false
 var _ax_spacing_hold_ms: float = 0.0
-## A+X+肩: -1=L（画面で反時計回り） / +1=R（時計回り）、0=なし
-var _ax_rotate_mode: int = 0
 
 # --- 空間グリッド用: 点-辺斥力の visited 世代管理 ---
 ## _apply_point_edge_repulsion 内での重複チェックを Dictionary 割り当てなしで行うための世代カウンタ
@@ -240,7 +230,7 @@ func is_bb_dragging() -> bool:
 func is_pad_grabbing_modifier_now() -> bool:
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		return false
-	return player_force_attracting or player_force_repelling or player_force_active or _ax_spacing_active or _ax_rotate_mode != 0
+	return player_force_attracting or player_force_repelling or player_force_active or _ax_spacing_active
 
 
 func update_grab_state_for_mouse() -> void:
@@ -300,7 +290,8 @@ func reset_for_stage() -> void:
 	_empty_attract_radius_bonus = 0.0
 	_ax_spacing_active = false
 	_ax_spacing_hold_ms = 0.0
-	_ax_rotate_mode = 0
+	_attract_visual_hold_ms = 0.0
+	_repulse_visual_hold_ms = 0.0
 	_pad_move_ramp_ms = 0.0
 	_reset_player_position()
 
@@ -915,7 +906,8 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
-		_ax_rotate_mode = 0
+		_attract_visual_hold_ms = 0.0
+		_repulse_visual_hold_ms = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
@@ -927,7 +919,8 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
-		_ax_rotate_mode = 0
+		_attract_visual_hold_ms = 0.0
+		_repulse_visual_hold_ms = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
@@ -939,7 +932,8 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
-		_ax_rotate_mode = 0
+		_attract_visual_hold_ms = 0.0
+		_repulse_visual_hold_ms = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if not player_position_initialized:
@@ -986,11 +980,7 @@ func process_pad(delta: float) -> void:
 		and ((pad_a and pad_x) or (mouse_left and mouse_right))
 	):
 		# A+X 同時（またはマウス左右同時）: 自キャラ引力・斥力はオフにし、頂点間斥力のみ
-		# A+X+肩: 全体回転モードのため等間隔斥力はオフ
-		if pad_a and pad_x and (pad_lb or pad_rb):
-			_ax_spacing_active = false
-		else:
-			_ax_spacing_active = true
+		_ax_spacing_active = true
 		player_force_repelling = false
 		player_force_attracting = false
 	else:
@@ -1014,13 +1004,6 @@ func process_pad(delta: float) -> void:
 		_ax_spacing_hold_ms = minf(_ax_spacing_hold_ms + delta * 1000.0, AX_SPACING_HOLD_CAP_MS)
 	else:
 		_ax_spacing_hold_ms = 0.0
-
-	_ax_rotate_mode = 0
-	if (not pad_b) and pad_a and pad_x:
-		if pad_lb and not pad_rb:
-			_ax_rotate_mode = -1
-		elif pad_rb and not pad_lb:
-			_ax_rotate_mode = 1
 
 	mouse_force_pressed = mouse_left or mouse_right
 
@@ -1056,6 +1039,16 @@ func process_pad(delta: float) -> void:
 	else:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
+
+	if in_play_ef and player_force_attracting:
+		_attract_visual_hold_ms = minf(_attract_visual_hold_ms + delta * 1000.0, 600000.0)
+	else:
+		_attract_visual_hold_ms = 0.0
+
+	if in_play_ef and player_force_repelling:
+		_repulse_visual_hold_ms = minf(_repulse_visual_hold_ms + delta * 1000.0, 600000.0)
+	else:
+		_repulse_visual_hold_ms = 0.0
 
 	var speed_mul: float = _get_player_speed_multiplier()
 	var moved: bool = false
@@ -1101,7 +1094,6 @@ func process_pad(delta: float) -> void:
 		_get_player_force_mode() != 0
 		or player_force_active
 		or _ax_spacing_active
-		or _ax_rotate_mode != 0
 	)
 	_game.is_dragging = false
 
@@ -1109,136 +1101,6 @@ func process_pad(delta: float) -> void:
 # =============================================================================
 # Drag Physics
 # =============================================================================
-
-func _ax_rotate_ref_for_orbit(vp: Vector2) -> Vector2:
-	var g: Vector2 = _game.guide_center_1
-	if g.length_squared() > 4.0:
-		return g
-	return vp * 0.5
-
-
-func _snap_position_to_guide_loop(pos: Vector2, loop: Array) -> Vector2:
-	var best: Vector2 = pos
-	var best_d2: float = INF
-	var n: int = loop.size()
-	if n < 2:
-		return pos
-	for i in range(n):
-		var a: Vector2 = loop[i] as Vector2
-		var b: Vector2 = loop[(i + 1) % n] as Vector2
-		var cp: Vector2 = _closest_point_on_segment(pos, a, b)
-		var d2: float = pos.distance_squared_to(cp)
-		if d2 < best_d2:
-			best_d2 = d2
-			best = cp
-	return best
-
-
-func _closest_loop_vertex_index(pos: Vector2, loop: Array) -> int:
-	var n: int = loop.size()
-	if n < 1:
-		return 0
-	var best_i: int = 0
-	var best_d2: float = INF
-	for i in range(n):
-		var d2: float = pos.distance_squared_to(loop[i] as Vector2)
-		if d2 < best_d2:
-			best_d2 = d2
-			best_i = i
-	return best_i
-
-
-## 頂点近傍では隣接2辺の4方向から desired に最も合う接線を選ぶ（頂点で止まらず隣辺へ）
-func _ax_rotate_pick_guide_move_direction(pos: Vector2, loop: Array, feat: Dictionary, desired: Vector2) -> Vector2:
-	var n: int = loop.size()
-	if n < 2:
-		return desired.normalized() if desired.length_squared() > 1e-10 else Vector2.RIGHT
-	var vdist: float = feat.get("vertex_dist", INF) as float
-	if vdist >= AX_ROTATE_VERTEX_CORNER_PX:
-		var t_edge: Vector2 = feat.get("edge_tangent", Vector2.RIGHT) as Vector2
-		if t_edge.length_squared() < 1e-10:
-			t_edge = Vector2.RIGHT
-		else:
-			t_edge = t_edge.normalized()
-		return t_edge if t_edge.dot(desired) >= (-t_edge).dot(desired) else -t_edge
-	var vk: int = int(feat.get("vertex_idx", -1))
-	if vk < 0 or vk >= n:
-		vk = _closest_loop_vertex_index(pos, loop)
-	var pkm: Vector2 = loop[(vk - 1 + n) % n] as Vector2
-	var pvk: Vector2 = loop[vk] as Vector2
-	var pkp: Vector2 = loop[(vk + 1) % n] as Vector2
-	var in_to: Vector2 = pvk - pkm
-	var out_fr: Vector2 = pkp - pvk
-	if in_to.length_squared() < 1e-10:
-		in_to = Vector2.RIGHT
-	else:
-		in_to = in_to.normalized()
-	if out_fr.length_squared() < 1e-10:
-		out_fr = Vector2.RIGHT
-	else:
-		out_fr = out_fr.normalized()
-	var candidates: Array[Vector2] = [out_fr, -out_fr, -in_to, in_to]
-	var best: Vector2 = candidates[0]
-	var best_dot: float = -INF
-	for c in candidates:
-		var ddot: float = c.dot(desired)
-		if ddot > best_dot:
-			best_dot = ddot
-			best = c
-	return best
-
-
-## ref 周りの「画面で時計回り」の接線方向（y 下向き座標: cross(r,v)>0 が CW）
-func _ax_rotate_orbit_screen_cw_tangent(ref: Vector2, pos: Vector2) -> Vector2:
-	var r: Vector2 = pos - ref
-	var t: Vector2 = Vector2(-r.y, r.x)
-	if t.length_squared() < 1e-10:
-		return Vector2.RIGHT
-	return t.normalized()
-
-
-func _apply_ax_rotate_kinematic_positions(
-	delta: float, guide_loops: Array, feats: Array, lo: Vector2, hi: Vector2
-) -> void:
-	var n_pts: int = _game.point_positions.size()
-	if n_pts == 0:
-		return
-	var vp: Vector2 = _game.get_viewport_rect().size
-	var ref_orbit: Vector2 = _ax_rotate_ref_for_orbit(vp)
-	var want_cw: bool = _ax_rotate_mode > 0
-	# ガイド外の剛体回転のみ向きを反転（R=時計回り: 正の角速度で Godot rotated と整合）
-	var dtheta_rigid: float = AX_ROTATE_RIGID_RAD_PER_SEC * delta * (1.0 if want_cw else -1.0)
-	var slide_mul: float = AX_ROTATE_GUIDE_SPEED_PX_PER_SEC * delta
-	for i in range(n_pts):
-		if _is_locked(i):
-			continue
-		var feat: Dictionary = feats[i] as Dictionary
-		var pos: Vector2 = _game.point_positions[i]
-		var vdist: float = feat.get("vertex_dist", INF) as float
-		var edist: float = feat.get("edge_dist", INF) as float
-		var on_guide: bool = false
-		if not guide_loops.is_empty():
-			on_guide = minf(vdist, edist) <= AX_ROTATE_GUIDE_ON_MAX_DIST_PX
-		if on_guide:
-			var ei: int = int(feat.get("edge_loop", -1))
-			var vi: int = int(feat.get("vertex_loop", -1))
-			var loop_idx: int = ei if ei >= 0 else vi
-			if loop_idx < 0 or loop_idx >= guide_loops.size():
-				var off_f: Vector2 = pos - ref_orbit
-				_game.point_positions[i] = (ref_orbit + off_f.rotated(dtheta_rigid)).clamp(lo, hi)
-				continue
-			var loop: Array = guide_loops[loop_idx] as Array
-			var desired: Vector2 = _ax_rotate_orbit_screen_cw_tangent(ref_orbit, pos)
-			if not want_cw:
-				desired = -desired
-			var t_move: Vector2 = _ax_rotate_pick_guide_move_direction(pos, loop, feat, desired)
-			var moved: Vector2 = pos + t_move * slide_mul
-			moved = _snap_position_to_guide_loop(moved, loop)
-			_game.point_positions[i] = moved.clamp(lo, hi)
-		else:
-			var off: Vector2 = pos - ref_orbit
-			_game.point_positions[i] = (ref_orbit + off.rotated(dtheta_rigid)).clamp(lo, hi)
-
 
 func _sync_point_indices_to_centroid_polygon_order() -> void:
 	_game.rebuild_polygon_walk_order_centroid_angular()
@@ -1258,7 +1120,6 @@ func update_drag_physics(delta: float) -> void:
 		and not _has_points_within_player_force()
 		and not _has_active_point_velocity()
 		and not _ax_spacing_active
-		and _ax_rotate_mode == 0
 	):
 		return
 
@@ -1284,18 +1145,10 @@ func _step_drag_physics(delta: float) -> bool:
 	var lo := Vector2(margin, margin)
 	var hi := Vector2(vp.x - margin, vp.y - margin)
 
-	if _ax_rotate_mode != 0:
-		_end_active_drag(true)
-		_sync_point_indices_to_centroid_polygon_order()
-
 	var before: Array[Vector2] = _game.point_positions.duplicate()
 
 	var guide_loops: Array = _build_fixed_guide_snap_loops()
 	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
-	if _ax_rotate_mode != 0:
-		_apply_ax_rotate_kinematic_positions(delta, guide_loops, nearest_features, lo, hi)
-		nearest_features = _compute_nearest_guide_features(guide_loops)
-		_enforce_point_pair_hard_separation(lo, hi)
 	var vertex_locks: Dictionary = _compute_vertex_locks(nearest_features)
 	var forces: Array[Vector2] = []
 	forces.resize(_game.point_positions.size())
@@ -1327,7 +1180,6 @@ func _step_drag_physics(delta: float) -> bool:
 		player_force_active
 		or _get_player_force_mode() != 0
 		or _ax_spacing_active
-		or _ax_rotate_mode != 0
 	)
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
@@ -1345,9 +1197,6 @@ func _step_drag_physics(delta: float) -> bool:
 	if not guide_loops.is_empty():
 		var post_features: Array = _compute_nearest_guide_features(guide_loops)
 		_apply_post_move_guide_constraints(post_features, vertex_locks)
-
-	if _ax_rotate_mode != 0:
-		_enforce_point_pair_hard_separation(lo, hi)
 
 	var topology_changed: bool = false
 	if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
@@ -1557,51 +1406,6 @@ func _force_radius_bonus_smooth(tr_float: float) -> float:
 	)
 
 
-func _ax_rotate_pair_repulse_scale() -> float:
-	return AX_ROTATE_PAIR_REPULSE_MUL if _ax_rotate_mode != 0 else 1.0
-
-
-func _ax_rotate_hard_min_center_distance() -> float:
-	var pr: float = _game.ui_renderer.POINT_RADIUS
-	return maxf(2.0 * pr + AX_ROTATE_SEP_EXTRA_PX, 12.0)
-
-
-## 回転中など、斥力だけでは詰まりきらない重なりを位置で解消（Jacobi 風に数回）
-func _enforce_point_pair_hard_separation(lo: Vector2, hi: Vector2) -> void:
-	var n: int = _game.point_positions.size()
-	if n < 2:
-		return
-	var min_d: float = _ax_rotate_hard_min_center_distance()
-	var min_d_sq: float = min_d * min_d
-	for _it in range(AX_ROTATE_SEPARATION_ITERATIONS):
-		var any_moved: bool = false
-		for i in range(n):
-			if _is_locked(i):
-				continue
-			for j in range(i + 1, n):
-				if _is_locked(j):
-					continue
-				var pi: Vector2 = _game.point_positions[i]
-				var pj: Vector2 = _game.point_positions[j]
-				var delta: Vector2 = pj - pi
-				var dist_sq: float = delta.length_squared()
-				if dist_sq >= min_d_sq:
-					continue
-				var dist: float = sqrt(dist_sq)
-				var dir: Vector2
-				if dist < 1e-6:
-					dir = Vector2.RIGHT.rotated(float(i * 73 + j * 47) * 0.719)
-				else:
-					dir = delta / dist
-				var overlap: float = min_d - dist
-				var half: float = overlap * 0.5
-				_game.point_positions[i] = (pi - dir * half).clamp(lo, hi)
-				_game.point_positions[j] = (pj + dir * half).clamp(lo, hi)
-				any_moved = true
-		if not any_moved:
-			break
-
-
 func _build_position_grid(cell_size: float) -> Dictionary:
 	"""現在の point_positions を cell_size のグリッドに登録して返す。
 	各セルは Vector2i キーに対して点インデックスの Array を持つ。
@@ -1620,7 +1424,6 @@ func _build_position_grid(cell_size: float) -> Dictionary:
 func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> void:
 	"""グリッドで近傍セル（3×3）のみ確認して点間斥力を適用。O(n²) → O(n)。"""
 	var n_vert: int = _game.point_positions.size()
-	var rs: float = _ax_rotate_pair_repulse_scale()
 	var thr: float = POINT_PAIR_REPULSE_DISTANCE
 	var threshold_sq: float = thr * thr
 	var inv: float = 1.0 / thr  # cell_size == thr なので 1セル分が閾値半径に対応
@@ -1647,7 +1450,7 @@ func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 					var dist: float = maxf(sqrt(dist_sq), POINT_PAIR_REPULSE_MIN_DISTANCE)
 					var falloff: float = 1.0 - dist / thr
 					var dir: Vector2 = delta / dist
-					var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * rs * falloff * falloff)
+					var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
 					forces[i] -= force
 					forces[j] += force
 
@@ -1673,10 +1476,6 @@ func _ax_spacing_strength_mul_now() -> float:
 
 func is_ax_spacing_mode_active() -> bool:
 	return _ax_spacing_active
-
-
-func is_ax_rotate_mode_active() -> bool:
-	return _ax_rotate_mode != 0
 
 
 func get_ax_spacing_hold_ms() -> float:
@@ -2602,6 +2401,19 @@ func get_player_position() -> Vector2:
 func get_effective_player_force_visual_radius() -> float:
 	"""薄い影響円用。静止チャージの幾何拡張を含む実効距離（中心〜ポイント側の限界）。"""
 	return _get_effective_player_force_limit()
+
+
+func get_base_player_force_visual_radius() -> float:
+	"""チャージ前の基準半径（PLAYER_FORCE_RADIUS + ポイント半径）。引力グラデの内側アンカー用。"""
+	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS
+
+
+func get_player_attract_visual_hold_ms() -> float:
+	return _attract_visual_hold_ms
+
+
+func get_player_repulse_visual_hold_ms() -> float:
+	return _repulse_visual_hold_ms
 
 
 func is_player_attracting() -> bool:

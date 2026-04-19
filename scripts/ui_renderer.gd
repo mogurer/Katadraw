@@ -94,6 +94,15 @@ const LASER_THICK_LAYERS: Array[Array] = [  # [幅, alpha] 外側→内側
 ]
 const LASER_WHITE_WIDTH := 1.5
 
+# X（引力）長押し: 円周→自キャラへ向かう吸い込み波の基準（秒間回数）。長押し秒に比例して加算され上限まで上がる
+const PLAYER_ATTRACT_INWARD_WAVE_HZ := 1.0
+const PLAYER_ATTRACT_INWARD_WAVE_HZ_PER_HOLD_SEC := 1.0
+const PLAYER_ATTRACT_INWARD_WAVE_HZ_MAX := 12.0
+# A（斥力）: 中心→外周へ広がる波。Hz 仕様は引力と対称
+const PLAYER_REPULSE_OUTWARD_WAVE_HZ := 1.0
+const PLAYER_REPULSE_OUTWARD_WAVE_HZ_PER_HOLD_SEC := 1.0
+const PLAYER_REPULSE_OUTWARD_WAVE_HZ_MAX := 12.0
+
 # --- Particle state ---
 var particles: Array[Dictionary] = []
 var particle_spawn_time: float = 0.0
@@ -1668,42 +1677,78 @@ func _draw_laser_effect() -> void:
 			_game.draw_line(p0, p1, white_c, LASER_WHITE_WIDTH, true)
 
 
+func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
+	"""X 長押し（引力）: 最外周の固定ラインは描かず、円弧が外→内へグラデーションしながら吸い込まれる波のみ。"""
+	var t_sec: float = Time.get_ticks_msec() * 0.001
+	var hold_sec: float = _game.input_handler.get_player_attract_visual_hold_ms() / 1000.0
+	var hz: float = mini(
+		PLAYER_ATTRACT_INWARD_WAVE_HZ + hold_sec * PLAYER_ATTRACT_INWARD_WAVE_HZ_PER_HOLD_SEC,
+		PLAYER_ATTRACT_INWARD_WAVE_HZ_MAX
+	)
+	var outer_rr: float = maxf(field_r - 1.5, inner_r + 6.0)
+	# 影響半径がチャージで伸びても、波の収束先は自キャラ周りに固定（中心が最も濃い見え方を維持）
+	var inner_limit: float = maxf(inner_r + 3.0, core_r * 1.75)
+	if inner_limit >= outer_rr - 2.0:
+		inner_limit = outer_rr * 0.28
+	# 位相をずらした複数リングで連続した吸い込みを表現
+	for wave_idx in range(4):
+		var p: float = fmod(t_sec * hz + float(wave_idx) * 0.25, 1.0)
+		var p_ease: float = p * p * (3.0 - 2.0 * p)
+		var rr: float = lerpf(outer_rr, inner_limit, p_ease)
+		var ring_alpha: float = pow(sin(p * PI), 1.15) * 0.42
+		# 外周（波頭）ほど濃く、中心へ近づくほど淡く（p: 0=外 → 1=内）
+		var t_in: float = p * p * (3.0 - 2.0 * p)
+		var c_outer_glow := Color(0.28, 0.62, 1.0, ring_alpha * 0.75)
+		var c_inner_glow := Color(0.92, 0.97, 1.0, ring_alpha * 0.06)
+		var c_outer_core := Color(0.22, 0.58, 1.0, ring_alpha * 0.98)
+		var c_inner_core := Color(0.88, 0.95, 1.0, ring_alpha * 0.05)
+		var c_soft: Color = c_outer_glow.lerp(c_inner_glow, t_in)
+		var c_bright: Color = c_outer_core.lerp(c_inner_core, t_in)
+		const W_SOFT := 13.6
+		const W_CORE := 5.4
+		_game.draw_arc(center, rr, 0.0, TAU, 80, c_soft, W_SOFT, true)
+		_game.draw_arc(center, rr, 0.0, TAU, 80, c_bright, W_CORE, true)
+
+
+func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
+	"""A 長押し（斥力）: 円弧が中心→外周へ広がり、最外周に近いほど色が濃くなる。"""
+	var t_sec: float = Time.get_ticks_msec() * 0.001
+	var hold_sec: float = _game.input_handler.get_player_repulse_visual_hold_ms() / 1000.0
+	var hz: float = mini(
+		PLAYER_REPULSE_OUTWARD_WAVE_HZ + hold_sec * PLAYER_REPULSE_OUTWARD_WAVE_HZ_PER_HOLD_SEC,
+		PLAYER_REPULSE_OUTWARD_WAVE_HZ_MAX
+	)
+	var outer_rr: float = maxf(field_r - 1.5, inner_r + 6.0)
+	var inner_limit: float = maxf(inner_r + 3.0, core_r * 1.75)
+	if inner_limit >= outer_rr - 2.0:
+		inner_limit = outer_rr * 0.28
+	for wave_idx in range(4):
+		var p: float = fmod(t_sec * hz + float(wave_idx) * 0.25, 1.0)
+		var p_ease: float = p * p * (3.0 - 2.0 * p)
+		var rr: float = lerpf(inner_limit, outer_rr, p_ease)
+		var ring_alpha: float = pow(sin(p * PI), 1.15) * 0.42
+		# p=0 で内側＝淡い、p→1 で外周ほど濃い
+		var t_edge: float = p * p * (3.0 - 2.0 * p)
+		var c_faint_glow := Color(1.0, 0.94, 0.96, ring_alpha * 0.06)
+		var c_strong_glow := Color(0.98, 0.32, 0.48, ring_alpha * 0.75)
+		var c_faint_core := Color(1.0, 0.82, 0.88, ring_alpha * 0.05)
+		var c_strong_core := Color(0.92, 0.18, 0.38, ring_alpha * 0.98)
+		var c_soft: Color = c_faint_glow.lerp(c_strong_glow, t_edge)
+		var c_bright: Color = c_faint_core.lerp(c_strong_core, t_edge)
+		const W_SOFT := 13.6
+		const W_CORE := 5.4
+		_game.draw_arc(center, rr, 0.0, TAU, 80, c_soft, W_SOFT, true)
+		_game.draw_arc(center, rr, 0.0, TAU, 80, c_bright, W_CORE, true)
+
+
 func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r: float, attracting: bool) -> void:
-	"""影響範囲：半径方向グラデーション＋周方向の明暗で引力／斥力の向きを示す。"""
-	var inner_r: float = maxf(core_r * 1.2, field_r * 0.2)
-	if inner_r >= field_r - 3.0:
-		inner_r = maxf(core_r * 1.08, field_r * 0.32)
-	var n_bands: int = 8
-	var band_w: float = maxf(1.15, (field_r - inner_r) / float(n_bands) * 0.95)
-	for k in range(n_bands):
-		var t_mid: float = (float(k) + 0.5) / float(n_bands)
-		var rr: float = lerpf(inner_r, field_r, t_mid)
-		var u: float = float(k) / float(max(n_bands - 1, 1))
-		var col: Color
-		if attracting:
-			var c_out := Color(0.52, 0.74, 1.0, 0.05)
-			var c_in := Color(0.28, 0.62, 1.0, 0.22)
-			col = c_out.lerp(c_in, u)
-		else:
-			var c_in2 := Color(0.72, 0.76, 0.86, 0.06)
-			var c_out2 := Color(1.0, 0.38, 0.52, 0.22)
-			col = c_in2.lerp(c_out2, u)
-		_game.draw_arc(center, rr, 0.0, TAU, 72, col, band_w)
-	var t_ms: float = Time.get_ticks_msec() * 0.0012
-	var nseg: int = 36
-	for s in range(nseg):
-		var a0: float = TAU * float(s) / float(nseg)
-		var a1: float = TAU * float(s + 1) / float(nseg)
-		var ang_mid: float = (a0 + a1) * 0.5
-		var swirl: float = 1.0 if attracting else -1.0
-		var pulse: float = 0.5 + 0.5 * sin(t_ms * 5.5 + ang_mid * 3.0 * swirl)
-		var eb: Color
-		if attracting:
-			eb = Color(0.75, 0.9, 1.0, 0.42)
-		else:
-			eb = Color(1.0, 0.65, 0.72, 0.45)
-		var cseg: Color = Color(eb.r, eb.g, eb.b, eb.a * pulse)
-		_game.draw_arc(center, field_r, a0, a1, 3, cseg, 2.5)
+	"""影響範囲：引力は内向き円波、斥力は外向き円波（最外周の固定ラインは描かない）。"""
+	var base_fr: float = _game.input_handler.get_base_player_force_visual_radius()
+	var inner_r: float = maxf(core_r * 1.2, base_fr * 0.2)
+	if attracting:
+		_draw_player_attract_inward_waves(center, inner_r, field_r, core_r)
+	else:
+		_draw_player_repulse_outward_waves(center, inner_r, field_r, core_r)
 
 
 ## 右スティックのデバッグ線／A+X 斥力可視化の共用: 2 点間の稲妻状放電
