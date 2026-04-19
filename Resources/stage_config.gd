@@ -30,6 +30,18 @@ const TYPE_DEFAULTS: Dictionary = {
 		"guide_follows_player_radius": 0,
 		"hud_guide_layout_scale_mul": 0.5,
 	},
+	"hexagon": {
+		"num_points": 6,
+		"min_radius": 180.0,
+		"max_radius": 260.0,
+		"vertex_range": [6, 6],
+		"variance": 0.20,
+		"zigzag": 0.08,
+		"clear_pct": 98.0,
+		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
+		"hud_guide_layout_scale_mul": 0.5,
+	},
 	"circle": {
 		"num_points": 12,
 		"min_radius": 200.0,

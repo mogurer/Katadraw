@@ -708,6 +708,11 @@ func _draw_stage_debug_type_icon(center: Vector2, r: float, type_str: String, c:
 		"square":
 			var s: float = r * 0.82
 			_game.draw_rect(Rect2(center.x - s, center.y - s, s * 2.0, s * 2.0), c, false, 2.0)
+		"hexagon":
+			for i in range(6):
+				var ah0: float = -PI * 0.5 + TAU * float(i) / 6.0
+				var ah1: float = -PI * 0.5 + TAU * float(i + 1) / 6.0
+				_game.draw_line(center + Vector2(cos(ah0), sin(ah0)) * r * 0.92, center + Vector2(cos(ah1), sin(ah1)) * r * 0.92, c, 2.0)
 		"circle":
 			_game.draw_arc(center, r, 0.0, TAU, nseg, c, 2.0)
 		"star":
@@ -2028,15 +2033,15 @@ func _draw_guide_info(vp: Vector2) -> void:
 	# ステージ別見本サイズ調整（線幅は変更しない）
 	var guide_shape_scale: float = 1.0
 	match _game.stage_type:
-		"square":
+		"square", "hexagon":
 			guide_shape_scale = 0.375  # 従来 index1 の 0.75 の半分
 		"cat_face":
 			guide_shape_scale = 0.75
 		_:
 			match _game.stage_manager.current_stage:
-				5:
-					guide_shape_scale = 0.90  # マグカップ
 				6:
+					guide_shape_scale = 0.90  # マグカップ
+				7:
 					guide_shape_scale = 0.88  # 七芒星シルエット
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(

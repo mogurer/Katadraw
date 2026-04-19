@@ -28,6 +28,8 @@ const HUD_SPAWN_SQUARE_CORNER_INWARD := 0.78
 ## HUD 初期配置（円）: 下半円ガイド上に並べる角度範囲（ラジアン）。画面+y 側（下）に偏る
 const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MIN := 0.12 * PI
 const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MAX := 0.88 * PI
+## HUD 正六角形: ガイド頂点（重心からの距離）に対する KATA 初期頂点の倍率（>1 でガイドより外側）
+const HUD_SPAWN_HEX_OUTWARD_MUL := 1.10
 
 # --- Stage state ---
 ## 本編進行 index。custom test / rules demo など main 以外は -1。
@@ -219,6 +221,15 @@ func _apply_hud_correspondence_scale() -> void:
 		ideal_display_radius = hud_guide_scale
 
 
+func _regular_hexagon_unit_vertices() -> Array:
+	"""正六角形の頂点（外接円半径1・中心原点・上向き頂点から時計回り）"""
+	var verts: Array = []
+	for k in range(6):
+		var a: float = -PI / 2.0 + TAU * float(k) / 6.0
+		verts.append(Vector2(cos(a), sin(a)))
+	return verts
+
+
 func _resample_closed_polyline_points(polyline: Array, n: int) -> Array:
 	if polyline.is_empty() or n <= 0:
 		return []
@@ -359,6 +370,32 @@ func _hud_square_corner_world_positions() -> Array[Vector2]:
 	return out
 
 
+## HUD 正六角形: 輪郭の 6 頂点（各辺先頭サンプル）を world 座標で取得（辺8サンプル×6＝48点）
+func _hud_hex_corner_world_positions() -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	var outline: Array = hud_guide_outline_world
+	if outline.size() < 48:
+		return out
+	for k in range(6):
+		out.append(outline[k * 8] as Vector2)
+	return out
+
+
+## 正六角形・6 点: ガイド頂点より重心方向へ HUD_SPAWN_HEX_OUTWARD_MUL だけ外側（同重心・やや大きい）
+func _rebuild_initial_points_hud_hex_ring_outward(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
+	var corners: Array[Vector2] = _hud_hex_corner_world_positions()
+	if corners.size() != 6:
+		return false
+	point_positions.clear()
+	var cent: Vector2 = hud_guide_spawn_centroid
+	var mul: float = HUD_SPAWN_HEX_OUTWARD_MUL
+	for i in range(6):
+		var cw: Vector2 = corners[i]
+		var radial: Vector2 = cw - cent
+		point_positions.append(cent + radial * mul)
+	return true
+
+
 ## 正方形・4 点: 各理想角に対応する位置を、角から重心へ HUD_SPAWN_SQUARE_CORNER_INWARD だけ内側に固定
 func _rebuild_initial_points_hud_square_attract_friendly(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
 	var corners: Array[Vector2] = _hud_square_corner_world_positions()
@@ -406,6 +443,12 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 	# 正方形: 4 角を理想対応に合わせ、角からわずかに内側（引力ですぐガイドへ）
 	if stage_type == "square" and num_points == 4:
 		if _rebuild_initial_points_hud_square_attract_friendly(point_positions, viewport_size):
+			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
+			return
+
+	# 正六角形: 6 頂点をガイドよりわずかに外側（同重心）
+	if stage_type == "hexagon" and num_points == 6:
+		if _rebuild_initial_points_hud_hex_ring_outward(point_positions, viewport_size):
 			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
 			return
 
@@ -478,6 +521,10 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		"square":
 			_generate_square_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_square_outline()
+			correspondence_scale = guide_radius_val
+		"hexagon":
+			_generate_hexagon_shape(shape_center, point_positions, cfg)
+			ideal_outline_points = _build_hexagon_outline()
 			correspondence_scale = guide_radius_val
 		"cat_face":
 			_generate_cat_face_shape(shape_center, point_positions, cfg)
@@ -629,6 +676,25 @@ func _generate_square_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 			2: v = Vector2(lerpf(1.0, -1.0, u), 1.0)   # 上辺
 			_: v = Vector2(-1.0, lerpf(1.0, -1.0, u))  # 左辺
 		var ideal: Vector2 = v * (1.0 / sqrt(2.0))
+		ideal_points.append(ideal)
+		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
+		pts.append(center + (ideal + noise) * base_r)
+
+
+func _generate_hexagon_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
+	"""正六角形: 周上に理想点を配置（外接円半径基準は square と同様）"""
+	var base_r: float = (min_radius + max_radius) / 2.0
+	var variance_factor: float = cfg.get("variance", 0.20)
+	var n: int = num_points
+	var verts: Array = _regular_hexagon_unit_vertices()
+	ideal_points.clear()
+	for i in range(n):
+		var t: float = float(i) / float(n)
+		var side: int = int(t * 6.0) % 6
+		var u: float = (t * 6.0) - floor(t * 6.0)
+		var p1: Vector2 = verts[side]
+		var p2: Vector2 = verts[(side + 1) % 6]
+		var ideal: Vector2 = p1.lerp(p2, u)
 		ideal_points.append(ideal)
 		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
 		pts.append(center + (ideal + noise) * base_r)
@@ -1139,6 +1205,18 @@ func _build_square_outline() -> Array:
 	return result
 
 
+func _build_hexagon_outline() -> Array:
+	"""正六角形の輪郭（外接円半径1・中心原点）。各辺 8 サンプルで計48点"""
+	var verts: Array = _regular_hexagon_unit_vertices()
+	var result: Array = []
+	for i in range(verts.size()):
+		var p1: Vector2 = verts[i]
+		var p2: Vector2 = verts[(i + 1) % verts.size()]
+		for k in range(8):
+			result.append(p1.lerp(p2, float(k) / 8.0))
+	return result
+
+
 func _get_outline_edges_for_stage(stage_t: String) -> Array:
 	"""辺・弧ごとの点列を返す。Editor由来の「ポイント間を辺または弧で結ぶ」定義。"""
 	match stage_t:
@@ -1148,6 +1226,8 @@ func _get_outline_edges_for_stage(stage_t: String) -> Array:
 			return _build_polygon_arc_edges(get_circle_polygon_vertices(), get_circle_arc_controls())
 		"square":
 			return _build_square_edges()
+		"hexagon":
+			return _build_hexagon_edges()
 		"cat_face":
 			var cv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _get_cat_face_polygon_vertices()
 			var cc: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
@@ -1238,6 +1318,20 @@ func _build_polygon_arc_edges(verts: Array, arc_ctrls: Dictionary) -> Array:
 		else:
 			edge_pts.append((p1 - c) / max_d)
 			edge_pts.append((p2 - c) / max_d)
+		result.append(edge_pts)
+	return result
+
+
+func _build_hexagon_edges() -> Array:
+	"""正六角形：6辺。各辺8サンプル"""
+	var verts: Array = _regular_hexagon_unit_vertices()
+	var result: Array = []
+	for i in range(verts.size()):
+		var p1: Vector2 = verts[i]
+		var p2: Vector2 = verts[(i + 1) % verts.size()]
+		var edge_pts: Array = []
+		for k in range(8):
+			edge_pts.append(p1.lerp(p2, float(k) / 8.0))
 		result.append(edge_pts)
 	return result
 
@@ -1531,7 +1625,7 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			_set_correspondence_scale_from_outline()
 			if stage_type == "triangle":
 				polygon_rotation = -PI / 2.0  # 頂点上向きでガイド表示
-		"square", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			_calculate_unified_arc_metrics(point_positions)
 
 
@@ -1726,7 +1820,7 @@ func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> floa
 	match stage_type:
 		"triangle", "circle":
 			ideal_dist = get_distance_to_hint_guide_outline(p)
-		"square", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			if idx >= 0 and idx < ideal_points.size():
 				var ideal_pos: Vector2 = _fixed_guide_target_position_from_ideal(guide_center_1, ideal_points[idx])
 				ideal_dist = p.distance_to(ideal_pos)
@@ -1792,7 +1886,7 @@ func get_fixed_guide_loops_world() -> Array:
 	match stage_type:
 		"triangle":
 			loops.append(_regular_polygon_loop_world(guide_center_1, guide_radius_val, 3, polygon_rotation))
-		"square":
+		"square", "hexagon":
 			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, ideal_points))
 		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
@@ -1875,7 +1969,7 @@ func is_clear() -> bool:
 	# 実現率100でクリア = current >= goal_pct (clear_pct)
 	var goal_pct: float = 100.0 - clear_threshold
 	match stage_type:
-		"triangle", "circle", "square", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette":
+		"triangle", "circle", "square", "hexagon", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette":
 			return current_circularity >= goal_pct
 	return false
 

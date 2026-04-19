@@ -1,0 +1,19 @@
+{
+	"schema_version": 1,
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "",
+		"stage_name": "正六角形"
+	},
+	"config": {
+		"type": "hexagon_6",
+		"shape_type": "hexagon",
+		"num_points": 6,
+		"min_radius": 180.0,
+		"max_radius": 260.0,
+		"vertex_range": [6, 6],
+		"variance": 0.2,
+		"zigzag": 0.08,
+		"clear_pct": 98.0
+	}
+}

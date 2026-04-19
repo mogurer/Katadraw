@@ -90,6 +90,7 @@ RESULT_TOTAL,TOTAL,TOTAL,TOTAL,TOTAL
 RESULT_BACK,クリックまたはキーでタイトルへ,Click or press key for title,点击或按键返回标题,點擊或按鍵返回標題
 GUIDE_TYPE_TRIANGLE,正三角形を作ろう,Make an equilateral triangle,画一个等边三角形,畫一個等邊三角形
 GUIDE_TYPE_SQUARE,正方形を作ろう,Make a square,画一个正方形,畫一個正方形
+GUIDE_TYPE_HEXAGON,正六角形を作ろう,Make a regular hexagon,画一个正六边形,畫一個正六邊形
 GUIDE_TYPE_CIRCLE,正円を作ろう,Make a circle,画一个正圆,畫一個正圓
 GUIDE_TYPE_TWO_CIRCLES,2つの正円を作ろう,Make two circles,画两个正圆,畫兩個正圓
 GUIDE_TYPE_STAR,☆の形を作ろう,Make a star shape,画一个星形,畫一個星形

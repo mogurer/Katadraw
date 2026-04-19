@@ -312,7 +312,7 @@ const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 var stage_debug_state: StageDebugState = StageDebugState.new()
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
-	"fish", "cat_face", "triangle", "square", "circle", "star",
+	"fish", "cat_face", "triangle", "square", "hexagon", "circle", "star",
 ]
 const STAGE_EDIT_TOP_BAR: float = 44.0
 const STAGE_EDIT_LEFT_RATIO: float = 0.66
