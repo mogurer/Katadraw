@@ -22,53 +22,21 @@ func draw_stage_lines() -> void:
 	var n: int = _game.point_positions.size()
 	if _game.is_polygon_walk_order_active():
 		var ord: PackedInt32Array = _game.polygon_walk_order
-		match _game.stage_type:
-			"two_circles":
-				var split: int = _game.group_split
-				var g2: int = n - split
-				for k in range(split):
-					var a: int = ord[k]
-					var b: int = ord[(k + 1) % split]
-					_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
-				for t in range(g2):
-					var a2: int = ord[split + t]
-					var b2: int = ord[split + (t + 1) % g2]
-					_game.draw_line(_game.point_positions[a2], _game.point_positions[b2], _renderer.LINE_COLOR_2, _renderer.LINE_WIDTH, true)
-			_:
-				for k in range(n):
-					var a: int = ord[k]
-					var b: int = ord[(k + 1) % n]
-					_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
+		for k in range(n):
+			var a: int = ord[k]
+			var b: int = ord[(k + 1) % n]
+			_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
 		return
 	match _game.stage_type:
 		"triangle", "square", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			for i in range(n):
 				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
-		"two_circles":
-			for i in range(_game.group_split):
-				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % _game.group_split], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
-			var g2_size: int = n - _game.group_split
-			for i in range(g2_size):
-				var idx: int = _game.group_split + i
-				var next_idx: int = _game.group_split + (i + 1) % g2_size
-				_game.draw_line(_game.point_positions[idx], _game.point_positions[next_idx], _renderer.LINE_COLOR_2, _renderer.LINE_WIDTH, true)
 		_:
 			for i in range(n):
 				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
 
 
-func draw_group_cleared_rings() -> void:
-	if _game.stage_type != "two_circles":
-		return
-	if _game.group1_cleared:
-		_draw_ring(_game.current_centroid, _game.ideal_display_radius, _game.IDEAL_CIRCLE_COLOR, 2.5)
-	if _game.group2_cleared:
-		_draw_ring(_game.current_centroid_2, _game.ideal_display_radius_2, _game.IDEAL_CIRCLE_COLOR, 2.5)
-
-
-func get_point_base_color(idx: int) -> Color:
-	if _game.stage_type == "two_circles" and idx >= _game.group_split:
-		return _renderer.POINT_COLOR_2
+func get_point_base_color(_idx: int) -> Color:
 	return _renderer.POINT_COLOR
 
 
@@ -86,9 +54,6 @@ func draw_ideal_shape() -> void:
 		"circle":
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			_draw_ideal_points_outline(_game.current_centroid, pts, _game.correspondence_scale, _game.correspondence_rotation, _game.IDEAL_CIRCLE_COLOR, 2.5)
-		"two_circles":
-			_draw_ring(_game.current_centroid, _game.ideal_display_radius, _game.IDEAL_CIRCLE_COLOR, 2.5)
-			_draw_ring(_game.current_centroid_2, _game.ideal_display_radius_2, _game.IDEAL_CIRCLE_COLOR, 2.5)
 		"star", "heptagram", "heptagram_silhouette":
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			_draw_ideal_points_outline(_game.current_centroid, pts, _game.correspondence_scale, _game.correspondence_rotation, _game.IDEAL_STAR_COLOR, 2.5)
@@ -102,13 +67,6 @@ func draw_guide_shape(alpha: float, width_scale: float = 1.0) -> void:
 	var width: float = 3.5 * width_scale
 	var loops: Array = _game.stage_manager.get_fixed_guide_loops_world()
 	match _game.stage_type:
-		"two_circles":
-			var col1 := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
-			if loops.size() > 0:
-				_draw_world_loop(loops[0] as Array, col1, width)
-			if loops.size() > 1:
-				_draw_world_loop(loops[1] as Array, col2, width)
 		"star", "heptagram", "heptagram_silhouette":
 			var col_star := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
 			for loop in loops:
@@ -123,7 +81,6 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 	"""指定位置を中心にお手本を描画（size_scale で図形全体を拡縮）"""
 	var width: float = 3.5 * width_scale
 	var offset1: Vector2 = (_game.guide_center_1 - _game.shape_center) * size_scale
-	var offset2: Vector2 = (_game.guide_center_2 - _game.shape_center) * size_scale
 	var r_scaled: float = _game.guide_radius_val * size_scale
 	match _game.stage_type:
 		"triangle":
@@ -138,11 +95,6 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			var base_ci: float = _game.guide_radius_val
 			_draw_ideal_points_outline(center + offset1, pts, base_ci * size_scale, _game.correspondence_rotation, col, width)
-		"two_circles":
-			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			_draw_ring(center + offset1, r_scaled, col, width)
-			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
-			_draw_ring(center + offset2, r_scaled, col2, width)
 		"star":
 			var col := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
@@ -174,34 +126,12 @@ func draw_hud_overlay_guide(alpha: float) -> void:
 	var sm = _game.stage_manager
 	var width: float = 3.5
 	match _game.stage_type:
-		"two_circles":
-			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
-			_draw_hud_circle_attraction_rings(sm.hud_two_circle_c1, sm.hud_two_circle_r, col, width)
-			_draw_hud_circle_attraction_rings(sm.hud_two_circle_c2, sm.hud_two_circle_r, col2, width)
 		"star", "heptagram", "heptagram_silhouette":
 			var col_s := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
 			_draw_hud_polyline_world(sm.hud_guide_outline_world, col_s, width)
 		_:
 			var col_g := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
-
-
-func _draw_hud_circle_attraction_rings(center: Vector2, base_r: float, base_color: Color, width: float) -> void:
-	var offsets: Array[float] = [0.0, 6.0, 14.0, 26.0]
-	var alphas: Array[float] = [1.0, 0.48, 0.22, 0.07]
-	for li in range(offsets.size()):
-		var off: float = offsets[li]
-		var am: float = alphas[li]
-		var w: float = width if li == 0 else width * (1.0 - li * 0.16)
-		if off == 0.0:
-			_draw_ring(center, base_r, Color(base_color.r, base_color.g, base_color.b, base_color.a * am), w)
-			continue
-		for sign in [-1.0, 1.0]:
-			var rr: float = base_r + off * sign
-			if rr < 2.0:
-				continue
-			_draw_ring(center, rr, Color(base_color.r, base_color.g, base_color.b, base_color.a * am), w)
 
 
 func _draw_hud_polyline_world(verts: Array, color: Color, width: float) -> void:
@@ -233,11 +163,7 @@ func _draw_hud_polyline_world(verts: Array, color: Color, width: float) -> void:
 
 func get_object_count() -> int:
 	"""このステージのオブジェクト数を返す"""
-	match _game.stage_type:
-		"two_circles":
-			return 2
-		_:
-			return 1
+	return 1
 
 
 func _get_size_ratio(obj_count: int) -> float:
@@ -252,68 +178,18 @@ func _get_size_ratio(obj_count: int) -> float:
 
 func draw_guide_shape_side_by_side(center: Vector2, available_w: float, available_h: float, alpha: float, width_scale: float = 1.0) -> void:
 	"""複数オブジェクトを横並び・中心揃え・重複なし・画面内に収めて描画"""
-	var width: float = 3.5 * width_scale
-	var obj_count: int = get_object_count()
-	var ratio: float = _get_size_ratio(obj_count)
+	var ratio: float = _get_size_ratio(get_object_count())
 
-	if obj_count <= 1:
-		var desired_r: float = minf(available_w, available_h) * ratio / 2.0
-		var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
-		draw_guide_shape_at(center, alpha, width_scale, sc)
-		return
-
-	# 複数オブジェクトの場合: 横並びで等間隔配置
-	var obj_gap: float = 20.0  # オブジェクト間の隙間
-	# 利用可能高さの ratio 分を直径に
-	var desired_diameter: float = available_h * ratio
-	# 幅方向の制限も考慮
-	var max_diameter_w: float = (available_w - obj_gap * (obj_count - 1)) / obj_count
-	var diameter: float = minf(desired_diameter, max_diameter_w)
-	var r: float = diameter / 2.0
-
-	match _game.stage_type:
-		"two_circles":
-			var total_span: float = diameter * obj_count + obj_gap * (obj_count - 1)
-			var start_x: float = center.x - total_span / 2.0 + r
-			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
-			_draw_ring(Vector2(start_x, center.y), r, col, width)
-			_draw_ring(Vector2(start_x + diameter + obj_gap, center.y), r, col2, width)
-		_:
-			var desired_r: float = minf(available_w, available_h) * ratio / 2.0
-			var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
-			draw_guide_shape_at(center, alpha, width_scale, sc)
+	var desired_r: float = minf(available_w, available_h) * ratio / 2.0
+	var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
+	draw_guide_shape_at(center, alpha, width_scale, sc)
 
 
 func draw_guide_shape_fit_max(center: Vector2, available_w: float, available_h: float, alpha: float, width_scale: float = 1.0) -> void:
 	"""指定枠いっぱいまで使って最大限フィットさせて描画"""
-	var width: float = 3.5 * width_scale
-	var obj_count: int = get_object_count()
-
-	if obj_count <= 1:
-		var desired_r: float = minf(available_w, available_h) / 2.0
-		var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
-		draw_guide_shape_at(center, alpha, width_scale, sc)
-		return
-
-	var obj_gap: float = 20.0
-	var desired_diameter: float = available_h
-	var max_diameter_w: float = (available_w - obj_gap * (obj_count - 1)) / obj_count
-	var diameter: float = minf(desired_diameter, max_diameter_w)
-	var r: float = diameter / 2.0
-
-	match _game.stage_type:
-		"two_circles":
-			var total_span: float = diameter * obj_count + obj_gap * (obj_count - 1)
-			var start_x: float = center.x - total_span / 2.0 + r
-			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			var col2 := Color(0.75, 0.15, 0.25, 0.7 * alpha)
-			_draw_ring(Vector2(start_x, center.y), r, col, width)
-			_draw_ring(Vector2(start_x + diameter + obj_gap, center.y), r, col2, width)
-		_:
-			var desired_r_single: float = minf(available_w, available_h) / 2.0
-			var sc_single: float = desired_r_single / maxf(_game.guide_radius_val, 1.0)
-			draw_guide_shape_at(center, alpha, width_scale, sc_single)
+	var desired_r: float = minf(available_w, available_h) / 2.0
+	var sc: float = desired_r / maxf(_game.guide_radius_val, 1.0)
+	draw_guide_shape_at(center, alpha, width_scale, sc)
 
 
 func draw_hint_shape(alpha: float) -> void:
@@ -335,8 +211,6 @@ func get_type_description() -> String:
 			return _game.tr("GUIDE_TYPE_FISH")
 		"circle":
 			return _game.tr("GUIDE_TYPE_CIRCLE")
-		"two_circles":
-			return _game.tr("GUIDE_TYPE_TWO_CIRCLES")
 		"star":
 			return _game.tr("GUIDE_TYPE_STAR")
 		"heptagram":
@@ -355,16 +229,9 @@ func draw_hud_metrics(hx: float, hw: float, goal_pct: float, draw_string_fit: Ca
 			var smooth_color: Color = _metric_color(_game.current_smoothness_error)
 			draw_string_fit.call(Vector2(hx, 240), _game.tr("HUD_SMOOTHNESS") % _game.current_smoothness, hw, 66, smooth_color)
 			draw_string_fit.call(Vector2(hx, 330), _game.tr("HUD_GOAL_BOTH") % goal_pct, hw, 45, Color(0.45, 0.38, 0.45))
-		"two_circles":
-			var sz: int = 50
-			var c1_sm_col: Color = _metric_color(_game.current_smoothness_error)
-			draw_string_fit.call(Vector2(hx, 235), _game.tr("HUD_C1_SMOOTHNESS") % _game.current_smoothness, hw, sz, c1_sm_col)
-			var c2_sm_col: Color = _metric_color(_game.current_smoothness_error_2)
-			draw_string_fit.call(Vector2(hx, 290), _game.tr("HUD_C2_SMOOTHNESS") % _game.current_smoothness_2, hw, sz, c2_sm_col)
-			draw_string_fit.call(Vector2(hx, 355), _game.tr("HUD_GOAL_ALL") % goal_pct, hw, 45, Color(0.45, 0.38, 0.45))
 		_:
-			var smooth_color: Color = _metric_color(_game.current_smoothness_error)
-			draw_string_fit.call(Vector2(hx, 240), _game.tr("HUD_SMOOTHNESS") % _game.current_smoothness, hw, 66, smooth_color)
+			var smooth_color2: Color = _metric_color(_game.current_smoothness_error)
+			draw_string_fit.call(Vector2(hx, 240), _game.tr("HUD_SMOOTHNESS") % _game.current_smoothness, hw, 66, smooth_color2)
 			draw_string_fit.call(Vector2(hx, 330), _game.tr("HUD_GOAL_BOTH") % goal_pct, hw, 45, Color(0.45, 0.38, 0.45))
 
 
@@ -373,13 +240,9 @@ func draw_hud_metrics(hx: float, hw: float, goal_pct: float, draw_string_fit: Ca
 func draw_clear_metrics(tx: float, y: float, tw: float) -> void:
 	# 実現率（表示値）をクリア画面にも表示。切り捨てで100.0%と未クリアの不整合を防ぐ
 	var circ_display: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
-	var circ2_display: float = _game.get_display_reproduction_rate_floor(_game.current_circularity_2)
 	match _game.stage_type:
 		"triangle", "square", "circle", "star", "cat_face", "fish":
 			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
-		"two_circles":
-			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_C1") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 31, Color(0.26, 0.21, 0.28))
-			_game.draw_string(_game.font, Vector2(tx, y + 237), _game.tr("CLEAR_C2") % [circ2_display, _game.current_smoothness_2], HORIZONTAL_ALIGNMENT_CENTER, tw, 31, Color(0.26, 0.21, 0.28))
 		_:
 			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
 
@@ -562,17 +425,6 @@ func _get_ideal_vertex_loops() -> Array:
 				var ty: float = (p.x * sin_r + p.y * cos_r) * _game.correspondence_scale
 				v.append(_game.current_centroid + Vector2(tx, ty))
 			result.append(v)
-		"two_circles":
-			var v1: Array[Vector2] = []
-			for i in range(_game.CIRCLE_SEGMENTS):
-				var a: float = TAU * i / _game.CIRCLE_SEGMENTS
-				v1.append(_game.current_centroid + Vector2(cos(a), sin(a)) * _game.ideal_display_radius)
-			result.append(v1)
-			var v2: Array[Vector2] = []
-			for i in range(_game.CIRCLE_SEGMENTS):
-				var a: float = TAU * i / _game.CIRCLE_SEGMENTS
-				v2.append(_game.current_centroid_2 + Vector2(cos(a), sin(a)) * _game.ideal_display_radius_2)
-			result.append(v2)
 		_:
 			var v: Array[Vector2] = []
 			for i in range(_game.CIRCLE_SEGMENTS):
@@ -589,37 +441,13 @@ func _get_player_vertex_loops() -> Array:
 		return result
 	if _game.is_polygon_walk_order_active():
 		var ord: PackedInt32Array = _game.polygon_walk_order
-		match _game.stage_type:
-			"two_circles":
-				var split: int = _game.group_split
-				var g2: int = n - split
-				var v1: Array[Vector2] = []
-				for k in range(split):
-					v1.append(_game.point_positions[ord[k]])
-				result.append(v1)
-				var v2: Array[Vector2] = []
-				for t in range(g2):
-					v2.append(_game.point_positions[ord[split + t]])
-				result.append(v2)
-			_:
-				var v: Array[Vector2] = []
-				for k in range(n):
-					v.append(_game.point_positions[ord[k]])
-				result.append(v)
+		var vw: Array[Vector2] = []
+		for k in range(n):
+			vw.append(_game.point_positions[ord[k]])
+		result.append(vw)
 		return result
-	match _game.stage_type:
-		"two_circles":
-			var v1: Array[Vector2] = []
-			for i in range(_game.group_split):
-				v1.append(_game.point_positions[i])
-			result.append(v1)
-			var v2: Array[Vector2] = []
-			for i in range(_game.group_split, n):
-				v2.append(_game.point_positions[i])
-			result.append(v2)
-		_:
-			var v: Array[Vector2] = []
-			for i in range(n):
-				v.append(_game.point_positions[i])
-			result.append(v)
+	var v0: Array[Vector2] = []
+	for i in range(n):
+		v0.append(_game.point_positions[i])
+	result.append(v0)
 	return result

@@ -105,6 +105,11 @@ CONFIG_BGM_VOLUME,BGM音量,BGM Volume,BGM音量,BGM音量
 CONFIG_SE_VOLUME,SE音量,SE Volume,SE音量,SE音量
 CONFIG_BACK,タイトルに戻る,Back to Title,返回标题,返回標題
 CONFIG_FULLSCREEN,フルスクリーン,Fullscreen,全屏,全螢幕
+CONFIG_WINDOW_1280_720,ウィンドウ（1280×720）,Window (1280×720),窗口（1280×720）,視窗（1280×720）
+CONFIG_WINDOW_1920_1080,ウィンドウ（1920×1080）,Window (1920×1080),窗口（1920×1080）,視窗（1920×1080）
+CONFIG_MOUSE_CONFINE,カーソル閉じ込め,Cursor lock,光标锁定,游標鎖定
+CONFIG_MOUSE_CONFINE_ON,オン,On,开,開
+CONFIG_MOUSE_CONFINE_OFF,オフ,Off,关,關
 CONFIG_WINDOW,ウインドウ,Window,窗口,視窗
 CONFIG_LANG_JA,日本語,日本語,日本語,日本語
 CONFIG_LANG_EN,English,English,English,English

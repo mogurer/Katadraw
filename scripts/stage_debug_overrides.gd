@@ -62,14 +62,6 @@ static func validate_effective_config(cfg: Dictionary) -> String:
 		var b: int = int((vr as Array)[1])
 		if a < 1 or b < 1 or a > b:
 			return "vertex_range が不正です"
-	if t == "two_circles" and cfg.has("group_sizes"):
-		var gs: Variant = cfg["group_sizes"]
-		if typeof(gs) != TYPE_ARRAY or (gs as Array).size() < 2:
-			return "group_sizes は [int,int] が必要です"
-		var s0: int = int((gs as Array)[0])
-		var s1: int = int((gs as Array)[1])
-		if s0 + s1 != np:
-			return "group_sizes の合計が num_points と一致しません"
 	if cfg.has("guide_follows_player_radius"):
 		var gv: Variant = cfg["guide_follows_player_radius"]
 		if typeof(gv) == TYPE_BOOL:

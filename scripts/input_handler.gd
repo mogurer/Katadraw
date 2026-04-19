@@ -97,8 +97,8 @@ const POINT_EDGE_REPULSE_STRENGTH := 3400.0
 const POINT_EDGE_REPULSE_MIN_DISTANCE := 3.0
 ## 多角形の中心周り角順（CCW）を保ち、隣接インデックス間で cross<0 にならないよう補正（線の交差抑止）
 const POLYGON_CCW_ORDER_STRENGTH := 3200.0
-## 画面端付近でクランプと斥力が打ち消し合うのを防ぐ（内向きの補助力）
-const PLAYFIELD_EDGE_RETURN_ZONE := 72.0
+## 画面端（viewport）からこの距離（px）以内では、速度・モードに関係なく即座に内向き斥力
+const VIEWPORT_EDGE_REPULSE_ZONE := 50.0
 const PLAYFIELD_EDGE_RETURN_STRENGTH := 1500.0
 const PLAYFIELD_EDGE_RETURN_REPULSE_MUL := 1.65
 const PLAYFIELD_EDGE_RETURN_VEL_BOOST := 0.006
@@ -1714,28 +1714,11 @@ func _get_polygon_edges_for_repulsion() -> Array[Vector2i]:
 		return edges
 	if _game.is_polygon_walk_order_active():
 		var ord: PackedInt32Array = _game.polygon_walk_order
-		if _game.stage_manager.stage_type == "two_circles":
-			var split: int = _game.stage_manager.group_split
-			var g2: int = n - split
-			for k in range(split):
-				edges.append(Vector2i(ord[k], ord[(k + 1) % split]))
-			for t in range(g2):
-				edges.append(Vector2i(ord[split + t], ord[split + (t + 1) % g2]))
-		else:
-			for k in range(n):
-				edges.append(Vector2i(ord[k], ord[(k + 1) % n]))
+		for k in range(n):
+			edges.append(Vector2i(ord[k], ord[(k + 1) % n]))
 		return edges
-	if _game.stage_manager.stage_type == "two_circles":
-		var split: int = _game.stage_manager.group_split
-		for i in range(split):
-			edges.append(Vector2i(i, (i + 1) % split))
-		var g2: int = n - split
-		for i in range(g2):
-			var idx: int = split + i
-			edges.append(Vector2i(idx, split + (i + 1) % g2))
-	else:
-		for i in range(n):
-			edges.append(Vector2i(i, (i + 1) % n))
+	for i in range(n):
+		edges.append(Vector2i(i, (i + 1) % n))
 	return edges
 
 
@@ -1845,25 +1828,11 @@ func _apply_polygon_ccw_order_constraint(forces: Array[Vector2]) -> void:
 	if n < 3:
 		return
 	if _game.is_polygon_walk_order_active():
-		if _game.stage_manager.stage_type == "two_circles":
-			var split: int = _game.stage_manager.group_split
-			var c1: Vector2 = _centroid_positions_range(0, split)
-			_apply_ccw_order_for_walk_segment(forces, 0, split, c1)
-			var c2: Vector2 = _centroid_positions_range(split, n)
-			_apply_ccw_order_for_walk_segment(forces, split, n - split, c2)
-		else:
-			var c: Vector2 = _centroid_positions_range(0, n)
-			_apply_ccw_order_for_walk_segment(forces, 0, n, c)
-		return
-	if _game.stage_manager.stage_type == "two_circles":
-		var split: int = _game.stage_manager.group_split
-		var c1: Vector2 = _centroid_positions_range(0, split)
-		_apply_ccw_order_for_loop(forces, 0, split, c1)
-		var c2: Vector2 = _centroid_positions_range(split, n)
-		_apply_ccw_order_for_loop(forces, split, n - split, c2)
-	else:
 		var c: Vector2 = _centroid_positions_range(0, n)
-		_apply_ccw_order_for_loop(forces, 0, n, c)
+		_apply_ccw_order_for_walk_segment(forces, 0, n, c)
+		return
+	var c0: Vector2 = _centroid_positions_range(0, n)
+	_apply_ccw_order_for_loop(forces, 0, n, c0)
 
 
 func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count: int, center: Vector2) -> void:
@@ -1935,65 +1904,45 @@ func _is_player_repelling_only() -> bool:
 	return _get_player_force_mode() == -1
 
 
-func _apply_playfield_edge_return_forces(forces: Array[Vector2], lo: Vector2, hi: Vector2) -> void:
-	var zone: float = PLAYFIELD_EDGE_RETURN_ZONE
+func _apply_playfield_edge_return_forces(forces: Array[Vector2], _lo: Vector2, _hi: Vector2) -> void:
+	var zone: float = VIEWPORT_EDGE_REPULSE_ZONE
 	if zone <= 0.001:
 		return
-	var repelling: bool = _is_player_repelling_only()
+	var vp: Vector2 = _game.get_viewport_rect().size
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var vel: Vector2 = point_velocities[i]
 		var f_add := Vector2.ZERO
-		# 左端: 内向き +X
-		var dl: float = pos.x - lo.x
+		# 左: 画面左端からの距離
+		var dl: float = pos.x
 		if dl < zone:
 			var vel_out: float = maxf(0.0, -vel.x)
-			if repelling or vel_out > 6.0:
-				var t: float = clampf(1.0 - dl / zone, 0.0, 1.0)
-				var mul: float = t * t * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out)
-				if repelling:
-					mul *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
-				else:
-					mul *= 0.38
-				f_add.x += PLAYFIELD_EDGE_RETURN_STRENGTH * mul
-		# 右端: 内向き -X
-		var dr: float = hi.x - pos.x
+			var t: float = clampf(1.0 - dl / zone, 0.0, 1.0)
+			var mul: float = t * t * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out) * PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+			f_add.x += PLAYFIELD_EDGE_RETURN_STRENGTH * mul
+		# 右
+		var dr: float = vp.x - pos.x
 		if dr < zone:
 			var vel_out_r: float = maxf(0.0, vel.x)
-			if repelling or vel_out_r > 6.0:
-				var t2: float = clampf(1.0 - dr / zone, 0.0, 1.0)
-				var mul2: float = t2 * t2 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_r)
-				if repelling:
-					mul2 *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
-				else:
-					mul2 *= 0.38
-				f_add.x -= PLAYFIELD_EDGE_RETURN_STRENGTH * mul2
-		# 上端: 内向き +Y
-		var db: float = pos.y - lo.y
-		if db < zone:
-			var vel_out_b: float = maxf(0.0, -vel.y)
-			if repelling or vel_out_b > 6.0:
-				var t3: float = clampf(1.0 - db / zone, 0.0, 1.0)
-				var mul3: float = t3 * t3 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_b)
-				if repelling:
-					mul3 *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
-				else:
-					mul3 *= 0.38
-				f_add.y += PLAYFIELD_EDGE_RETURN_STRENGTH * mul3
-		# 下端: 内向き -Y
-		var dt: float = hi.y - pos.y
+			var t2: float = clampf(1.0 - dr / zone, 0.0, 1.0)
+			var mul2: float = t2 * t2 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_r) * PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+			f_add.x -= PLAYFIELD_EDGE_RETURN_STRENGTH * mul2
+		# 上
+		var dt: float = pos.y
 		if dt < zone:
+			var vel_out_b: float = maxf(0.0, -vel.y)
+			var t3: float = clampf(1.0 - dt / zone, 0.0, 1.0)
+			var mul3: float = t3 * t3 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_b) * PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+			f_add.y += PLAYFIELD_EDGE_RETURN_STRENGTH * mul3
+		# 下
+		var db: float = vp.y - pos.y
+		if db < zone:
 			var vel_out_t: float = maxf(0.0, vel.y)
-			if repelling or vel_out_t > 6.0:
-				var t4: float = clampf(1.0 - dt / zone, 0.0, 1.0)
-				var mul4: float = t4 * t4 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_t)
-				if repelling:
-					mul4 *= PLAYFIELD_EDGE_RETURN_REPULSE_MUL
-				else:
-					mul4 *= 0.38
-				f_add.y -= PLAYFIELD_EDGE_RETURN_STRENGTH * mul4
+			var t4: float = clampf(1.0 - db / zone, 0.0, 1.0)
+			var mul4: float = t4 * t4 * (1.0 + PLAYFIELD_EDGE_RETURN_VEL_BOOST * vel_out_t) * PLAYFIELD_EDGE_RETURN_REPULSE_MUL
+			f_add.y -= PLAYFIELD_EDGE_RETURN_STRENGTH * mul4
 		forces[i] += f_add
 
 
@@ -2419,13 +2368,8 @@ func _local_signed_angle(prev_idx: int, center_idx: int, next_idx: int) -> float
 	return atan2(from_prev.cross(to_next), from_prev.dot(to_next))
 
 
-func _get_loop_bounds_for_index(idx: int) -> Vector2i:
-	if _game.stage_manager.stage_type != "two_circles":
-		return Vector2i(0, _game.point_positions.size())
-	var split: int = _game.stage_manager.group_split
-	if idx < split:
-		return Vector2i(0, split)
-	return Vector2i(split, _game.point_positions.size())
+func _get_loop_bounds_for_index(_idx: int) -> Vector2i:
+	return Vector2i(0, _game.point_positions.size())
 
 
 func _get_loop_perimeter(start_idx: int, end_idx: int) -> float:

@@ -47,6 +47,17 @@ static func get_stage_count() -> int:
 # --- レイアウト ---
 # 左側UIパネルの幅（画面幅に対する比率 0.0〜1.0）。0=パネルなし
 const UI_WIDTH_RATIO := 0.0
+## プレイ中 HUD ガイドと start_stage のレイアウトで共通の基準点。play_stage_slot が 0 のときだけ ui_renderer._draw_game と同様に Y を 100px 下げる。
+static func hud_playfield_shape_center(vp: Vector2, play_stage_slot: int) -> Vector2:
+	var sc := Vector2(
+		vp.x * UI_WIDTH_RATIO + (vp.x - vp.x * UI_WIDTH_RATIO) * 0.5,
+		vp.y * 0.5
+	)
+	if play_stage_slot == 0:
+		sc.y += 100.0
+	return sc
+
+
 # Playing guide: margin on each side of playfield; shape fits in inner (1-2*M) box, centered.
 const HUD_GUIDE_MARGIN_FRAC := 0.15
 # Guide drawn as fixed HUD; scoring uses the same on-screen outline (world px).
@@ -69,3 +80,10 @@ const LOGO_FADE_OUT := 1.0
 const LOGO_WAIT2 := 1.0
 const LOGO_TOTAL := 7.0
 const TITLE_FADE_IN := 0.5
+
+# --- Twitter / X 共有（結果画面アイコン）---
+## 編集用テキスト（UTF-8）。ビルドに同梱される。
+const TWITTER_SHARE_TEXT_PATH := "res://Resources/Text/Twitter.txt"
+## ファイル未同梱・読み取り失敗時に使う既定文（Twitter.txt と揃えること）
+const TWITTER_SHARE_TEXT_DEFAULT := "#KATADRAW"
+const TWITTER_INTENT_URL := "https://twitter.com/intent/tweet"

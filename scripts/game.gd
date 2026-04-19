@@ -36,8 +36,8 @@ var stage_effective_cfg: Dictionary = {}
 var shape_center: Vector2
 var point_positions: Array[Vector2] = []
 ## プレイ中の KATA 辺の頂点訪問順。size==point_positions のとき有効。
-## 単一閉路: 辺は order[k]–order[(k+1)%n]。two_circles: order[0..split) がグループ1、order[split..n) がグループ2の各閉路。
-## 空のときは従来どおりインデックス 0→1→…→(n-1)→0（グループは group_split で分割）。
+## 単一閉路: 辺は order[k]–order[(k+1)%n]。
+## 空のときは従来どおりインデックス 0→1→…→(n-1)→0。
 var polygon_walk_order: PackedInt32Array = PackedInt32Array()
 var hovered_index: int = -1
 var game_state: String = "title"
@@ -60,17 +60,6 @@ var current_circularity: float = 0.0
 var current_smoothness_error: float = 100.0
 var current_smoothness: float = 0.0
 
-# --- Two Circles (group 2) ---
-var group_split: int = 0
-var group1_cleared: bool = false
-var group2_cleared: bool = false
-var current_centroid_2: Vector2 = Vector2.ZERO
-var current_avg_radius_2: float = 0.0
-var current_circularity_error_2: float = 100.0
-var current_circularity_2: float = 0.0
-var current_smoothness_error_2: float = 100.0
-var current_smoothness_2: float = 0.0
-
 # --- Star ---
 var star_rotation: float = 0.0
 var star_outer_r: float = 0.0
@@ -88,10 +77,8 @@ var correspondence_rotation: float = 0.0
 # --- Guide & Hints ---
 var guide_start_time: float = 0.0
 var guide_center_1: Vector2 = Vector2.ZERO
-var guide_center_2: Vector2 = Vector2.ZERO
 var guide_radius_val: float = 0.0
 var ideal_display_radius: float = 0.0   # 理想形描画用（triangle/circle）。固定サイズ時は guide_radius_val
-var ideal_display_radius_2: float = 0.0  # two_circles 用
 ## StageConfig.guide_follows_player_radius（ガイドをプレイヤー半径に追従させるか）
 var guide_follows_player_radius: bool = false
 var hint_alpha: float = 0.0
@@ -174,22 +161,7 @@ func rebuild_polygon_walk_order_centroid_angular() -> void:
 	if n < 3:
 		clear_polygon_walk_order()
 		return
-	if stage_type == "two_circles":
-		var split: int = group_split
-		var g2: int = n - split
-		if split < 1 or g2 < 1:
-			clear_polygon_walk_order()
-			return
-		var o1: PackedInt32Array = _angular_sort_vertex_indices_by_centroid(0, split)
-		var o2: PackedInt32Array = _angular_sort_vertex_indices_by_centroid(split, n)
-		polygon_walk_order = PackedInt32Array()
-		polygon_walk_order.resize(n)
-		for i in range(split):
-			polygon_walk_order[i] = o1[i]
-		for j in range(g2):
-			polygon_walk_order[split + j] = o2[j]
-	else:
-		polygon_walk_order = _angular_sort_vertex_indices_by_centroid(0, n)
+	polygon_walk_order = _angular_sort_vertex_indices_by_centroid(0, n)
 
 
 ## polygon_walk_order で定めた閉路順を、point_positions[0,1,…] の並びに焼き直す（座標はそのまま入れ替え）。その後 walk_order は空に戻す。
@@ -212,27 +184,9 @@ func get_polygon_next_vertex_index(vert_idx: int) -> int:
 	if n < 2:
 		return vert_idx
 	if is_polygon_walk_order_active():
-		if stage_type == "two_circles":
-			var split: int = group_split
-			if vert_idx < split:
-				for k in range(split):
-					if polygon_walk_order[k] == vert_idx:
-						return polygon_walk_order[(k + 1) % split]
-			else:
-				for k in range(split, n):
-					if polygon_walk_order[k] == vert_idx:
-						var g2: int = n - split
-						return polygon_walk_order[split + ((k - split + 1) % g2)]
-		else:
-			for k in range(n):
-				if polygon_walk_order[k] == vert_idx:
-					return polygon_walk_order[(k + 1) % n]
-	if stage_type == "two_circles":
-		var split: int = group_split
-		if vert_idx < split:
-			return (vert_idx + 1) % split
-		var g2: int = n - split
-		return split + (vert_idx - split + 1) % g2
+		for k in range(n):
+			if polygon_walk_order[k] == vert_idx:
+				return polygon_walk_order[(k + 1) % n]
 	return (vert_idx + 1) % n
 
 
@@ -241,27 +195,9 @@ func get_polygon_prev_vertex_index(vert_idx: int) -> int:
 	if n < 2:
 		return vert_idx
 	if is_polygon_walk_order_active():
-		if stage_type == "two_circles":
-			var split: int = group_split
-			if vert_idx < split:
-				for k in range(split):
-					if polygon_walk_order[k] == vert_idx:
-						return polygon_walk_order[(k - 1 + split) % split]
-			else:
-				var g2: int = n - split
-				for k in range(split, n):
-					if polygon_walk_order[k] == vert_idx:
-						return polygon_walk_order[split + ((k - split - 1 + g2) % g2)]
-		else:
-			for k in range(n):
-				if polygon_walk_order[k] == vert_idx:
-					return polygon_walk_order[(k - 1 + n) % n]
-	if stage_type == "two_circles":
-		var split: int = group_split
-		if vert_idx < split:
-			return (vert_idx - 1 + split) % split
-		var g2: int = n - split
-		return split + (vert_idx - split - 1 + g2) % g2
+		for k in range(n):
+			if polygon_walk_order[k] == vert_idx:
+				return polygon_walk_order[(k - 1 + n) % n]
 	return (vert_idx - 1 + n) % n
 
 
@@ -269,7 +205,7 @@ func get_polygon_prev_vertex_index(vert_idx: int) -> int:
 var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
 var menu_confirm_quit: bool = false
 var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
-var config_index: int = 0        # 0=Window Mode, 1=Language, 2=BGM Vol, 3=SE Vol, 4=Back
+var config_index: int = 0  # 0=画面モード,1=カーソル制限,2=言語,3=BGM,4=SE,5=戻る
 ## コンフィグ画面レイアウト（ui_renderer._draw_config とヒット判定で共通）
 const CONFIG_MENU_BASE_Y_RATIO := 0.28
 const CONFIG_MENU_SPACING := 103.5
@@ -281,7 +217,9 @@ const CONFIG_MENU_ARROW_PAD := 4.0
 ## 項目名の右端と ◀ 左端の間の余白（英語ラベル長でも見切れしにくいよう vx を寄せている）
 const CONFIG_MENU_LABEL_GAP_TO_ARROW := 20.0
 ## コンフィグ 0〜3 行のホバー拡大（set_btn_hover / get_btn_scale と同一 ID）
-const CONFIG_ROW_BTN_IDS: Array[String] = ["cfg_row_window", "cfg_row_lang", "cfg_row_bgm", "cfg_row_se"]
+const CONFIG_ROW_BTN_IDS: Array[String] = [
+	"cfg_row_window", "cfg_row_mouse_confine", "cfg_row_lang", "cfg_row_bgm", "cfg_row_se",
+]
 # UI メニュー: 左スティック / D-pad ハット（ボタン型十字と併用。_process でポーリング）
 # JoyAxis の HAT は環境によって JOY_AXIS_LEFT_HAT_* が未定義のため、Enum と同じ番号を直指定する
 const _JOY_AXIS_HAT_X := 6
@@ -311,9 +249,16 @@ var _ui_menu_stick_v_dir: int = 0
 var _ui_menu_stick_v_cd: float = 0.0
 var _ui_menu_stick_h_dir: int = 0
 var _ui_menu_stick_h_cd: float = 0.0
-var is_fullscreen: bool = false
-## ウインドウモード時の OS ウィンドウ（クライアント領域）。描画解像度は INTERNAL_VIEWPORT_SIZE のまま stretch。
-const FIXED_WINDOW_CLIENT_SIZE := Vector2i(1280, 720)
+var is_fullscreen: bool = false  # display_mode==フルスクリーンと同期（OS からも更新）
+## 0=ウィンドウ1280x720, 1=ウィンドウ1920x1080, 2=フルスクリーン
+const DISPLAY_MODE_WINDOW_720 := 0
+const DISPLAY_MODE_WINDOW_1080 := 1
+const DISPLAY_MODE_FULLSCREEN := 2
+var display_mode: int = DISPLAY_MODE_WINDOW_1080
+const WINDOW_CLIENT_SIZE_720 := Vector2i(1280, 720)
+const WINDOW_CLIENT_SIZE_1080 := Vector2i(1920, 1080)
+## ウィンドウ時: マウスカーソルをウィンドウ外へ出さない（Input.MOUSE_MODE_CONFINED）
+var mouse_confine_to_window: bool = true
 const INTERNAL_VIEWPORT_SIZE := Vector2i(1920, 1080)
 var bgm_volume: int = 5         # 0(ミュート)〜10(最大), デフォルト5
 var se_volume: int = 5          # 0(ミュート)〜10(最大), デフォルト5
@@ -367,7 +312,7 @@ const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 var stage_debug_state: StageDebugState = StageDebugState.new()
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
-	"fish", "cat_face", "triangle", "square", "circle", "star", "two_circles",
+	"fish", "cat_face", "triangle", "square", "circle", "star",
 ]
 const STAGE_EDIT_TOP_BAR: float = 44.0
 const STAGE_EDIT_LEFT_RATIO: float = 0.66
@@ -559,8 +504,8 @@ func _ready() -> void:
 	else:
 		font_din = font
 	var vp: Vector2 = get_viewport_rect().size
-	# 有効エリア中央（上下左右40px + 右上UI禁忌ゾーン考慮）
-	shape_center = _default_stage_shape_center(vp)
+	# タイトル前の仮値（本番は _begin_stage で上書き）。HUD 用基準点と式を揃える
+	shape_center = _default_stage_shape_center(vp, -1)
 	_setup_audio()
 	# Load logo texture
 	logo_texture = _load_texture("res://assets/UI/messed_logo.png")
@@ -574,11 +519,11 @@ func _ready() -> void:
 	bg_texture = _load_texture("res://assets/UI/kata-draw_bg.png")
 	_setup_game_cursor()
 	get_window().size_changed.connect(_on_window_size_changed)
-	_sync_fullscreen_from_os()
+	_sync_window_display_from_os()
 	if is_fullscreen:
 		call_deferred("_apply_internal_viewport_size")
 	else:
-		call_deferred("_apply_window_pixel_size_impl", FIXED_WINDOW_CLIENT_SIZE)
+		call_deferred("_apply_window_pixel_size_impl", _window_client_size_for_display_mode())
 	game_state = "logo"
 	logo_start_time = Time.get_ticks_msec() / 1000.0
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
@@ -639,7 +584,7 @@ func _split_csv_row(line: String) -> PackedStringArray:
 
 
 func _on_window_size_changed() -> void:
-	_sync_fullscreen_from_os()
+	_sync_window_display_from_os()
 	if not is_fullscreen:
 		_apply_internal_viewport_size()
 	queue_redraw()
@@ -705,9 +650,15 @@ func _cursor_register_pad_activity() -> void:
 	_cursor_mouse_motion_accum = Vector2.ZERO
 
 
+func _cursor_visible_mode() -> Input.MouseMode:
+	if not is_fullscreen and mouse_confine_to_window:
+		return Input.MOUSE_MODE_CONFINED
+	return Input.MOUSE_MODE_VISIBLE
+
+
 func _apply_cursor_policy() -> void:
 	if pause_active:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		Input.mouse_mode = _cursor_visible_mode()
 		return
 	var now: float = Time.get_ticks_msec() / 1000.0
 	if _cursor_pad_override_hidden:
@@ -716,7 +667,7 @@ func _apply_cursor_policy() -> void:
 	if (now - _cursor_last_mouse_activity_sec) > CURSOR_IDLE_HIDE_SECONDS:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	else:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		Input.mouse_mode = _cursor_visible_mode()
 
 
 # =============================================================================
@@ -956,15 +907,6 @@ func _sync_stage_vars() -> void:
 	current_circularity = stage_manager.current_circularity
 	current_smoothness_error = stage_manager.current_smoothness_error
 	current_smoothness = stage_manager.current_smoothness
-	group_split = stage_manager.group_split
-	group1_cleared = stage_manager.group1_cleared
-	group2_cleared = stage_manager.group2_cleared
-	current_centroid_2 = stage_manager.current_centroid_2
-	current_avg_radius_2 = stage_manager.current_avg_radius_2
-	current_circularity_error_2 = stage_manager.current_circularity_error_2
-	current_circularity_2 = stage_manager.current_circularity_2
-	current_smoothness_error_2 = stage_manager.current_smoothness_error_2
-	current_smoothness_2 = stage_manager.current_smoothness_2
 	star_rotation = stage_manager.star_rotation
 	star_outer_r = stage_manager.star_outer_r
 	star_inner_r = stage_manager.star_inner_r
@@ -974,19 +916,16 @@ func _sync_stage_vars() -> void:
 	correspondence_scale = stage_manager.correspondence_scale
 	correspondence_rotation = stage_manager.correspondence_rotation
 	guide_center_1 = stage_manager.guide_center_1
-	guide_center_2 = stage_manager.guide_center_2
 	guide_radius_val = stage_manager.guide_radius_val
 	ideal_display_radius = stage_manager.ideal_display_radius
-	ideal_display_radius_2 = stage_manager.ideal_display_radius_2
 	guide_follows_player_radius = stage_manager.guide_follows_player_radius
 	stage_effective_cfg = stage_manager.effective_config.duplicate(true)
 
 
-func _default_stage_shape_center(vp: Vector2) -> Vector2:
-	# 画面中央を基準に、上端の TIME UI 被りを避けるため Y を少し下げる
-	# 右上禁忌ゾーンは上端の一角のみのため X は画面中央のままでよい
-	# 点のクランプは _keep_points_inside_playfield が担う
-	return Vector2(vp.x * 0.5, vp.y * 0.5 + 80.0)
+func _default_stage_shape_center(vp: Vector2, play_stage_slot: int = -1) -> Vector2:
+	# ui_renderer._draw_game の sc と同一式（GameConfig.hud_playfield_shape_center）。
+	# 旧: vp.y*0.5+80 だったため、プレイ中に HUD だけが再計算され KATA とズレていた。
+	return GameConfig.hud_playfield_shape_center(vp, play_stage_slot)
 
 
 func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_state: String = "guide_info", reset_move_track: bool = true) -> void:
@@ -1019,7 +958,7 @@ func _start_stage(idx: int) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
 	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
-	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp))
+	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp, idx))
 
 
 func _calculate_metrics() -> void:
@@ -1048,35 +987,6 @@ func _stage_display_number_text() -> String:
 func _check_clear() -> void:
 	if game_state != "playing":
 		return
-	# For two_circles: check per-group clear and lock
-	if stage_manager.stage_type == "two_circles":
-		var changed: bool = false
-		if not stage_manager.group1_cleared and stage_manager.is_group_clear(1):
-			stage_manager.set_group1_cleared()
-			_sync_stage_vars()
-			_play_sfx(sfx_clear)
-			input_handler.release_mouse_grab()
-			changed = true
-		if not stage_manager.group2_cleared and stage_manager.is_group_clear(2):
-			stage_manager.set_group2_cleared()
-			_sync_stage_vars()
-			_play_sfx(sfx_clear)
-			input_handler.release_mouse_grab()
-			changed = true
-		if changed and stage_manager.group1_cleared and stage_manager.group2_cleared:
-			is_dragging = false
-			game_state = "cleared"
-			input_handler.release_mouse_grab()
-			_stop_sfx_move()
-			clear_time = Time.get_ticks_msec() / 1000.0 - start_time
-			_finalize_move_count()
-			stage_session.append_result(clear_time, stage_move_count, ui_renderer.capture_stage_result_shapes())
-			ui_renderer.clear_spore_particles()
-			var mid: Vector2 = (current_centroid + current_centroid_2) * 0.5
-			ui_renderer.spawn_particles(mid)
-			_play_sfx(sfx_stageclear)
-		return
-
 	if stage_manager.is_clear():
 		is_dragging = false
 		game_state = "cleared"
@@ -1093,10 +1003,6 @@ func _check_clear() -> void:
 
 func _force_clear_for_debug() -> void:
 	"""デバッグ用: 実現率を無視してステージクリア扱いにする"""
-	if stage_manager.stage_type == "two_circles":
-		stage_manager.set_group1_cleared()
-		stage_manager.set_group2_cleared()
-		_sync_stage_vars()
 	is_dragging = false
 	game_state = "cleared"
 	input_handler.release_mouse_grab()
@@ -1105,10 +1011,7 @@ func _force_clear_for_debug() -> void:
 	_finalize_move_count()
 	stage_session.append_result(clear_time, stage_move_count, ui_renderer.capture_stage_result_shapes())
 	ui_renderer.clear_spore_particles()
-	if stage_manager.stage_type == "two_circles":
-		ui_renderer.spawn_particles((current_centroid + current_centroid_2) * 0.5)
-	else:
-		ui_renderer.spawn_particles(current_centroid)
+	ui_renderer.spawn_particles(current_centroid)
 	_play_sfx(sfx_clear)
 	_play_sfx(sfx_stageclear)
 
@@ -1272,7 +1175,7 @@ func _ui_menu_stick_nav_horizontal_first(delta: float) -> Vector2i:
 
 func _process_config_stick_navigation(delta: float) -> void:
 	# 上下＝行移動、左右＝値変更（全項目で同じ優先: 縦を先に処理）
-	var items_count: int = 5
+	var items_count: int = 6
 	var ly: float = _ui_stick_ly
 	var lx: float = _ui_stick_lx
 	var vy: int = _ui_menu_stick_vertical_step(delta, ly)
@@ -1281,7 +1184,7 @@ func _process_config_stick_navigation(delta: float) -> void:
 		queue_redraw()
 		return
 	var hx: int = _ui_menu_stick_horizontal_step(delta, lx)
-	if hx != 0 and config_index < 4:
+	if hx != 0 and config_index < 5:
 		_config_apply_main_horizontal(hx)
 		queue_redraw()
 
@@ -1631,7 +1534,7 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			if idx == 0:
 				_enter_rules()
 			elif idx == 1:
-				_sync_fullscreen_from_os()
+				_sync_window_display_from_os()
 				game_state = "config"
 				config_index = 0
 				_reset_ui_menu_stick_navigation()
@@ -1711,7 +1614,7 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 
 
 func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
-	var items_count: int = 5  # window_mode, language, bgm_vol, se_vol, back
+	var items_count: int = 6
 	var moved: bool = false
 
 	# ESC / B: メニューへ戻る
@@ -1733,11 +1636,11 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 			config_index = (config_index + 1) % items_count
 			moved = true
 		elif event.keycode == KEY_LEFT:
-			if config_index < 4:
+			if config_index < 5:
 				_config_apply_main_horizontal(-1)
 				moved = true
 		elif event.keycode == KEY_RIGHT:
-			if config_index < 4:
+			if config_index < 5:
 				_config_apply_main_horizontal(1)
 				moved = true
 
@@ -1748,7 +1651,7 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
 		var mouse_pos: Vector2 = event.position
 		for i in range(items_count):
-			if i < 4:
+			if i < 5:
 				var geom: Dictionary = config_row_scaled_layout(vp, i)
 				var bh: float = geom["bh"]
 				var top: float = geom["Lp"].y - bh * 0.5
@@ -1777,7 +1680,7 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		if hit.get("ok", false):
 			config_index = int(hit["main"])
 			do_confirm = true
-	if do_confirm and config_index == 4:
+	if do_confirm and config_index == 5:
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
 			game_state = "menu"
 			_reset_ui_menu_stick_navigation()
@@ -1788,39 +1691,60 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		queue_redraw()
 
 
-## コンフィグ: 0〜3 行の左右（±1）。画面モードは [フルスクリーン, ウインドウ] を循環。
+## コンフィグ: 値行の左右（±1）。画面モードは 720 / 1080 / フルスクリーンを循環。
 func _config_apply_main_horizontal(delta: int) -> void:
 	match config_index:
 		0:
-			_config_apply_window_mode_delta(delta)
+			_config_apply_display_mode_delta(delta)
 			_play_sfx(sfx_click)
 		1:
-			_config_apply_language_delta(delta)
+			_config_apply_mouse_confine_delta(delta)
 			_play_sfx(sfx_click)
 		2:
+			_config_apply_language_delta(delta)
+			_play_sfx(sfx_click)
+		3:
 			bgm_volume = clampi(bgm_volume + delta, 0, 10)
 			_apply_bgm_volume()
 			_play_sfx(sfx_click)
-		3:
+		4:
 			se_volume = clampi(se_volume + delta, 0, 10)
 			_apply_se_volume()
 			_play_sfx(sfx_click)
 
 
-func _config_apply_window_mode_delta(delta: int) -> void:
-	var idx: int = 0 if is_fullscreen else 1
-	idx = (idx + delta + 2) % 2
-	_config_apply_window_mode_index(idx)
+func _window_client_size_for_display_mode() -> Vector2i:
+	return WINDOW_CLIENT_SIZE_1080 if display_mode == DISPLAY_MODE_WINDOW_1080 else WINDOW_CLIENT_SIZE_720
 
 
-func _config_apply_window_mode_index(idx: int) -> void:
-	is_fullscreen = (idx == 0)
-	if is_fullscreen:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
-		call_deferred("_apply_internal_viewport_size")
-	else:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-		call_deferred("_apply_window_pixel_size_impl", FIXED_WINDOW_CLIENT_SIZE)
+func _config_apply_display_mode_delta(delta: int) -> void:
+	var idx: int = posmod(display_mode + delta, 3)
+	_config_apply_display_mode_index(idx)
+
+
+func _config_apply_display_mode_index(idx: int) -> void:
+	display_mode = posmod(idx, 3)
+	match display_mode:
+		DISPLAY_MODE_FULLSCREEN:
+			is_fullscreen = true
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
+			call_deferred("_apply_internal_viewport_size")
+		DISPLAY_MODE_WINDOW_720:
+			is_fullscreen = false
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			call_deferred("_apply_window_pixel_size_impl", WINDOW_CLIENT_SIZE_720)
+		DISPLAY_MODE_WINDOW_1080:
+			is_fullscreen = false
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			call_deferred("_apply_window_pixel_size_impl", WINDOW_CLIENT_SIZE_1080)
+	_apply_cursor_policy()
+
+
+func _config_apply_mouse_confine_delta(delta: int) -> void:
+	var v: int = 1 if mouse_confine_to_window else 0
+	v = posmod(v + delta, 2)
+	mouse_confine_to_window = v == 1
+	_apply_cursor_policy()
 
 
 func _config_apply_language_delta(delta: int) -> void:
@@ -1842,32 +1766,51 @@ func config_language_ui_label() -> String:
 	return tr("CONFIG_LANG_JA") if _config_language_ui_index_from_locale() == 0 else tr("CONFIG_LANG_EN")
 
 
+func config_display_mode_ui_label() -> String:
+	match display_mode:
+		DISPLAY_MODE_WINDOW_720:
+			return tr("CONFIG_WINDOW_1280_720")
+		DISPLAY_MODE_WINDOW_1080:
+			return tr("CONFIG_WINDOW_1920_1080")
+		_:
+			return tr("CONFIG_FULLSCREEN")
+
+
+func config_mouse_confine_ui_label() -> String:
+	return tr("CONFIG_MOUSE_CONFINE_ON") if mouse_confine_to_window else tr("CONFIG_MOUSE_CONFINE_OFF")
+
+
 func _center_window() -> void:
 	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(0)
 	var win_size: Vector2i = get_window().get_size_with_decorations()
 	get_window().position = screen_rect.position + (screen_rect.size / 2 - win_size / 2)
 
 
-func _sync_fullscreen_from_os() -> void:
+func _sync_window_display_from_os() -> void:
 	var win: Window = get_window()
 	var wid: int = win.get_window_id()
-	var m := DisplayServer.window_get_mode(wid)
-	is_fullscreen = (
-		m == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
-		or m == DisplayServer.WINDOW_MODE_FULLSCREEN
-	)
+	var m: DisplayServer.WindowMode = DisplayServer.window_get_mode(wid)
+	if m == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN or m == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		is_fullscreen = true
+		display_mode = DISPLAY_MODE_FULLSCREEN
+		return
+	is_fullscreen = false
+	var sz: Vector2i = win.size
+	display_mode = DISPLAY_MODE_WINDOW_1080 if sz.y >= 1000 else DISPLAY_MODE_WINDOW_720
 
 
 ## ウインドウのクライアントサイズのみ変更する。内部解像度は常に INTERNAL_VIEWPORT_SIZE（stretch で縮小表示）。
 func _apply_window_pixel_size_impl(new_size: Vector2i) -> void:
-	_sync_fullscreen_from_os()
-	if is_fullscreen:
-		_apply_internal_viewport_size()
-		return
 	var win: Window = get_window()
 	var wid: int = win.get_window_id()
+	var m: DisplayServer.WindowMode = DisplayServer.window_get_mode(wid)
+	if m == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN or m == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		_apply_internal_viewport_size()
+		return
 	DisplayServer.window_set_size(new_size, wid)
 	win.size = new_size
+	is_fullscreen = false
+	display_mode = DISPLAY_MODE_WINDOW_1080 if new_size == WINDOW_CLIENT_SIZE_1080 else DISPLAY_MODE_WINDOW_720
 	_apply_internal_viewport_size()
 	call_deferred("_center_window")
 
@@ -2043,17 +1986,18 @@ func _hit_results_twitter_button(pos: Vector2) -> bool:
 
 
 func _open_twitter_post() -> void:
-	# Twitter.txt の文面を読み込む
-	const TWITTER_TEXT_PATH: String = "C:/Users/krtek/OneDrive/ドキュメント/GitHub/Katadraw/Resources/Text/Twitter.txt"
-	var tweet_text: String = ""
-	var f: FileAccess = FileAccess.open(TWITTER_TEXT_PATH, FileAccess.READ)
-	if f:
-		tweet_text = f.get_as_text().strip_edges()
-		f.close()
-
-	# URL エンコードして Twitter 投稿フォームを開く
+	# res:// で全環境共通。絶対パスだと他PC・エクスポート版では読めず text が空になる。
+	var tweet_text: String = GameConfig.TWITTER_SHARE_TEXT_DEFAULT
+	var path: String = GameConfig.TWITTER_SHARE_TEXT_PATH
+	if FileAccess.file_exists(path):
+		var f: FileAccess = FileAccess.open(path, FileAccess.READ)
+		if f:
+			var raw: String = f.get_as_text().strip_edges()
+			f.close()
+			if raw != "":
+				tweet_text = raw
 	var encoded: String = tweet_text.uri_encode()
-	OS.shell_open("https://twitter.com/intent/tweet?text=" + encoded)
+	OS.shell_open("%s?text=%s" % [GameConfig.TWITTER_INTENT_URL, encoded])
 
 
 func _take_screenshot() -> void:
@@ -2092,13 +2036,13 @@ func _hit_menu_item(pos: Vector2) -> int:
 
 
 func _hit_config_item(pos: Vector2) -> Dictionary:
-	# 「タイトルに戻る」ボタン（行4）の決定用。値行は ◀▶ は _hit_config_value_arrows。
+	# 「タイトルに戻る」ボタン（最終行）の決定用。値行は ◀▶ は _hit_config_value_arrows。
 	var vp: Vector2 = get_viewport_rect().size
 	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
 	var spacing: float = CONFIG_MENU_SPACING
 	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO
 	var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-	var i: int = 4
+	var i: int = 5
 	var item_y: float = base_y + i * spacing
 	var extra_y: float = vp.y * 0.15 - 35.0
 	var btn_half_w: float = box_w / 2.0
@@ -2108,10 +2052,10 @@ func _hit_config_item(pos: Vector2) -> Dictionary:
 	return {}
 
 
-## 画面モード・言語・BGM/SE の ◀▲ クリック。戻り値: ok, item(0〜3), delta(±1)
+## 画面モード・カーソル制限・言語・BGM/SE の ◀▶ クリック。戻り値: ok, item(0〜4), delta(±1)
 func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 	var vp: Vector2 = get_viewport_rect().size
-	for item_idx in range(4):
+	for item_idx in range(5):
 		var geom: Dictionary = config_row_scaled_layout(vp, item_idx)
 		var Lp: Vector2 = geom["Lp"]
 		var Rp: Vector2 = geom["Rp"]
@@ -2124,10 +2068,10 @@ func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 		var left_enabled: bool = true
 		var right_enabled: bool = true
 		match item_idx:
-			2:
+			3:
 				left_enabled = bgm_volume > 0
 				right_enabled = bgm_volume < 10
-			3:
+			4:
 				left_enabled = se_volume > 0
 				right_enabled = se_volume < 10
 		var left_edge: float = Lp.x - aw * 0.5
@@ -2139,7 +2083,7 @@ func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 	return {}
 
 
-## コンフィグ 0〜3 行の値ボックス中心・矢印位置（get_btn_scale 適用後）。描画とヒット判定で共通。
+## コンフィグ 値行 0〜4 のボックス中心・矢印位置（get_btn_scale 適用後）。描画とヒット判定で共通。
 func config_row_scaled_layout(vp: Vector2, item_idx: int) -> Dictionary:
 	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
 	var spacing: float = CONFIG_MENU_SPACING
@@ -2255,7 +2199,7 @@ func _do_pause_retry() -> void:
 	if cfg.is_empty():
 		var master_idx_r: int = GameConfig.resolve_play_stage_to_master_index(current_stage)
 		cfg = StageDebugOverrides.build_config_for_index(master_idx_r)
-	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(vp))
+	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(vp, current_stage))
 
 
 func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> void:
@@ -3790,7 +3734,7 @@ func _start_stage_debug_test() -> void:
 			meta_stage_name = str((raw["meta"] as Dictionary).get("stage_name", ""))
 		seed(stage_session.start_debug_test(cfg, meta_stage_name))
 		input_recorder = DebugInputRecorder.new()
-		_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size))
+		_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size, idx))
 		input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
 		return
 
@@ -3809,7 +3753,7 @@ func _start_stage_debug_test() -> void:
 	stage_debug_state.last_error = ""
 	seed(stage_session.start_debug_test(cfg))
 	input_recorder = DebugInputRecorder.new()
-	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size))
+	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size, idx))
 	input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
 
 

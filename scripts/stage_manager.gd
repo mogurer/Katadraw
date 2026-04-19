@@ -23,6 +23,11 @@ const REF_R_PERCENTILE := REF_R_PERCENTILE_95
 # ガイド固定サイズ: true で目標図形をプレイヤーに追従せず一定サイズ表示（正帰還ループ防止）
 # guide_follows_player_radius が true のとき代表半径に追従（cfg で 0/1、デフォルトは fish のみ 1）
 const GUIDE_USE_FIXED_SIZE := true
+## HUD 初期配置（正方形）: 各角から重心方向へ寄せる比率（1=角上、小さいほど内側＝引力ですみやすい）
+const HUD_SPAWN_SQUARE_CORNER_INWARD := 0.78
+## HUD 初期配置（円）: 下半円ガイド上に並べる角度範囲（ラジアン）。画面+y 側（下）に偏る
+const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MIN := 0.12 * PI
+const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MAX := 0.88 * PI
 
 # --- Stage state ---
 ## 本編進行 index。custom test / rules demo など main 以外は -1。
@@ -44,17 +49,6 @@ var current_circularity: float = 0.0
 var current_smoothness_error: float = 100.0
 var current_smoothness: float = 0.0
 
-# --- Two circles (group 2) ---
-var group_split: int = 0
-var group1_cleared: bool = false
-var group2_cleared: bool = false
-var current_centroid_2: Vector2 = Vector2.ZERO
-var current_avg_radius_2: float = 0.0
-var current_circularity_error_2: float = 100.0
-var current_circularity_2: float = 0.0
-var current_smoothness_error_2: float = 100.0
-var current_smoothness_2: float = 0.0
-
 # --- Star ---
 var star_rotation: float = 0.0
 var star_outer_r: float = 0.0
@@ -74,10 +68,8 @@ var _cfg_shape_arc: Dictionary = {}
 
 # --- Guide ---
 var guide_center_1: Vector2 = Vector2.ZERO
-var guide_center_2: Vector2 = Vector2.ZERO
 var guide_radius_val: float = 0.0
 var ideal_display_radius: float = 0.0   # 理想形描画用。GUIDE_USE_FIXED_SIZE なら guide_radius_val
-var ideal_display_radius_2: float = 0.0  # two_circles 用
 ## start_stage で解決したマージ済み設定（カスタム idx でも game が build_config_for_index に頼らず参照できる）
 var effective_config: Dictionary = {}
 
@@ -87,19 +79,60 @@ var hud_guide_scale: float = 1.0
 var hud_guide_ref_px: float = 1.0
 var hud_guide_outline_world: Array = []
 var hud_guide_query_world: Array = []
-var hud_two_circle_r: float = 0.0
-var hud_two_circle_c1: Vector2 = Vector2.ZERO
-var hud_two_circle_c2: Vector2 = Vector2.ZERO
 ## HUD ガイドの頂点平均などから求めたスポーン基準（自キャラ初期位置・単一閉曲線の KATA 初期円の中心）
 var hud_guide_spawn_centroid: Vector2 = Vector2.ZERO
 ## 単一閉曲線: KATA を載せる初期円半径（ガイド輪郭から重心までの最大距離 × GameConfig.HUD_INITIAL_RING_SCALE_MUL など）
 var hud_guide_spawn_ring_radius: float = 1.0
-## two_circles: 各グループの円半径に hud_two_circle_r へ掛ける
-var hud_spawn_two_circle_r_mul: float = 1.0
 var _hud_layout_vp: Vector2 = Vector2(-1.0, -1.0)
 var _hud_layout_sc: Vector2 = Vector2.ZERO
 ## 画面フィット後の HUD ガイド半径に乗算（1=従来）。rules デモ等で目標円の見た目だけ縮小する。
 var hud_guide_layout_scale_mul: float = 1.0
+
+
+## 閉じた輪郭（末尾＝先頭とみなす）の幾何学的重心。面積ゼロに近いときは頂点の平均
+func _hud_outline_area_centroid_or_average(outline: Array) -> Vector2:
+	var n: int = outline.size()
+	if n == 0:
+		return Vector2.ZERO
+	if n < 3:
+		var s0 := Vector2.ZERO
+		for q in outline:
+			s0 += q as Vector2
+		return s0 / float(n)
+	var twice_signed: float = 0.0
+	var cx: float = 0.0
+	var cy: float = 0.0
+	for i in range(n):
+		var j: int = (i + 1) % n
+		var pi: Vector2 = outline[i] as Vector2
+		var pj: Vector2 = outline[j] as Vector2
+		var cr: float = pi.x * pj.y - pj.x * pi.y
+		twice_signed += cr
+		cx += (pi.x + pj.x) * cr
+		cy += (pi.y + pj.y) * cr
+	var area: float = twice_signed * 0.5
+	if absf(area) < 1e-4:
+		var s1 := Vector2.ZERO
+		for q in outline:
+			s1 += q as Vector2
+		return s1 / float(n)
+	return Vector2(cx / (3.0 * twice_signed), cy / (3.0 * twice_signed))
+
+
+## KATA 群の重心を hud_guide_spawn_centroid（目標図形の重心）に一致させる
+func _align_point_positions_to_guide_centroid(point_positions: Array[Vector2]) -> void:
+	if point_positions.is_empty():
+		return
+	var g: Vector2 = hud_guide_spawn_centroid
+	var k := Vector2.ZERO
+	for p in point_positions:
+		k += p
+	k /= float(point_positions.size())
+	var d: Vector2 = g - k
+	if d.length_squared() < 0.04:
+		return
+	for i in range(point_positions.size()):
+		point_positions[i] += d
 
 
 func recompute_hud_guide_layout_if_needed(shape_center: Vector2, viewport_size: Vector2) -> void:
@@ -114,7 +147,6 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_center = shape_center
 	hud_guide_outline_world.clear()
 	hud_guide_query_world.clear()
-	hud_two_circle_r = 0.0
 	_hud_layout_vp = viewport_size
 	_hud_layout_sc = shape_center
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
@@ -126,32 +158,12 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	var inner_w: float = play_w * (1.0 - 2.0 * margin)
 	var inner_h: float = play_h * (1.0 - 2.0 * margin)
 
-	if stage_type == "two_circles":
-		var ratio: float = 0.65
-		var obj_gap: float = 20.0
-		var desired_diameter: float = inner_h * ratio
-		var max_diameter_w: float = (inner_w - obj_gap) / 2.0
-		var diameter: float = minf(desired_diameter, max_diameter_w)
-		var rr: float = diameter / 2.0
-		var total_span: float = diameter * 2.0 + obj_gap
-		var start_x: float = shape_center.x - total_span / 2.0 + rr
-		hud_two_circle_r = rr
-		hud_two_circle_c1 = Vector2(start_x, shape_center.y)
-		hud_two_circle_c2 = Vector2(start_x + diameter + obj_gap, shape_center.y)
-		hud_guide_ref_px = maxf(rr, 1.0)
-		hud_guide_scale = rr
-		hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
-		hud_guide_spawn_centroid = (hud_two_circle_c1 + hud_two_circle_c2) * 0.5
-		hud_guide_spawn_ring_radius = hud_two_circle_r * hud_spawn_two_circle_r_mul
-		_apply_hud_correspondence_scale()
-		return
-
 	if ideal_outline_points.is_empty():
 		hud_guide_scale = guide_radius_val * hud_guide_layout_scale_mul
 		hud_guide_ref_px = maxf(hud_guide_scale, 1.0)
-		hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
 		hud_guide_spawn_centroid = shape_center
 		hud_guide_spawn_ring_radius = maxf(hud_guide_scale, 1.0) * GameConfig.HUD_INITIAL_RING_SCALE_MUL
+		guide_center_1 = hud_guide_spawn_centroid
 		_apply_hud_correspondence_scale()
 		return
 
@@ -180,19 +192,16 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	for p in rotated:
 		hud_guide_outline_world.append(shape_center + p * s)
 	hud_guide_query_world = _make_runtime_query_polyline(hud_guide_outline_world)
+	hud_guide_spawn_centroid = _hud_outline_area_centroid_or_average(hud_guide_outline_world)
 	hud_guide_ref_px = 0.001
 	for q in hud_guide_outline_world:
-		hud_guide_ref_px = maxf(hud_guide_ref_px, q.distance_to(shape_center))
+		hud_guide_ref_px = maxf(hud_guide_ref_px, q.distance_to(hud_guide_spawn_centroid))
 	hud_guide_ref_px = maxf(hud_guide_ref_px, 1.0)
-	var acc_c := Vector2.ZERO
-	for q in hud_guide_outline_world:
-		acc_c += q as Vector2
-	hud_guide_spawn_centroid = acc_c / float(hud_guide_outline_world.size())
 	var max_from_c: float = 0.001
 	for q in hud_guide_outline_world:
 		max_from_c = maxf(max_from_c, hud_guide_spawn_centroid.distance_to(q as Vector2))
 	hud_guide_spawn_ring_radius = maxf(max_from_c * GameConfig.HUD_INITIAL_RING_SCALE_MUL, 12.0)
-	hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
+	guide_center_1 = hud_guide_spawn_centroid
 	_apply_hud_correspondence_scale()
 
 
@@ -202,11 +211,6 @@ func _hud_outline_rotation_for_layout() -> float:
 
 func _apply_hud_correspondence_scale() -> void:
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
-		return
-	if stage_type == "two_circles":
-		correspondence_scale = maxf(hud_two_circle_r, 1.0)
-		ideal_display_radius = hud_two_circle_r
-		ideal_display_radius_2 = hud_two_circle_r
 		return
 	if ideal_outline_points.is_empty():
 		return
@@ -311,27 +315,105 @@ func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) 
 		pts[i] = p
 
 
+## 円ガイド: 各点をガイド重心からの半径 hud_guide_ref_px（輪郭との整合）の円周上へ投影
+func _snap_point_positions_to_hud_circle_ring(point_positions: Array[Vector2]) -> void:
+	var c: Vector2 = hud_guide_spawn_centroid
+	var r: float = maxf(hud_guide_ref_px, 1.0)
+	for q in hud_guide_outline_world:
+		r = maxf(r, c.distance_to(q as Vector2))
+	for i in range(point_positions.size()):
+		var d: Vector2 = point_positions[i] - c
+		if d.length_squared() < 1e-10:
+			var a: float = TAU * float(i) / float(maxi(point_positions.size(), 1))
+			d = Vector2(cos(a), sin(a))
+		point_positions[i] = c + d.normalized() * r
+
+
+## 右上 UI 禁忌で y が動いたあとも、KATA 群の重心がガイド重心に戻るよう keep と整列を交互に 2 回
+func _finalize_hud_spawn_points_align_centroid(point_positions: Array[Vector2], viewport_size: Vector2) -> void:
+	if point_positions.is_empty():
+		return
+	_keep_points_inside_playfield(point_positions, viewport_size)
+	_align_point_positions_to_guide_centroid(point_positions)
+	_keep_points_inside_playfield(point_positions, viewport_size)
+	_align_point_positions_to_guide_centroid(point_positions)
+
+
+## 円ステージ: 周上維持のため keep の後にリングへ投影（重心合わせはしない）
+func _finalize_hud_spawn_points_circle_on_guide(point_positions: Array[Vector2], viewport_size: Vector2) -> void:
+	if point_positions.is_empty():
+		return
+	for _k in range(2):
+		_keep_points_inside_playfield(point_positions, viewport_size)
+		_snap_point_positions_to_hud_circle_ring(point_positions)
+
+
+## HUD 正方形ガイド: 輪郭の 4 角（各辺先頭サンプル）を world 座標で取得
+func _hud_square_corner_world_positions() -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	var outline: Array = hud_guide_outline_world
+	if outline.size() < 32:
+		return out
+	for k in range(4):
+		out.append(outline[k * 8] as Vector2)
+	return out
+
+
+## 正方形・4 点: 各理想角に対応する位置を、角から重心へ HUD_SPAWN_SQUARE_CORNER_INWARD だけ内側に固定
+func _rebuild_initial_points_hud_square_attract_friendly(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
+	var corners: Array[Vector2] = _hud_square_corner_world_positions()
+	if corners.size() != 4:
+		return false
+	point_positions.clear()
+	var cent: Vector2 = hud_guide_spawn_centroid
+	var t: float = HUD_SPAWN_SQUARE_CORNER_INWARD
+	for i in range(4):
+		var cw: Vector2 = corners[i]
+		point_positions.append(cent + (cw - cent) * t)
+	return true
+
+
+## 円: ガイド重心からの最大距離＝円半径として周上に全点を置き、角度を下半分（+y 側）に偏らせる
+func _rebuild_initial_points_hud_circle_guide_lower_bias(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
+	var c: Vector2 = hud_guide_spawn_centroid
+	var r: float = 0.001
+	for q in hud_guide_outline_world:
+		r = maxf(r, c.distance_to(q as Vector2))
+	r = maxf(r, hud_guide_ref_px)
+	if r < 4.0:
+		return false
+	var n: int = num_points
+	if n < 1:
+		return false
+	point_positions.clear()
+	var a0: float = HUD_SPAWN_CIRCLE_LOWER_ANGLE_MIN
+	var a1: float = HUD_SPAWN_CIRCLE_LOWER_ANGLE_MAX
+	var span: float = maxf(a1 - a0, 0.001)
+	for i in range(n):
+		var u: float = float(i) / float(maxi(n - 1, 1))
+		# 下半円（+y 側）の中央付近に角度を寄せる（等間隔 u を cos で変形）
+		var u_c: float = 0.5 * (1.0 - cos(PI * u))
+		var a: float = a0 + span * u_c
+		point_positions.append(c + Vector2(cos(a), sin(a)) * r)
+	return true
+
+
 func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vector2, point_positions: Array[Vector2]) -> void:
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
 		return
 	point_positions.clear()
-	var variance_factor: float = float(cfg.get("variance", 0.2))
 
-	if stage_type == "two_circles":
-		var sizes: Array = cfg.get("group_sizes", [num_points / 2, num_points - num_points / 2])
-		group_split = int(sizes[0])
-		var rr_spawn: float = hud_two_circle_r * hud_spawn_two_circle_r_mul
-		for i in range(group_split):
-			var ang1: float = TAU * float(i) / float(maxi(group_split, 1))
-			var noise1: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * rr_spawn
-			point_positions.append(hud_two_circle_c1 + Vector2(cos(ang1), sin(ang1)) * rr_spawn + noise1)
-		var g2_size: int = int(sizes[1]) if sizes.size() > 1 else maxi(num_points - group_split, 0)
-		for i in range(g2_size):
-			var ang2: float = TAU * float(i) / float(maxi(g2_size, 1))
-			var noise2: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor * rr_spawn
-			point_positions.append(hud_two_circle_c2 + Vector2(cos(ang2), sin(ang2)) * rr_spawn + noise2)
-		_keep_points_inside_playfield(point_positions, viewport_size)
-		return
+	# 正方形: 4 角を理想対応に合わせ、角からわずかに内側（引力ですぐガイドへ）
+	if stage_type == "square" and num_points == 4:
+		if _rebuild_initial_points_hud_square_attract_friendly(point_positions, viewport_size):
+			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
+			return
+
+	# 円: 全点をガイド円周上に置き、下半分（画面 +y 側）に偏って配置
+	if stage_type == "circle":
+		if _rebuild_initial_points_hud_circle_guide_lower_bias(point_positions, viewport_size):
+			_finalize_hud_spawn_points_circle_on_guide(point_positions, viewport_size)
+			return
 
 	# 単一閉曲線ステージ: ガイド幾何重心を中心に、ガイドより大きめの円周上等間隔
 	var n_pts: int = num_points
@@ -340,7 +422,7 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 		var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
 		point_positions.append(hud_guide_spawn_centroid + Vector2(cos(ang), sin(ang)) * ring_r)
 
-	_keep_points_inside_playfield(point_positions, viewport_size)
+	_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
 
 
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
@@ -370,7 +452,6 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 	guide_radius_val = (min_radius + max_radius) / 2.0
 	guide_center_1 = shape_center
 	hud_guide_spawn_centroid = shape_center
-	hud_spawn_two_circle_r_mul = GameConfig.HUD_INITIAL_RING_SCALE_MUL
 	hud_guide_spawn_ring_radius = maxf(guide_radius_val * GameConfig.HUD_INITIAL_RING_SCALE_MUL, 12.0)
 
 	_cfg_shape_polygon.clear()
@@ -391,9 +472,6 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		"circle":
 			_generate_circle_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
-		"two_circles":
-			_generate_two_circles(cfg, point_positions, viewport_size)
-			ideal_outline_points = _build_circle_outline()
 		"star":
 			_generate_star_polygon_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
@@ -417,10 +495,7 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			push_error("StageManager: 未対応の type '%s'" % stage_type)
 			return
 
-	group1_cleared = false
-	group2_cleared = false
 	ideal_display_radius = guide_radius_val
-	ideal_display_radius_2 = guide_radius_val
 	var skip_hud_initial_layout: bool = bool(cfg.get("skip_hud_initial_layout", false))
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		recompute_hud_guide_layout(shape_center, viewport_size)
@@ -462,26 +537,6 @@ func _generate_polygon_group(center: Vector2, pts: Array[Vector2], n_pts: int, n
 		dist += zigzag_amount
 
 		pts.append(center + Vector2(cos(angle), sin(angle)) * dist)
-
-
-func _generate_two_circles(cfg: Dictionary, pts: Array[Vector2], vp: Vector2) -> void:
-	var sizes: Array = cfg["group_sizes"]
-	group_split = sizes[0]
-
-	var right_x: float = vp.x * GameConfig.UI_WIDTH_RATIO
-	# プレイエリア中央を基準にセンタリング
-	var play_cx: float = right_x + (vp.x - right_x) * 0.5
-	var play_cy: float = vp.y * 0.5
-	# 現状の半間隔（right_w*0.15）に7.5px加算して両側合計+15px
-	var half_gap: float = vp.x * 0.75 * 0.15 + 7.5
-	var center1 := Vector2(play_cx - half_gap, play_cy)
-	var center2 := Vector2(play_cx + half_gap, play_cy)
-	guide_center_1 = center1
-	guide_center_2 = center2
-
-	var vr: Array = cfg["vertex_range"]
-	_generate_polygon_group(center1, pts, sizes[0], randi_range(vr[0], vr[1]), cfg["variance"], cfg["zigzag"])
-	_generate_polygon_group(center2, pts, sizes[1], randi_range(vr[0], vr[1]), cfg["variance"], cfg["zigzag"])
 
 
 func _generate_circle_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
@@ -547,7 +602,7 @@ func _generate_star_polygon_shape(center: Vector2, pts: Array[Vector2], cfg: Dic
 
 
 func _generate_star_shape(center: Vector2, pts: Array[Vector2], zigzag_factor: float) -> void:
-	"""旧星生成（two_circles 等で _build_star_outline を使う場合のフォールバック）"""
+	"""旧星生成（_build_star_outline を使う場合のフォールバック）"""
 	var base_r: float = (min_radius + max_radius) / 2.0
 	for i in range(num_points):
 		var angle: float = TAU * i / num_points
@@ -1085,8 +1140,7 @@ func _build_square_outline() -> Array:
 
 
 func _get_outline_edges_for_stage(stage_t: String) -> Array:
-	"""辺・弧ごとの点列を返す。Editor由来の「ポイント間を辺または弧で結ぶ」定義。
-	two_circles は空を返し、従来方式に任せる。"""
+	"""辺・弧ごとの点列を返す。Editor由来の「ポイント間を辺または弧で結ぶ」定義。"""
 	match stage_t:
 		"triangle":
 			return _build_triangle_edges()
@@ -1477,37 +1531,6 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			_set_correspondence_scale_from_outline()
 			if stage_type == "triangle":
 				polygon_rotation = -PI / 2.0  # 頂点上向きでガイド表示
-		"two_circles":
-			var m1: Dictionary
-			var m2: Dictionary
-			if GameConfig.USE_SCREEN_HUD_GUIDE:
-				m1 = _calc_hud_screen_arc_metrics(point_positions, 0, group_split, hud_two_circle_c1, hud_two_circle_r)
-				m2 = _calc_hud_screen_arc_metrics(point_positions, group_split, point_positions.size(), hud_two_circle_c2, hud_two_circle_r)
-			else:
-				m1 = _calc_unified_arc_metrics(point_positions, 0, group_split)
-				m2 = _calc_unified_arc_metrics(point_positions, group_split, point_positions.size())
-			current_centroid = m1["centroid"]
-			current_avg_radius = m1["avg_r"]
-			if GameConfig.USE_SCREEN_HUD_GUIDE:
-				ideal_display_radius = hud_two_circle_r
-			else:
-				ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
-			current_circularity_error = m1["circ_err"]
-			current_circularity = m1["circ"]
-			current_smoothness_error = 0.0
-			current_smoothness = 100.0
-
-			current_centroid_2 = m2["centroid"]
-			current_avg_radius_2 = m2["avg_r"]
-			if GameConfig.USE_SCREEN_HUD_GUIDE:
-				ideal_display_radius_2 = hud_two_circle_r
-			else:
-				ideal_display_radius_2 = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius_2
-			current_circularity_error_2 = m2["circ_err"]
-			current_circularity_2 = m2["circ"]
-			current_smoothness_error_2 = 0.0
-			current_smoothness_2 = 100.0
-			_set_correspondence_scale_from_outline()
 		"square", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			_calculate_unified_arc_metrics(point_positions)
 
@@ -1559,7 +1582,7 @@ func _calc_hud_screen_arc_metrics(
 func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) -> Dictionary:
 	"""弧誤差のみ・回転非対応。指定範囲の点群を評価"""
 	var n: int = to_idx - from_idx
-	if GameConfig.USE_SCREEN_HUD_GUIDE and stage_type != "two_circles":
+	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		if n < 1:
 			return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
 		return _calc_hud_screen_arc_metrics(pts, from_idx, to_idx, Vector2.ZERO, -1.0)
@@ -1593,7 +1616,7 @@ func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) 
 			# 辺・弧ごとハウスドルフ h(edge→user) を平均で集約
 			circ_err = _eval_arc_error_per_edge_hausdorff(curr_scaled, edges, ref_size)
 		else:
-			# circle/two_circles: 辺定義なし → 従来方式
+			# circle: 辺定義なし → 従来方式
 			if USE_COMBINED_ARC_ERROR:
 				per_pt = _eval_arc_error_per_point(curr_scaled, ideal_outline_points, n, 0.0, 1.0)
 				var avg_d: float = 0.0
@@ -1709,8 +1732,6 @@ func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> floa
 				ideal_dist = p.distance_to(ideal_pos)
 			else:
 				ideal_dist = get_distance_to_hint_guide_outline(p)
-		"two_circles":
-			ideal_dist = get_distance_to_hint_guide_outline(p)
 		_:
 			return 1.0
 
@@ -1776,9 +1797,6 @@ func get_fixed_guide_loops_world() -> Array:
 		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
 			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
 			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, pts))
-		"two_circles":
-			loops.append(_circle_loop_world(guide_center_1, guide_radius_val))
-			loops.append(_circle_loop_world(guide_center_2, guide_radius_val))
 		_:
 			loops.append(_circle_loop_world(guide_center_1, guide_radius_val))
 	var filtered: Array = []
@@ -1792,11 +1810,6 @@ func get_fixed_guide_loops_world() -> Array:
 func get_active_guide_loops_world() -> Array:
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
 		return get_fixed_guide_loops_world()
-	if stage_type == "two_circles":
-		return [
-			_circle_loop_world(hud_two_circle_c1, hud_two_circle_r),
-			_circle_loop_world(hud_two_circle_c2, hud_two_circle_r),
-		]
 	if hud_guide_query_world.size() >= 2:
 		return [hud_guide_query_world.duplicate()]
 	if hud_guide_outline_world.size() >= 2:
@@ -1841,17 +1854,11 @@ func _distance_point_to_circle_ring_outline(p: Vector2, center: Vector2, r: floa
 ## プレイ中ヒントガイド（draw_hint_shape）と同じ形状への最短距離（画面座標・px）
 func get_distance_to_hint_guide_outline(p: Vector2) -> float:
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
-		match stage_type:
-			"two_circles":
-				var dh1: float = _distance_point_to_circle_ring_outline(p, hud_two_circle_c1, hud_two_circle_r)
-				var dh2: float = _distance_point_to_circle_ring_outline(p, hud_two_circle_c2, hud_two_circle_r)
-				return minf(dh1, dh2)
-			_:
-				if hud_guide_query_world.size() >= 2:
-					return _distance_to_polyline(p, hud_guide_query_world)
-				if hud_guide_outline_world.size() >= 2:
-					return _distance_to_polyline(p, hud_guide_outline_world)
-				return INF
+		if hud_guide_query_world.size() >= 2:
+			return _distance_to_polyline(p, hud_guide_query_world)
+		if hud_guide_outline_world.size() >= 2:
+			return _distance_to_polyline(p, hud_guide_outline_world)
+		return INF
 	var best: float = INF
 	for loop in get_fixed_guide_loops_world():
 		var verts: Array = loop as Array
@@ -1860,21 +1867,8 @@ func get_distance_to_hint_guide_outline(p: Vector2) -> float:
 	return best
 
 
-func is_locked(idx: int) -> bool:
-	if stage_type != "two_circles":
-		return false
-	if idx < group_split:
-		return group1_cleared
-	return group2_cleared
-
-
-func is_group_clear(group: int) -> bool:
-	# 実現率100でクリア = current >= goal_pct (clear_pct)
-	var goal_pct: float = 100.0 - clear_threshold
-	if group == 1:
-		return current_circularity >= goal_pct
-	else:
-		return current_circularity_2 >= goal_pct
+func is_locked(_idx: int) -> bool:
+	return false
 
 
 func is_clear() -> bool:
@@ -1883,20 +1877,8 @@ func is_clear() -> bool:
 	match stage_type:
 		"triangle", "circle", "square", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette":
 			return current_circularity >= goal_pct
-		"two_circles":
-			return group1_cleared and group2_cleared
 	return false
 
 
-func set_group1_cleared() -> void:
-	group1_cleared = true
-
-
-func set_group2_cleared() -> void:
-	group2_cleared = true
-
-
-func get_target_center_for_point(idx: int) -> Vector2:
-	if stage_type == "two_circles":
-		return guide_center_2 if idx >= group_split else guide_center_1
+func get_target_center_for_point(_idx: int) -> Vector2:
 	return guide_center_1

@@ -1,1 +1,1 @@
-#KATADRAW
+リポジトリの Resources/Text/Twitter.txt を編集（UTF-8） #KATADRAW

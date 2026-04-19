@@ -130,6 +130,8 @@ var _pause_anim_time: float = -1.0    # ポーズ開演出の開始時刻
 var _pause_closing: bool = false       # ポーズ閉じ中
 var _stage_intro_time: float = -1.0   # ステージ開始演出の開始時刻
 const STAGE_INTRO_DURATION := 0.5     # 演出の長さ（秒）
+# HUD 秒表示: 一度左上に逃げたら、自キャラが左上エリアに入るまで左上のまま
+var _hud_time_dock_left: bool = false
 var _results_anim_time: float = -1.0  # リザルト画面の開始時刻
 const RESULTS_SLIDE_DURATION := 0.7   # スライドイン所要時間（秒）
 # Result 画面の見出し・TOTAL ラベル（基準からの倍率）
@@ -331,6 +333,7 @@ func on_state_changed(new_state: String) -> void:
 		_clear_anim_time = Time.get_ticks_msec() / 1000.0
 	if new_state == "playing":
 		_stage_intro_time = Time.get_ticks_msec() / 1000.0
+		_hud_time_dock_left = false
 	if new_state == "results":
 		_results_anim_time = Time.get_ticks_msec() / 1000.0
 		results_action_focus_index = 2
@@ -707,10 +710,6 @@ func _draw_stage_debug_type_icon(center: Vector2, r: float, type_str: String, c:
 			_game.draw_rect(Rect2(center.x - s, center.y - s, s * 2.0, s * 2.0), c, false, 2.0)
 		"circle":
 			_game.draw_arc(center, r, 0.0, TAU, nseg, c, 2.0)
-		"two_circles":
-			var rr: float = r * 0.42
-			_game.draw_arc(center + Vector2(-r * 0.38, 0.0), rr, 0.0, TAU, 24, c, 2.0)
-			_game.draw_arc(center + Vector2(r * 0.38, 0.0), rr, 0.0, TAU, 24, c, 2.0)
 		"star":
 			var pts: PackedVector2Array = PackedVector2Array()
 			for i in range(10):
@@ -1116,21 +1115,21 @@ func _draw_config(vp: Vector2) -> void:
 	var label_fs: int = 36
 	var box_h: float = (_game.font_din.get_ascent(50) + _game.font_din.get_descent(50)) * 1.5
 
-	var win_label: String = tr("CONFIG_FULLSCREEN") if _game.is_fullscreen else tr("CONFIG_WINDOW")
 	var item_labels: Array[String] = [
-		tr("CONFIG_WINDOW_MODE"), tr("CONFIG_LANGUAGE"),
-		tr("CONFIG_BGM_VOLUME"), tr("CONFIG_SE_VOLUME"), tr("CONFIG_BACK")
+		tr("CONFIG_WINDOW_MODE"), tr("CONFIG_MOUSE_CONFINE"), tr("CONFIG_LANGUAGE"),
+		tr("CONFIG_BGM_VOLUME"), tr("CONFIG_SE_VOLUME"), tr("CONFIG_BACK"),
 	]
 	var item_values: Array[String] = [
-		win_label, _game.config_language_ui_label(), str(_game.bgm_volume), str(_game.se_volume), ""
+		_game.config_display_mode_ui_label(), _game.config_mouse_confine_ui_label(),
+		_game.config_language_ui_label(), str(_game.bgm_volume), str(_game.se_volume), "",
 	]
 
 	var arrow_fs: int = 28
 
-	for i in range(5):
+	for i in range(6):
 		var item_y: float = base_y + i * spacing
 		var is_sel: bool = (i == _game.config_index)
-		if i == 4:
+		if i == 5:
 			# 「タイトルに戻る」— タイトルメニューと同じく is_off=非選択（薄ベージュ＋濃字）、選択時は赤
 			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.15 - 35.0)
 			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, box_w)
@@ -1152,8 +1151,8 @@ func _draw_config(vp: Vector2) -> void:
 		_game.draw_rect(Rect2(box_rect.position + shadow_offset, box_rect.size), Color(0.26, 0.21, 0.28, 0.30))
 		_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
 		_game.draw_rect(box_rect, Color(0.26, 0.21, 0.28), false, 5.75)
-		var val_font: Font = _game.font_din if (i == 2 or i == 3) else _game.font
-		var val_fs: int = 50 if (i == 2 or i == 3) else 34
+		var val_font: Font = _game.font_din if (i == 3 or i == 4) else _game.font
+		var val_fs: int = 50 if (i == 3 or i == 4) else 34
 		var val_baseline_y: float = box_rect.position.y + (bh + val_font.get_ascent(val_fs) - val_font.get_descent(val_fs)) * 0.5
 		_game.draw_string(val_font, Vector2(box_rect.position.x, val_baseline_y), item_values[i], HORIZONTAL_ALIGNMENT_CENTER, bw, val_fs, val_c)
 		var c: Color = sel_c if is_sel else text_c
@@ -1165,10 +1164,10 @@ func _draw_config(vp: Vector2) -> void:
 		var left_enabled: bool = true
 		var right_enabled: bool = true
 		match i:
-			2:
+			3:
 				left_enabled = _game.bgm_volume > 0
 				right_enabled = _game.bgm_volume < 10
-			3:
+			4:
 				left_enabled = _game.se_volume > 0
 				right_enabled = _game.se_volume < 10
 		var down_x: float = Lp.x - aw * 0.5
@@ -1373,6 +1372,7 @@ func _draw_rules(vp: Vector2) -> void:
 	# 本編と同じ HUD 円形ガイド（物理の get_active_guide_loops と一致させるため shape_center で再計算）
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(_game.shape_center, vp)
+		_game.guide_center_1 = _game.stage_manager.guide_center_1
 		_stage_renderer.draw_hud_overlay_guide(0.7)
 
 	# 中央: デモ図形の線・頂点（自キャラは [つぎへ] の上に重ねる）
@@ -1467,22 +1467,10 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 		return
 	if _game.is_polygon_walk_order_active():
 		var ord: PackedInt32Array = _game.polygon_walk_order
-		if _game.stage_type == "two_circles":
-			var split: int = _game.group_split
-			var g2: int = n - split
-			for k in range(split):
-				var a: int = ord[k]
-				var b: int = ord[(k + 1) % split]
-				_game.draw_line(_game.point_positions[a], _game.point_positions[b], LINE_COLOR, LINE_WIDTH, true)
-			for t in range(g2):
-				var a2: int = ord[split + t]
-				var b2: int = ord[split + (t + 1) % g2]
-				_game.draw_line(_game.point_positions[a2], _game.point_positions[b2], LINE_COLOR, LINE_WIDTH, true)
-		else:
-			for k in range(n):
-				var a: int = ord[k]
-				var b: int = ord[(k + 1) % n]
-				_game.draw_line(_game.point_positions[a], _game.point_positions[b], LINE_COLOR, LINE_WIDTH, true)
+		for k in range(n):
+			var a: int = ord[k]
+			var b: int = ord[(k + 1) % n]
+			_game.draw_line(_game.point_positions[a], _game.point_positions[b], LINE_COLOR, LINE_WIDTH, true)
 	else:
 		for i in range(n):
 			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
@@ -1509,15 +1497,10 @@ func _draw_game(vp: Vector2) -> void:
 	_draw_bg(vp)
 
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
-		var sc: Vector2 = Vector2(
-			vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5,
-			vp.y * 0.5
-		)
-		# STAGE1（三角形）の見本のみ100px下に移動
-		if _game.stage_manager.current_stage == 0:
-			sc.y += 100.0
+		var sc: Vector2 = GameConfig.hud_playfield_shape_center(vp, _game.stage_manager.current_stage)
 		_game.shape_center = sc
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(sc, vp)
+		_game.guide_center_1 = _game.stage_manager.guide_center_1
 
 	# プレイ中の見た目と物理座標を一致させるため、描画時の拡大変換は使わない。
 	var intro_scale: float = 1.0
@@ -1533,7 +1516,6 @@ func _draw_game(vp: Vector2) -> void:
 
 	# 2. ユーザーの図形（線・ポイント・エフェクト）
 	_stage_renderer.draw_stage_lines()
-	_stage_renderer.draw_group_cleared_rings()
 
 	_refresh_guide_point_distance_bounds()
 	var focus_idx: int = _game.input_handler.get_player_focus_index()
@@ -1583,11 +1565,7 @@ func _draw_game(vp: Vector2) -> void:
 		if idx >= 0 and idx < _game.point_positions.size():
 			var pt: Vector2 = _game.input_handler.get_player_position()
 			var offset: Vector2 = Vector2(28.0, 32.0)
-			var circ_val: float
-			if _game.stage_type == "two_circles" and idx >= _game.group_split:
-				circ_val = _game.get_display_reproduction_rate_floor(_game.current_circularity_2)
-			else:
-				circ_val = _game.get_display_reproduction_rate_floor(_game.current_circularity)
+			var circ_val: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
 			var rate_text: String = "%.1f%%" % circ_val
 			var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(circ_val)
 			_draw_realization_rate_with_glow(pt + offset, rate_text, rate_color)
@@ -2049,10 +2027,17 @@ func _draw_guide_info(vp: Vector2) -> void:
 	var intro_shape_h: float = 360.0
 	# ステージ別見本サイズ調整（線幅は変更しない）
 	var guide_shape_scale: float = 1.0
-	match _game.stage_manager.current_stage:
-		1, 4: guide_shape_scale = 0.75  # 正方形・ねこ顔（旧 STAGE2 / STAGE7 相当）
-		5:    guide_shape_scale = 0.90  # マグカップ（旧 STAGE8）
-		6:    guide_shape_scale = 0.88  # 七芒星シルエット
+	match _game.stage_type:
+		"square":
+			guide_shape_scale = 0.375  # 従来 index1 の 0.75 の半分
+		"cat_face":
+			guide_shape_scale = 0.75
+		_:
+			match _game.stage_manager.current_stage:
+				5:
+					guide_shape_scale = 0.90  # マグカップ
+				6:
+					guide_shape_scale = 0.88  # 七芒星シルエット
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(
 			Vector2(play_cx, shape_cy),
@@ -2310,13 +2295,14 @@ func _draw_hud_time_fixed_width(pos: Vector2, elapsed: float, fs: int, color: Co
 
 
 func _draw_hud(vp: Vector2) -> void:
+	# 経過秒（小数第2位）。枠なし・等幅7文字で桁ブレ抑制。右上が塞がれたら左上へ逃げ、左上に戻るまで左上維持。
+	const HUD_CORNER_ZONE_W: float = 280.0
+	const HUD_CORNER_ZONE_H: float = 110.0
 	var right_margin: float = 24.0
-	var label_fs: int = 36
+	var left_margin: float = 24.0
 	var value_fs: int = int(52 * 0.85)  # 85%に縮小
 	var hud_black: Color = Color(0.26, 0.21, 0.28)
-	var box_w: float = 350.0
-	var box_h: float = 60.0
-	var shadow_offset := Vector2(12.5, 12.5)
+	var top_y: float = 20.0
 
 	var elapsed: float
 	if _game.game_state == "cleared":
@@ -2326,53 +2312,52 @@ func _draw_hud(vp: Vector2) -> void:
 	else:
 		elapsed = maxf(0.0, Time.get_ticks_msec() / 1000.0 - _game.start_time)
 
-	# ラベル幅を計算
-	var stage_label: String = "STAGE"
-	var time_label: String = "TIME"
-	var label_w: float = _game.font_din.get_string_size(stage_label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_fs).x
-	var time_label_w: float = _game.font_din.get_string_size(time_label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_fs).x
-	var max_label_w: float = maxf(label_w, time_label_w)
-	var label_gap: float = 12.0
+	var e_snapped: float = snappedf(clampf(elapsed, 0.0, 9999.99), 0.01)
+	var bare: String = "%.2f" % e_snapped
+	var time_str: String = bare
+	while time_str.length() < 7:
+		time_str = " " + time_str
 
-	var box_x_base: float = vp.x - right_margin - box_w - 10.0  # 左に10pix移動
-	var label_x_base: float = box_x_base - max_label_w - label_gap - 10.0  # 左に10pix移動
+	var adv: float = 0.0
+	var adv_chars: String = "0123456789. "
+	for i in range(adv_chars.length()):
+		var ch0: String = adv_chars.substr(i, 1)
+		adv = maxf(adv, _game.font_din.get_string_size(ch0, HORIZONTAL_ALIGNMENT_LEFT, -1, value_fs).x)
+	var text_w: float = adv * float(time_str.length())
 
-	# --- スライドイン演出 ---
+	if _game.input_handler.has_player_avatar():
+		var pr: float = InputHandler.PLAYER_RADIUS + 28.0
+		var ppos: Vector2 = _game.input_handler.get_player_position()
+		var in_tr: bool = (ppos.x + pr > vp.x - HUD_CORNER_ZONE_W) and (ppos.y - pr < HUD_CORNER_ZONE_H)
+		var in_tl: bool = (ppos.x - pr < HUD_CORNER_ZONE_W) and (ppos.y - pr < HUD_CORNER_ZONE_H)
+		if in_tr:
+			_hud_time_dock_left = true
+		elif in_tl:
+			_hud_time_dock_left = false
+
+	var dock_left: bool = _hud_time_dock_left
+
+	var text_x_base: float
+	if dock_left:
+		text_x_base = left_margin
+	else:
+		text_x_base = vp.x - right_margin - text_w
+
 	var intro_t: float = get_stage_intro_progress()
-	var slide_dist: float = box_w + max_label_w + label_gap + right_margin + 40.0  # 画面外に出る距離
-	# STAGE: 即座にスライド開始
-	var stage_slide_t: float = clampf(intro_t / 0.8, 0.0, 1.0)  # 0〜80%の区間で完了
-	var stage_offset_x: float = slide_dist * (1.0 - _ease_out_cubic(stage_slide_t))
-	# TIME: 少し遅れてスライド開始
-	var time_slide_t: float = clampf((intro_t - 0.2) / 0.8, 0.0, 1.0)  # 20%〜100%の区間で完了
-	var time_offset_x: float = slide_dist * (1.0 - _ease_out_cubic(time_slide_t))
+	var slide_t: float = clampf(intro_t / 0.8, 0.0, 1.0)
+	var slide_dist: float = text_w + right_margin + left_margin + 40.0
+	var intro_offset_x: float
+	if dock_left:
+		intro_offset_x = -slide_dist * (1.0 - _ease_out_cubic(slide_t))
+	else:
+		intro_offset_x = slide_dist * (1.0 - _ease_out_cubic(slide_t))
+	var x: float = text_x_base + intro_offset_x
 
-	var box_x: float = box_x_base + stage_offset_x
-	var label_x: float = label_x_base + stage_offset_x
-
-	# STAGE ボックス
-	var stage_y: float = 20.0
-	_game.draw_string(_game.font_din, Vector2(label_x, stage_y + 42.0), stage_label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_fs, hud_black)
-	var stage_box := Rect2(box_x, stage_y, box_w, box_h)
-	_game.draw_rect(Rect2(stage_box.position + shadow_offset, stage_box.size), Color(0.26, 0.21, 0.28, 0.30))
-	_game.draw_rect(stage_box, Color(1.0, 1.0, 1.0))
-	_game.draw_rect(stage_box, Color(0.26, 0.21, 0.28), false, 5.75)
-	var stage_val: String = _game._stage_display_number_text()
-	var stage_baseline: float = stage_y + (box_h + _game.font_din.get_ascent(value_fs) - _game.font_din.get_descent(value_fs)) * 0.5 - 3.0
-	_draw_monospace_number(_game.font_din, Vector2(box_x, stage_baseline), stage_val, HORIZONTAL_ALIGNMENT_CENTER, box_w, value_fs, hud_black)
-
-	# TIME ボックス（STAGE枠の下端から20px空ける）— 別のオフセット
-	var time_box_x: float = box_x_base + time_offset_x
-	var time_label_x: float = label_x_base + time_offset_x
-	var time_y: float = stage_y + box_h + 20.0
-	_game.draw_string(_game.font_din, Vector2(time_label_x, time_y + 42.0), time_label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_fs, hud_black)
-	var time_box := Rect2(time_box_x, time_y, box_w, box_h)
-	_game.draw_rect(Rect2(time_box.position + shadow_offset, time_box.size), Color(0.26, 0.21, 0.28, 0.30))
-	_game.draw_rect(time_box, Color(1.0, 1.0, 1.0))
-	_game.draw_rect(time_box, Color(0.26, 0.21, 0.28), false, 5.75)
-	var time_val: String = "%.1fs" % elapsed
-	var time_baseline: float = time_y + (box_h + _game.font_din.get_ascent(value_fs) - _game.font_din.get_descent(value_fs)) * 0.5 - 3.0
-	_draw_monospace_number(_game.font_din, Vector2(time_box_x, time_baseline), time_val, HORIZONTAL_ALIGNMENT_CENTER, box_w, value_fs, hud_black)
+	var baseline_y: float = top_y + _game.font_din.get_ascent(value_fs) - 3.0
+	for i in range(time_str.length()):
+		var c: String = time_str.substr(i, 1)
+		_game.draw_string(_game.font_din, Vector2(x, baseline_y), c, HORIZONTAL_ALIGNMENT_LEFT, -1, value_fs, hud_black)
+		x += adv
 
 
 # =============================================================================
@@ -2387,45 +2372,17 @@ func _draw_clear_fill() -> void:
 	if n < 3:
 		return
 	var fill_color := Color(0.949, 0.188, 0.322, 0.5)  # #f23052, 50%透過
-	if _game.stage_type == "two_circles":
-		# グループ1: 完成済みなら塗りつぶし
-		if _game.group1_cleared:
-			var poly1 := PackedVector2Array()
-			if _game.is_polygon_walk_order_active():
-				var ord: PackedInt32Array = _game.polygon_walk_order
-				for k in range(_game.group_split):
-					poly1.append(positions[ord[k]])
-			else:
-				for i in range(_game.group_split):
-					poly1.append(positions[i])
-			if poly1.size() >= 3:
-				_game.draw_colored_polygon(poly1, fill_color)
-		# グループ2: 完成済みなら塗りつぶし
-		if _game.group2_cleared:
-			var poly2 := PackedVector2Array()
-			if _game.is_polygon_walk_order_active():
-				var ord2: PackedInt32Array = _game.polygon_walk_order
-				var split: int = _game.group_split
-				var g2: int = n - split
-				for t in range(g2):
-					poly2.append(positions[ord2[split + t]])
-			else:
-				for i in range(_game.group_split, n):
-					poly2.append(positions[i])
-			if poly2.size() >= 3:
-				_game.draw_colored_polygon(poly2, fill_color)
-	else:
-		# 単一オブジェクト: clearedステートでのみ塗りつぶし
-		if _game.game_state == "cleared":
-			var poly := PackedVector2Array()
-			if _game.is_polygon_walk_order_active():
-				var ord: PackedInt32Array = _game.polygon_walk_order
-				for k in range(n):
-					poly.append(positions[ord[k]])
-			else:
-				for i in range(n):
-					poly.append(positions[i])
-			_game.draw_colored_polygon(poly, fill_color)
+	# 単一オブジェクト: clearedステートでのみ塗りつぶし
+	if _game.game_state == "cleared":
+		var poly := PackedVector2Array()
+		if _game.is_polygon_walk_order_active():
+			var ord: PackedInt32Array = _game.polygon_walk_order
+			for k in range(n):
+				poly.append(positions[ord[k]])
+		else:
+			for i in range(n):
+				poly.append(positions[i])
+		_game.draw_colored_polygon(poly, fill_color)
 
 
 func _draw_clear_overlay(vp: Vector2) -> void:
