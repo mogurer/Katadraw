@@ -194,10 +194,6 @@ var _pad_move_ramp_ms: float = 0.0
 var _empty_repulse_stationary_ms: float = 0.0
 ## 引力ホールド中の静止累積（ms）
 var _empty_attract_stationary_ms: float = 0.0
-## X 引力を押し続けている時間（移動中も加算）。視覚エフェクトの波速にのみ使用。
-var _attract_visual_hold_ms: float = 0.0
-## A 斥力を押し続けている時間（移動中も加算）。視覚エフェクトの波速にのみ使用。
-var _repulse_visual_hold_ms: float = 0.0
 var _empty_repulse_radius_bonus: float = 0.0
 var _empty_attract_radius_bonus: float = 0.0
 ## A+X（またはマウス左右同時）長押しで等間隔用斥力を有効にしているフレーム
@@ -290,8 +286,6 @@ func reset_for_stage() -> void:
 	_empty_attract_radius_bonus = 0.0
 	_ax_spacing_active = false
 	_ax_spacing_hold_ms = 0.0
-	_attract_visual_hold_ms = 0.0
-	_repulse_visual_hold_ms = 0.0
 	_pad_move_ramp_ms = 0.0
 	_reset_player_position()
 
@@ -906,8 +900,6 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
-		_attract_visual_hold_ms = 0.0
-		_repulse_visual_hold_ms = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
@@ -919,8 +911,6 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
-		_attract_visual_hold_ms = 0.0
-		_repulse_visual_hold_ms = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
@@ -932,8 +922,6 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
-		_attract_visual_hold_ms = 0.0
-		_repulse_visual_hold_ms = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if not player_position_initialized:
@@ -1039,16 +1027,6 @@ func process_pad(delta: float) -> void:
 	else:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
-
-	if in_play_ef and player_force_attracting:
-		_attract_visual_hold_ms = minf(_attract_visual_hold_ms + delta * 1000.0, 600000.0)
-	else:
-		_attract_visual_hold_ms = 0.0
-
-	if in_play_ef and player_force_repelling:
-		_repulse_visual_hold_ms = minf(_repulse_visual_hold_ms + delta * 1000.0, 600000.0)
-	else:
-		_repulse_visual_hold_ms = 0.0
 
 	var speed_mul: float = _get_player_speed_multiplier()
 	var moved: bool = false
@@ -2406,14 +2384,6 @@ func get_effective_player_force_visual_radius() -> float:
 func get_base_player_force_visual_radius() -> float:
 	"""チャージ前の基準半径（PLAYER_FORCE_RADIUS + ポイント半径）。引力グラデの内側アンカー用。"""
 	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS
-
-
-func get_player_attract_visual_hold_ms() -> float:
-	return _attract_visual_hold_ms
-
-
-func get_player_repulse_visual_hold_ms() -> float:
-	return _repulse_visual_hold_ms
 
 
 func is_player_attracting() -> bool:
