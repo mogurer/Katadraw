@@ -28,7 +28,7 @@ func draw_stage_lines() -> void:
 			_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
 		return
 	match _game.stage_type:
-		"triangle", "square", "hexagon", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"triangle", "square", "hexagon", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			for i in range(n):
 				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
 		_:
@@ -50,7 +50,7 @@ func draw_ideal_shape() -> void:
 			_draw_ideal_points_outline(_game.current_centroid, _game.ideal_points, _game.correspondence_scale, _game.correspondence_rotation, _game.IDEAL_CIRCLE_COLOR, 2.5)
 		"hexagon":
 			_draw_ideal_points_outline(_game.current_centroid, _game.ideal_points, _game.correspondence_scale, _game.correspondence_rotation, _game.IDEAL_CIRCLE_COLOR, 2.5)
-		"cat_face", "fish":
+		"cat_face", "fish", "rugby_ball":
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			_draw_ideal_points_outline(_game.current_centroid, pts, _game.correspondence_scale, _game.correspondence_rotation, _game.IDEAL_CIRCLE_COLOR, 2.5)
 		"circle":
@@ -120,6 +120,11 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			var pts_f: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			_draw_ideal_points_outline(center + offset1, pts_f, _game.guide_radius_val * size_scale, _game.correspondence_rotation, col, width)
+		"rugby_ball":
+			var col_rb := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+			var pts_rb: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
+			var base_rb: float = _game.guide_radius_val
+			_draw_ideal_points_outline(center + offset1, pts_rb, base_rb * size_scale, _game.correspondence_rotation, col_rb, width)
 		_:
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			_draw_ring(center + offset1, r_scaled, col, width)
@@ -225,6 +230,8 @@ func get_type_description() -> String:
 			return _game.tr("GUIDE_TYPE_HEPTAGRAM")
 		"heptagram_silhouette":
 			return _game.tr("GUIDE_TYPE_HEPTAGRAM_SILHOUETTE")
+		"rugby_ball":
+			return _game.tr("GUIDE_TYPE_RUGBY_BALL")
 		_:
 			return ""
 
@@ -233,7 +240,7 @@ func get_type_description() -> String:
 
 func draw_hud_metrics(hx: float, hw: float, goal_pct: float, draw_string_fit: Callable) -> void:
 	match _game.stage_type:
-		"triangle", "square", "hexagon", "circle", "star", "cat_face", "fish":
+		"triangle", "square", "hexagon", "circle", "star", "cat_face", "fish", "rugby_ball":
 			var smooth_color: Color = _metric_color(_game.current_smoothness_error)
 			draw_string_fit.call(Vector2(hx, 240), _game.tr("HUD_SMOOTHNESS") % _game.current_smoothness, hw, 66, smooth_color)
 			draw_string_fit.call(Vector2(hx, 330), _game.tr("HUD_GOAL_BOTH") % goal_pct, hw, 45, Color(0.45, 0.38, 0.45))
@@ -249,7 +256,7 @@ func draw_clear_metrics(tx: float, y: float, tw: float) -> void:
 	# 実現率（表示値）をクリア画面にも表示。切り捨てで100.0%と未クリアの不整合を防ぐ
 	var circ_display: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
 	match _game.stage_type:
-		"triangle", "square", "hexagon", "circle", "star", "cat_face", "fish":
+		"triangle", "square", "hexagon", "circle", "star", "cat_face", "fish", "rugby_ball":
 			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
 		_:
 			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
@@ -421,7 +428,7 @@ func _get_ideal_vertex_loops() -> Array:
 				var a: float = TAU * i / _game.CIRCLE_SEGMENTS
 				v.append(_game.current_centroid + Vector2(cos(a), sin(a)) * _game.ideal_display_radius)
 			result.append(v)
-		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			if pts.is_empty():
 				return result

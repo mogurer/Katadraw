@@ -98,6 +98,7 @@ GUIDE_TYPE_CAT_FACE,ねこの顔を作ろう,Make a cat face,画一张猫脸,畫
 GUIDE_TYPE_FISH,さかなを作ろう,Make a fish,画一条鱼,畫一條魚
 GUIDE_TYPE_HEPTAGRAM,七芒星を作ろう,Make a heptagram (7-pointed star),画一个七芒星,畫一個七芒星
 GUIDE_TYPE_HEPTAGRAM_SILHOUETTE,七芒星のシルエットを作ろう,Make a heptagram silhouette,画一个七芒星轮廓,畫一個七芒星輪廓
+GUIDE_TYPE_RUGBY_BALL,ラグビーボールの形を作ろう,Trace the prolate oval (rugby ball shape),画一个长球状轮廓,畫一個長球狀輪廓
 MENU_GAME_START,ゲームスタート,Game Start,开始游戏,開始遊戲
 MENU_CONFIG,コンフィグ,Config,设置,設定
 CONFIG_WINDOW_MODE,画面モード,Window Mode,窗口模式,視窗模式

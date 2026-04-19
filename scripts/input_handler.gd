@@ -74,9 +74,11 @@ const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
 ## A+X 同時長押し: 頂点同士を押し広げて周上の等間隔に近づける追加斥力（長押しで増幅、上限あり）
 ## 長押しは最大 3 秒で頭打ち。最大強さは旧実装（飽和時）比 2 倍。
 const AX_SPACING_HOLD_CAP_MS := 3000.0
-## この距離より遠い頂点同士には A+X 追加斥力は乗らない（大きい輪郭でも隣同士に効くよう余裕を持たせる）
+## A+X 追加斥力は「多角形の辺で隣り合う頂点ペア」のみ（全ペアだと n² で描画・物理とも重い）。
+## 周上の等間隔化は主に隣接間隔の調整で足りる想定。
+## この距離より遠いペアには追加斥力は乗らない（大きい輪郭でも隣同士に効くよう余裕を持たせる）
 const AX_SPACING_REPULSE_DISTANCE := 400.0
-const AX_SPACING_REPULSE_STRENGTH := 5200.0
+const AX_SPACING_REPULSE_STRENGTH := 10240.0
 const AX_SPACING_REPULSE_MIN_DISTANCE := 2.0
 const AX_SPACING_MAX_STRENGTH_MUL := 2.0
 ## A+X+L/R: 未ロック頂点を全体回転（ガイド上はレール方向へスライド）
@@ -211,6 +213,12 @@ var _ax_spacing_active: bool = false
 var _ax_spacing_hold_ms: float = 0.0
 ## A+X+肩: -1=L（画面で反時計回り） / +1=R（時計回り）、0=なし
 var _ax_rotate_mode: int = 0
+
+# --- 空間グリッド用: 点-辺斥力の visited 世代管理 ---
+## _apply_point_edge_repulsion 内での重複チェックを Dictionary 割り当てなしで行うための世代カウンタ
+var _edge_repulse_gen: int = 0
+## 各点インデックスが最後に処理された世代番号。_edge_repulse_gen と一致すれば処理済み
+var _edge_repulse_visited: PackedInt32Array = PackedInt32Array()
 
 # --- game reference ---
 var _game: Node2D
@@ -1304,10 +1312,12 @@ func _step_drag_physics(delta: float) -> bool:
 			player_force = _remap_player_force_when_distant_on_guide(i, nearest_features[i], player_force)
 			forces[i] += player_force
 			player_influenced_point_count += 1
-	_apply_point_pair_repulsion(forces)
+	# 空間グリッドを1回だけ構築して pair/edge 両方の斥力計算で使い回す
+	var _pos_grid: Dictionary = _build_position_grid(POINT_PAIR_REPULSE_DISTANCE)
+	_apply_point_pair_repulsion(forces, _pos_grid)
 	if _ax_spacing_active and _ax_spacing_hold_ms > 0.5:
 		_apply_ax_spacing_equal_spacing_repulsion(forces)
-	_apply_point_edge_repulsion(forces)
+	_apply_point_edge_repulsion(forces, _pos_grid)
 	_apply_polygon_ccw_order_constraint(forces)
 	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
 	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
@@ -1592,27 +1602,54 @@ func _enforce_point_pair_hard_separation(lo: Vector2, hi: Vector2) -> void:
 			break
 
 
-func _apply_point_pair_repulsion(forces: Array[Vector2]) -> void:
+func _build_position_grid(cell_size: float) -> Dictionary:
+	"""現在の point_positions を cell_size のグリッドに登録して返す。
+	各セルは Vector2i キーに対して点インデックスの Array を持つ。
+	pair/edge 斥力の O(n²) → O(n) 化に使う。"""
+	var grid: Dictionary = {}
+	var inv: float = 1.0 / cell_size
+	for i in range(_game.point_positions.size()):
+		var p: Vector2 = _game.point_positions[i]
+		var key: Vector2i = Vector2i(int(floor(p.x * inv)), int(floor(p.y * inv)))
+		if not grid.has(key):
+			grid[key] = []
+		(grid[key] as Array).append(i)
+	return grid
+
+
+func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> void:
+	"""グリッドで近傍セル（3×3）のみ確認して点間斥力を適用。O(n²) → O(n)。"""
 	var n_vert: int = _game.point_positions.size()
 	var rs: float = _ax_rotate_pair_repulse_scale()
+	var thr: float = POINT_PAIR_REPULSE_DISTANCE
+	var threshold_sq: float = thr * thr
+	var inv: float = 1.0 / thr  # cell_size == thr なので 1セル分が閾値半径に対応
 	for i in range(n_vert):
 		if _is_locked(i):
 			continue
-		for j in range(i + 1, n_vert):
-			if _is_locked(j):
-				continue
-			var thr: float = POINT_PAIR_REPULSE_DISTANCE
-			var threshold_sq: float = thr * thr
-			var delta: Vector2 = _game.point_positions[j] - _game.point_positions[i]
-			var dist_sq: float = delta.length_squared()
-			if dist_sq > threshold_sq:
-				continue
-			var dist: float = maxf(sqrt(dist_sq), POINT_PAIR_REPULSE_MIN_DISTANCE)
-			var falloff: float = 1.0 - dist / thr
-			var dir: Vector2 = delta / dist
-			var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * rs * falloff * falloff)
-			forces[i] -= force
-			forces[j] += force
+		var pi: Vector2 = _game.point_positions[i]
+		var cx: int = int(floor(pi.x * inv))
+		var cy: int = int(floor(pi.y * inv))
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var key: Vector2i = Vector2i(cx + dx, cy + dy)
+				if not grid.has(key):
+					continue
+				for j in (grid[key] as Array):
+					if j <= i:
+						continue  # 対称ペアの重複を回避
+					if _is_locked(j):
+						continue
+					var delta: Vector2 = _game.point_positions[j] - pi
+					var dist_sq: float = delta.length_squared()
+					if dist_sq > threshold_sq:
+						continue
+					var dist: float = maxf(sqrt(dist_sq), POINT_PAIR_REPULSE_MIN_DISTANCE)
+					var falloff: float = 1.0 - dist / thr
+					var dir: Vector2 = delta / dist
+					var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * rs * falloff * falloff)
+					forces[i] -= force
+					forces[j] += force
 
 
 ## ワールド座標の2頂点間。戻りは i→j 方向の斥力ベクトル（i に -v、j に +v を足す用）
@@ -1660,51 +1697,49 @@ func get_polygon_loop_edge_endpoints_world() -> Array:
 
 
 func get_ax_spacing_repulsion_debug_segments() -> Array:
-	"""描画用: A+X 等間隔斥力が作用するペアごとに { from, to, magnitude }（ワールド座標）"""
+	"""描画用: A+X 等間隔斥力が作用する辺ごとに { from, to, magnitude }（ワールド座標）"""
 	var out: Array = []
 	if not _ax_spacing_active or _ax_spacing_hold_ms <= 0.5:
 		return out
 	var strength_mul: float = _ax_spacing_strength_mul_now()
 	if strength_mul < 0.001:
 		return out
-	var n_vert: int = _game.point_positions.size()
-	for i in range(n_vert):
-		if _is_locked(i):
+	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
+	for e in edges:
+		var i: int = e.x
+		var j: int = e.y
+		if _is_locked(i) or _is_locked(j):
 			continue
-		for j in range(i + 1, n_vert):
-			if _is_locked(j):
-				continue
-			var pi: Vector2 = _game.point_positions[i]
-			var pj: Vector2 = _game.point_positions[j]
-			var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, strength_mul)
-			var mag: float = fvec.length()
-			if mag < 0.05:
-				continue
-			out.append({"from": pi, "to": pj, "magnitude": mag})
+		var pi: Vector2 = _game.point_positions[i]
+		var pj: Vector2 = _game.point_positions[j]
+		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, strength_mul)
+		var mag: float = fvec.length()
+		if mag < 0.05:
+			continue
+		out.append({"from": pi, "to": pj, "magnitude": mag})
 	return out
 
 
 func _apply_ax_spacing_equal_spacing_repulsion(forces: Array[Vector2]) -> void:
-	"""A+X 長押し: 既存の近距離斥力に加え、距離に応じた追加斥力（長押しで増幅）"""
+	"""A+X 長押し: 既存の近距離斥力に加え、辺で隣る頂点間のみ追加斥力（長押しで増幅）"""
 	var strength_mul: float = _ax_spacing_strength_mul_now()
 	if strength_mul < 0.001:
 		return
-	var n_vert: int = _game.point_positions.size()
-	for i in range(n_vert):
-		if _is_locked(i):
+	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
+	for e in edges:
+		var i: int = e.x
+		var j: int = e.y
+		if _is_locked(i) or _is_locked(j):
 			continue
-		for j in range(i + 1, n_vert):
-			if _is_locked(j):
-				continue
-			var fvec: Vector2 = _ax_spacing_pair_repulsion_force(
-				_game.point_positions[i],
-				_game.point_positions[j],
-				strength_mul
-			)
-			if fvec.length_squared() < 1e-12:
-				continue
-			forces[i] -= fvec
-			forces[j] += fvec
+		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(
+			_game.point_positions[i],
+			_game.point_positions[j],
+			strength_mul
+		)
+		if fvec.length_squared() < 1e-12:
+			continue
+		forces[i] -= fvec
+		forces[j] += fvec
 
 
 func _get_polygon_edges_for_repulsion() -> Array[Vector2i]:
@@ -1780,38 +1815,59 @@ func _resolve_polygon_edge_intersection_circle_around_player(lo: Vector2, hi: Ve
 		point_velocities[i] = Vector2.ZERO
 
 
-func _apply_point_edge_repulsion(forces: Array[Vector2]) -> void:
+func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary) -> void:
+	"""グリッドでエッジ両端点の近傍セル（3×3）内の点のみ確認して点-辺斥力を適用。O(n²) → O(n)。
+	各エッジを外ループにし、近傍で見つかった点 k を世代カウンタで重複除去することで
+	Dictionary を毎エッジ割り当てずに済む。"""
 	var n: int = _game.point_positions.size()
 	if n < 3:
 		return
 	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
 	var thr: float = POINT_EDGE_REPULSE_DISTANCE
 	var thr_sq: float = thr * thr
-	for k in range(n):
-		if _is_locked(k):
+	var inv: float = 1.0 / POINT_PAIR_REPULSE_DISTANCE  # グリッドと同じ cell_size
+	# 世代カウンタを進めて "未訪問" 状態にリセット（配列クリア不要）
+	_edge_repulse_gen += 1
+	var gen: int = _edge_repulse_gen
+	if _edge_repulse_visited.size() < n:
+		_edge_repulse_visited.resize(n)
+	for e in edges:
+		var a: int = e.x
+		var b: int = e.y
+		var pa: Vector2 = _game.point_positions[a]
+		var pb: Vector2 = _game.point_positions[b]
+		var ab: Vector2 = pb - pa
+		var ab_len_sq: float = ab.length_squared()
+		if ab_len_sq < 1e-10:
 			continue
-		var p: Vector2 = _game.point_positions[k]
-		for e in edges:
-			var a: int = e.x
-			var b: int = e.y
-			if k == a or k == b:
-				continue
-			var pa: Vector2 = _game.point_positions[a]
-			var pb: Vector2 = _game.point_positions[b]
-			var ab: Vector2 = pb - pa
-			var ab_len_sq: float = ab.length_squared()
-			if ab_len_sq < 1e-10:
-				continue
-			var t: float = clampf((p - pa).dot(ab) / ab_len_sq, 0.0, 1.0)
-			var closest: Vector2 = pa + ab * t
-			var delta: Vector2 = p - closest
-			var dist_sq: float = delta.length_squared()
-			if dist_sq > thr_sq:
-				continue
-			var dist: float = maxf(sqrt(dist_sq), POINT_EDGE_REPULSE_MIN_DISTANCE)
-			var falloff: float = 1.0 - dist / thr
-			var dir: Vector2 = delta / dist
-			forces[k] += dir * (POINT_EDGE_REPULSE_STRENGTH * falloff * falloff)
+		# 両端点の近傍セルを探索（エッジが短い限り完全に網羅できる）
+		for ep in [pa, pb]:
+			var cx: int = int(floor(ep.x * inv))
+			var cy: int = int(floor(ep.y * inv))
+			for dy in range(-1, 2):
+				for dx in range(-1, 2):
+					var key: Vector2i = Vector2i(cx + dx, cy + dy)
+					if not grid.has(key):
+						continue
+					for k in (grid[key] as Array):
+						if _edge_repulse_visited[k] == gen:
+							continue  # このエッジに対して既に確認済み
+						_edge_repulse_visited[k] = gen
+						if k == a or k == b:
+							continue
+						if _is_locked(k):
+							continue
+						var p: Vector2 = _game.point_positions[k]
+						var t_proj: float = clampf((p - pa).dot(ab) / ab_len_sq, 0.0, 1.0)
+						var closest: Vector2 = pa + ab * t_proj
+						var delta: Vector2 = p - closest
+						var dist_sq: float = delta.length_squared()
+						if dist_sq > thr_sq:
+							continue
+						var dist: float = maxf(sqrt(dist_sq), POINT_EDGE_REPULSE_MIN_DISTANCE)
+						var falloff: float = 1.0 - dist / thr
+						var dir: Vector2 = delta / dist
+						forces[k] += dir * (POINT_EDGE_REPULSE_STRENGTH * falloff * falloff)
 
 
 func _centroid_positions_range(start_idx: int, end_exclusive: int) -> Vector2:

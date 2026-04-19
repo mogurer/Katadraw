@@ -102,6 +102,17 @@ const TYPE_DEFAULTS: Dictionary = {
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0,
 	},
+	## ラグビーボール（8 頂点＋弧）。builtin JSON の num_points / 半径に合わせる。
+	"rugby_ball": {
+		"num_points": 24,
+		"min_radius": 400.0,
+		"max_radius": 800.0,
+		"variance": 0.15,
+		"clear_pct": 98.0,
+		"display_rate_min_pct": 80.0,
+		"guide_follows_player_radius": 0,
+		"hud_guide_layout_scale_mul": 0.80,
+	},
 }
 
 

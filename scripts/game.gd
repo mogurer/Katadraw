@@ -312,7 +312,7 @@ const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 var stage_debug_state: StageDebugState = StageDebugState.new()
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
-	"fish", "cat_face", "triangle", "square", "hexagon", "circle", "star",
+	"fish", "cat_face", "triangle", "square", "hexagon", "circle", "star", "rugby_ball",
 ]
 const STAGE_EDIT_TOP_BAR: float = 44.0
 const STAGE_EDIT_LEFT_RATIO: float = 0.66
@@ -922,10 +922,20 @@ func _sync_stage_vars() -> void:
 	stage_effective_cfg = stage_manager.effective_config.duplicate(true)
 
 
+## HUD 図形中心の縦位置（hud_playfield_shape_center）は play_stage_slot==0 のときだけ Y を +100 する。
+## DEBUG_PLAY_SINGLE_MASTER_INDEX 有効時は cfg の stage_index が 0 に潰され current_stage が常に 0 になるため、
+## そのままだとマスタ行 2（六角）でもスロット 0 用のオフセットが乗り、開始時の shape_center と毎フレームの再計算が食い違う。
+## 単面本番試行ではロック行インデックスをレイアウト用スロットに使う。F2 ステージデバッグからの起動では行 idx をそのまま使う。
+func hud_layout_slot(play_stage_slot: int) -> int:
+	if GameConfig.DEBUG_PLAY_SINGLE_MASTER_INDEX >= 0 and not stage_session.debug_test_mode:
+		return GameConfig.DEBUG_PLAY_SINGLE_MASTER_INDEX
+	return play_stage_slot
+
+
 func _default_stage_shape_center(vp: Vector2, play_stage_slot: int = -1) -> Vector2:
-	# ui_renderer._draw_game の sc と同一式（GameConfig.hud_playfield_shape_center）。
+	# ui_renderer._draw_game の sc と同一式（GameConfig.hud_playfield_shape_center + hud_layout_slot）。
 	# 旧: vp.y*0.5+80 だったため、プレイ中に HUD だけが再計算され KATA とズレていた。
-	return GameConfig.hud_playfield_shape_center(vp, play_stage_slot)
+	return GameConfig.hud_playfield_shape_center(vp, hud_layout_slot(play_stage_slot))
 
 
 func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_state: String = "guide_info", reset_move_track: bool = true) -> void:
@@ -1440,8 +1450,15 @@ func _input(event: InputEvent) -> void:
 		_input_pause(event, is_confirm, is_pause_key)
 		return
 
-	# デバッグ用: [S] で実現率無視の強制クリア
-	if game_state == "playing" and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S:
+	# デバッグ用: [S] で実現率無視の強制クリア（エディタからの実行時のみ。エクスポート版では無効）
+	if (
+		game_state == "playing"
+		and _debug_tools_enabled()
+		and event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_S
+	):
 		_force_clear_for_debug()
 		return
 

@@ -15,6 +15,22 @@ const ARC_ERROR_MAX_WEIGHT := 0.3
 
 # 辺・弧ごとハウスドルフ（triangle/circle/square/star/cat_face/fish）
 const USE_PER_EDGE_HAUSDORFF := true
+## 辺サンプル点を何点おきに間引くか（1=全点使用、2=1点おき、3=2点おき…）。
+## 直線辺8点・弧辺6点を前提に設計: 2 で約2×、3 で弧辺3×高速化。
+## 端点（先頭・末尾）は sample_step に関わらず必ず評価する。
+const HAUSDORFF_SAMPLE_STEP := 1
+
+## cat_face 系の直線辺を square/hex と同様に何分割するか（終点を含む 8 セグメント）
+const CAT_FACE_STRAIGHT_EDGE_SAMPLES := 8
+## HUD 弧誤差にブレンドする先端（鋭角）ペナルティの割合
+const VERTEX_TIP_WEIGHT := 0.3
+## 先端とみなす最小の「そり」（内角の補角、度）。これ未満の折れは先端扱いしない
+const VERTEX_MIN_TURNING_DEG := 30.0
+
+## 弧を _sample_arc に渡す分割数（num_samples）。全ステージ共通で 6 セグメント
+const ARC_OUTLINE_SAMPLES := 6
+## 一致度計算時のみ: 弧としてサンプルした閉曲線の辺の距離に掛ける係数（<1 で厳しさ緩和）。直線辺は 1.0
+const ARC_SEGMENT_MATCH_LENIENCY_MUL := 0.6
 
 # 案2: スケール基準。90=90%タイル、95=95%タイル、100=最大値（理想側の ideal_ref_r 計算用）
 const REF_R_PERCENTILE_90 := 90.0
@@ -29,7 +45,7 @@ const HUD_SPAWN_SQUARE_CORNER_INWARD := 0.78
 const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MIN := 0.12 * PI
 const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MAX := 0.88 * PI
 ## HUD 正六角形: ガイド頂点（重心からの距離）に対する KATA 初期頂点の倍率（>1 でガイドより外側）
-const HUD_SPAWN_HEX_OUTWARD_MUL := 1.10
+const HUD_SPAWN_HEX_OUTWARD_MUL := 1.50
 
 # --- Stage state ---
 ## 本編進行 index。custom test / rules demo など main 以外は -1。
@@ -62,6 +78,8 @@ var polygon_rotation: float = -PI / 2.0  # 理想形の向き（描いた形に�
 # --- Correspondence (square, cat_face) 案C: 点対応マッチング ---
 var ideal_points: Array = []  # 理想点（原点中心）。start_stage で設定
 var ideal_outline_points: Array = []  # cat_face: 描画用（弧を細かくサンプルした頂点）
+## ideal_outline と同じ長さの閉じた輪郭: 辺 i（頂点 i→i+1）が弧サンプル由来なら true
+var ideal_outline_segment_is_arc: Array = []
 var correspondence_scale: float = 1.0
 var correspondence_rotation: float = 0.0
 # CustomStageFile / デバッグ用: cfg の shape_polygon_vertices / shape_arc_controls（JSON 由来）
@@ -81,6 +99,8 @@ var hud_guide_scale: float = 1.0
 var hud_guide_ref_px: float = 1.0
 var hud_guide_outline_world: Array = []
 var hud_guide_query_world: Array = []
+## hud_guide_outline_world と同じ辺数: 辺が弧サンプル由来か（一致度の弧のみ緩和用）
+var hud_guide_segment_is_arc: Array = []
 ## HUD ガイドの頂点平均などから求めたスポーン基準（自キャラ初期位置・単一閉曲線の KATA 初期円の中心）
 var hud_guide_spawn_centroid: Vector2 = Vector2.ZERO
 ## 単一閉曲線: KATA を載せる初期円半径（ガイド輪郭から重心までの最大距離 × GameConfig.HUD_INITIAL_RING_SCALE_MUL など）
@@ -89,6 +109,11 @@ var _hud_layout_vp: Vector2 = Vector2(-1.0, -1.0)
 var _hud_layout_sc: Vector2 = Vector2.ZERO
 ## 画面フィット後の HUD ガイド半径に乗算（1=従来）。rules デモ等で目標円の見た目だけ縮小する。
 var hud_guide_layout_scale_mul: float = 1.0
+
+# --- 精度アルファキャッシュ ---
+## calculate_metrics() 呼び出し時に全点分の精度アルファを事前計算してキャッシュする。
+## 描画パスでの毎フレーム n×O(polyline) 距離計算をゼロにする。
+var _accuracy_alpha_cache: PackedFloat32Array = PackedFloat32Array()
 
 
 ## 閉じた輪郭（末尾＝先頭とみなす）の幾何学的重心。面積ゼロに近いときは頂点の平均
@@ -149,6 +174,7 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_center = shape_center
 	hud_guide_outline_world.clear()
 	hud_guide_query_world.clear()
+	hud_guide_segment_is_arc.clear()
 	_hud_layout_vp = viewport_size
 	_hud_layout_sc = shape_center
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
@@ -193,6 +219,8 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_scale = s
 	for p in rotated:
 		hud_guide_outline_world.append(shape_center + p * s)
+	if ideal_outline_segment_is_arc.size() == hud_guide_outline_world.size():
+		hud_guide_segment_is_arc = ideal_outline_segment_is_arc.duplicate()
 	hud_guide_query_world = _make_runtime_query_polyline(hud_guide_outline_world)
 	hud_guide_spawn_centroid = _hud_outline_area_centroid_or_average(hud_guide_outline_world)
 	hud_guide_ref_px = 0.001
@@ -254,25 +282,28 @@ func _resample_closed_polyline_points(polyline: Array, n: int) -> Array:
 		return copy_pts
 
 	var result: Array = []
+	result.resize(n)
+	var seg_idx: int = 0
+	var seg_last: int = polyline.size() - 1
 	for i in range(n):
 		var target_len: float = total_len * float(i) / float(n)
-		for seg_idx in range(polyline.size()):
-			var seg_start: float = lengths[seg_idx]
-			var seg_end: float = lengths[seg_idx + 1]
-			if target_len <= seg_end or seg_idx == polyline.size() - 1:
-				var a: Vector2 = polyline[seg_idx] as Vector2
-				var b: Vector2 = polyline[(seg_idx + 1) % polyline.size()] as Vector2
-				var denom: float = maxf(seg_end - seg_start, 0.0001)
-				var t: float = clampf((target_len - seg_start) / denom, 0.0, 1.0)
-				result.append(a.lerp(b, t))
-				break
+		# ポインタを前方にのみ進める（単調増加なので逆戻りしない）
+		while seg_idx < seg_last and lengths[seg_idx + 1] < target_len:
+			seg_idx += 1
+		var a: Vector2 = polyline[seg_idx] as Vector2
+		var b: Vector2 = polyline[(seg_idx + 1) % polyline.size()] as Vector2
+		var seg_start: float = lengths[seg_idx]
+		var seg_end: float = lengths[seg_idx + 1]
+		var denom: float = maxf(seg_end - seg_start, 0.0001)
+		var t: float = clampf((target_len - seg_start) / denom, 0.0, 1.0)
+		result[i] = a.lerp(b, t)
 	return result
 
 
 func _make_runtime_query_polyline(polyline: Array) -> Array:
-	if polyline.size() <= 64:
+	if polyline.size() <= 128:
 		return polyline.duplicate()
-	return _resample_closed_polyline_points(polyline, 64)
+	return _resample_closed_polyline_points(polyline, 128)
 
 
 func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) -> void:
@@ -458,7 +489,8 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 			_finalize_hud_spawn_points_circle_on_guide(point_positions, viewport_size)
 			return
 
-	# 単一閉曲線ステージ: ガイド幾何重心を中心に、ガイドより大きめの円周上等間隔
+	# 単一閉曲線ステージ（fish / mug / heptagram_silhouette / rugby_ball 等）:
+	# ガイド幾何重心を中心に、ガイドより大きめの円周上等間隔（多角形ガイドと同系のリング初期配置）
 	var n_pts: int = num_points
 	var ring_r: float = maxf(hud_guide_spawn_ring_radius, 12.0)
 	for i in range(n_pts):
@@ -482,6 +514,7 @@ func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_
 func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2]) -> void:
 	current_stage = int(cfg.get("stage_index", -1))
 	ideal_outline_points.clear()
+	ideal_outline_segment_is_arc.clear()
 	effective_config = cfg.duplicate(true)
 	hud_guide_layout_scale_mul = float(cfg.get("hud_guide_layout_scale_mul", 1.0))
 	stage_type = str(cfg.get("shape_type", cfg.get("type", "circle")))
@@ -512,6 +545,7 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			var n_verts: int = randi_range(vr[0], vr[1])
 			_generate_polygon_group(shape_center, point_positions, num_points, n_verts, cfg["variance"], cfg["zigzag"], -PI / 2.0)
 			ideal_outline_points = _build_triangle_outline()
+			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 		"circle":
 			_generate_circle_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
@@ -521,10 +555,12 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		"square":
 			_generate_square_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_square_outline()
+			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
 		"hexagon":
 			_generate_hexagon_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_hexagon_outline()
+			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
 		"cat_face":
 			_generate_cat_face_shape(shape_center, point_positions, cfg)
@@ -537,6 +573,9 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			correspondence_scale = guide_radius_val
 		"heptagram_silhouette":
 			_generate_heptagram_silhouette_polygon_shape(shape_center, point_positions, cfg)
+			correspondence_scale = guide_radius_val
+		"rugby_ball":
+			_generate_rugby_ball_polygon_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
 		_:
 			push_error("StageManager: 未対応の type '%s'" % stage_type)
@@ -595,7 +634,7 @@ func _generate_circle_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 	var verts: Array = get_circle_polygon_vertices()
 	var arc_ctrls: Dictionary = get_circle_arc_controls()
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
-	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
 	var max_d: float = 0.001
 	for p in ideal_points:
@@ -626,7 +665,7 @@ func _generate_star_polygon_shape(center: Vector2, pts: Array[Vector2], cfg: Dic
 	var verts: Array = get_star_polygon_vertices()
 	var arc_ctrls: Dictionary = get_star_arc_controls()
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
-	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
 	var max_d: float = 0.001
 	for p in ideal_points:
@@ -757,7 +796,7 @@ func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Diction
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _get_cat_face_polygon_vertices()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
-	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	# 周長の重心で中心化し、同一スケールで正規化（製作中図形とガイドの中心一致用）
 	var c := _perimeter_centroid(ideal_outline_points)
 	var max_d: float = 0.001
@@ -850,6 +889,33 @@ static func _heptagram_silhouette_polygon_vertices_embedded() -> Array:
 	return v
 
 
+## ラグビーボール（builtin rugby_ball.json と同一。8 頂点＋弧エッジ）
+static func rugby_ball_polygon_vertices_embedded() -> Array:
+	var v: Array = []
+	v.append(Vector2(-0.871080160140991, -0.638792097568512))
+	v.append(Vector2(-0.81300812959671, -0.81300812959671))
+	v.append(Vector2(-0.638792097568512, -0.871080160140991))
+	v.append(Vector2(0.464576065540314, -0.464576065540314))
+	v.append(Vector2(0.871080160140991, 0.638792097568512))
+	v.append(Vector2(0.81300812959671, 0.81300812959671))
+	v.append(Vector2(0.638792097568512, 0.871080160140991))
+	v.append(Vector2(-0.464576065540314, 0.464576065540314))
+	return v
+
+
+static func rugby_ball_arc_controls_embedded() -> Dictionary:
+	var d: Dictionary = {}
+	d[0] = Vector2(-0.871080160140991, -0.580720067024231)
+	d[1] = Vector2(-0.871080160140991, -0.696864128112793)
+	d[2] = Vector2(0.871080160140991, 0.638792097568512)
+	d[3] = Vector2(-0.638792097568512, -0.871080160140991)
+	d[4] = Vector2(0.871080160140991, 0.522648096084595)
+	d[5] = Vector2(0.871080160140991, 0.754936099052429)
+	d[6] = Vector2(-0.871080160140991, -0.638792097568512)
+	d[7] = Vector2(0.638792097568512, 0.871080160140991)
+	return d
+
+
 ## ねこの顔の輪郭頂点（Shape Grid Editor 別プロジェクトで編集し出力した頂点を貼り付け）
 static func get_cat_face_polygon_vertices() -> Array:
 	"""頂点のみ（0-1-2-3-4-5-6）。直線は点、弧は端点のみ"""
@@ -908,7 +974,7 @@ func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary)
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else get_fish_polygon_vertices()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_fish_arc_controls()
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
-	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
 	var max_d: float = 0.001
 	for p in ideal_points:
@@ -939,7 +1005,7 @@ func _generate_heptagram_polygon_shape(center: Vector2, pts: Array[Vector2], cfg
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_polygon_vertices_embedded()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
-	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
 	var max_d: float = 0.001
 	for p in ideal_points:
@@ -970,7 +1036,40 @@ func _generate_heptagram_silhouette_polygon_shape(center: Vector2, pts: Array[Ve
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_silhouette_polygon_vertices_embedded()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
-	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
+	var c := _perimeter_centroid(ideal_outline_points)
+	var max_d: float = 0.001
+	for p in ideal_points:
+		max_d = maxf(max_d, (p - c).length())
+	for p in ideal_outline_points:
+		max_d = maxf(max_d, (p - c).length())
+	var normalized_ideal: Array = []
+	for p in ideal_points:
+		normalized_ideal.append((p - c) / max_d)
+	ideal_points = normalized_ideal
+	var normalized_outline: Array = []
+	for p in ideal_outline_points:
+		normalized_outline.append((p - c) / max_d)
+	ideal_outline_points = normalized_outline
+
+	for i in range(n):
+		var ideal: Vector2 = ideal_points[i]
+		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
+		pts.append(center + (ideal + noise) * base_r)
+
+
+func _generate_rugby_ball_polygon_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
+	"""ラグビーボール輪郭（多角形＋弧）。fish / mug と同じ正規化。JSON 未指定時は埋め込み頂点・弧を使用"""
+	var base_r: float = (min_radius + max_radius) / 2.0
+	var variance_factor: float = cfg.get("variance", 0.15)
+	var n: int = num_points
+
+	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else rugby_ball_polygon_vertices_embedded()
+	var arc_ctrls: Dictionary = (
+		_cfg_shape_arc if not _cfg_shape_arc.is_empty() else rugby_ball_arc_controls_embedded()
+	)
+	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
+	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
 	var max_d: float = 0.001
 	for p in ideal_points:
@@ -1062,6 +1161,7 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 	"""多角形の周上に n 点を等間隔でサンプル。弧エッジは弧に沿ってサンプル"""
 	if verts.size() < 2:
 		return []
+	var arc_seg_n: int = ARC_OUTLINE_SAMPLES
 	var seg_lengths: Array = []
 	var total: float = 0.0
 	for i in range(verts.size()):
@@ -1069,7 +1169,7 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 		var p2: Vector2 = verts[(i + 1) % verts.size()]
 		var len: float
 		if arc_ctrls.has(i):
-			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], 16)
+			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], arc_seg_n)
 			len = 0.0
 			for k in range(arc_pts.size() - 1):
 				len += arc_pts[k].distance_to(arc_pts[k + 1])
@@ -1091,7 +1191,7 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 				var local_t: float = (t - seg["start"]) / (seg["end"] - seg["start"]) if (seg["end"] - seg["start"]) > 0.001 else 0.0
 				local_t = clampf(local_t, 0.0, 1.0)
 				if seg["arc_ac"] != null:
-					var arc_pts: Array = _sample_arc(seg["p1"], seg["p2"], seg["arc_ac"], 16)
+					var arc_pts: Array = _sample_arc(seg["p1"], seg["p2"], seg["arc_ac"], arc_seg_n)
 					result.append(_point_on_arc_polyline(arc_pts, local_t, seg["p1"], seg["p2"]))
 				else:
 					result.append(seg["p1"].lerp(seg["p2"], local_t))
@@ -1109,20 +1209,58 @@ func _sample_points_on_polygon_with_arcs(verts: Array, arc_ctrls: Dictionary, n:
 	return result
 
 
-func _build_cat_face_outline(verts: Array, arc_ctrls: Dictionary) -> Array:
-	"""描画用の輪郭頂点（弧を細かくサンプル）"""
+func _outline_segments_all_straight(m: int) -> Array:
+	var a: Array = []
+	for _i in range(m):
+		a.append(false)
+	return a
+
+
+func _segment_flags_include_arc(flags: Array) -> bool:
+	for v in flags:
+		if v:
+			return true
+	return false
+
+
+func _build_cat_face_outline(
+	verts: Array, arc_ctrls: Dictionary, arc_samples: int = -1, out_segment_is_arc: Variant = null
+) -> Array:
+	"""描画用の輪郭頂点（弧をサンプル）。直線辺は 8 セグメント補間。
+	out_segment_is_arc が非 null なら、閉じた輪郭の辺 i（頂点 i→i+1）が弧サンプル由来かを格納する。"""
 	if verts.is_empty():
+		if out_segment_is_arc != null:
+			out_segment_is_arc.clear()
 		return []
+	var n_arc: int = arc_samples if arc_samples >= 0 else ARC_OUTLINE_SAMPLES
 	var result: Array = [verts[0]]
-	for i in range(verts.size()):
+	var n_e: int = verts.size()
+	if out_segment_is_arc != null:
+		out_segment_is_arc.clear()
+	for i in range(n_e):
 		var p1: Vector2 = verts[i]
-		var p2: Vector2 = verts[(i + 1) % verts.size()]
+		var p2: Vector2 = verts[(i + 1) % n_e]
 		if arc_ctrls.has(i):
-			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], 24)
+			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], n_arc)
 			for k in range(1, arc_pts.size()):
+				if out_segment_is_arc != null:
+					out_segment_is_arc.append(true)
 				result.append(arc_pts[k])
 		else:
-			result.append(p2)
+			var ns: int = CAT_FACE_STRAIGHT_EDGE_SAMPLES
+			for k in range(1, ns + 1):
+				if out_segment_is_arc != null:
+					out_segment_is_arc.append(false)
+				result.append(p1.lerp(p2, float(k) / float(ns)))
+	if out_segment_is_arc != null:
+		var M: int = result.size()
+		if out_segment_is_arc.size() == M - 1:
+			# 始点へ戻る閉じ辺（重複頂点時はゼロ長）— 一致度の弧緩和は掛けない
+			out_segment_is_arc.append(false)
+		elif out_segment_is_arc.size() != M:
+			out_segment_is_arc.clear()
+			for _idx in range(M):
+				out_segment_is_arc.append(false)
 	return result
 
 
@@ -1137,6 +1275,9 @@ func get_normalized_outline_for_icon_debug(type_str: String) -> Array:
 		"cat_face":
 			verts = get_cat_face_polygon_vertices()
 			arc_ctrls = get_cat_face_arc_controls()
+		"rugby_ball":
+			verts = rugby_ball_polygon_vertices_embedded()
+			arc_ctrls = rugby_ball_arc_controls_embedded()
 		_:
 			return []
 	if verts.is_empty():
@@ -1246,6 +1387,10 @@ func _get_outline_edges_for_stage(stage_t: String) -> Array:
 			var hsv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_silhouette_polygon_vertices_embedded()
 			var hsa: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
 			return _build_polygon_arc_edges(hsv, hsa)
+		"rugby_ball":
+			var rv: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else rugby_ball_polygon_vertices_embedded()
+			var ra: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else rugby_ball_arc_controls_embedded()
+			return _build_polygon_arc_edges(rv, ra)
 		_:
 			return []
 
@@ -1289,35 +1434,28 @@ func _build_square_edges() -> Array:
 
 
 func _build_polygon_arc_edges(verts: Array, arc_ctrls: Dictionary) -> Array:
-	"""多角形+弧：各辺をサンプル。cat_face/fish用。輪郭と同様に正規化して返す"""
+	"""多角形+弧：各辺をサンプル。cat_face/fish用。輪郭は _build_cat_face_outline と同一密度で正規化して返す"""
 	if verts.size() < 2:
 		return []
-	var outline: Array = [verts[0]]
-	for i in range(verts.size()):
-		var p1: Vector2 = verts[i]
-		var p2: Vector2 = verts[(i + 1) % verts.size()]
-		if arc_ctrls.has(i):
-			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], 24)
-			for k in range(1, arc_pts.size()):
-				outline.append(arc_pts[k])
-		else:
-			outline.append(p2)
+	var outline: Array = _build_cat_face_outline(verts, arc_ctrls)
 	var c: Vector2 = _perimeter_centroid(outline)
 	var max_d: float = 0.001
 	for p in outline:
 		max_d = maxf(max_d, (p - c).length())
+	var ns: int = CAT_FACE_STRAIGHT_EDGE_SAMPLES
 	var result: Array = []
 	for i in range(verts.size()):
 		var p1: Vector2 = verts[i]
 		var p2: Vector2 = verts[(i + 1) % verts.size()]
 		var edge_pts: Array = []
 		if arc_ctrls.has(i):
-			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], 24)
+			var arc_pts: Array = _sample_arc(p1, p2, arc_ctrls[i], ARC_OUTLINE_SAMPLES)
 			for ap in arc_pts:
 				edge_pts.append((ap - c) / max_d)
 		else:
-			edge_pts.append((p1 - c) / max_d)
-			edge_pts.append((p2 - c) / max_d)
+			for k in range(ns):
+				var pt: Vector2 = p1.lerp(p2, float(k) / float(ns))
+				edge_pts.append((pt - c) / max_d)
 		result.append(edge_pts)
 	return result
 
@@ -1368,11 +1506,12 @@ func _percentile_distance_from_center(pts: Array, center: Vector2, pct: float) -
 	"""点列から center への距離の pct% タイルを返す（0-100）。外れ値除外＋尖り反映"""
 	if pts.is_empty():
 		return 1.0
-	var dists: Array = []
-	for p in pts:
-		dists.append((p - center).length())
+	var n: int = pts.size()
+	var dists: PackedFloat32Array = PackedFloat32Array()
+	dists.resize(n)
+	for i in range(n):
+		dists[i] = (pts[i] - center).length()
 	dists.sort()
-	var n: int = dists.size()
 	var idx: int = clampi(int(ceil(n * pct / 100.0)) - 1, 0, n - 1)
 	return maxf(dists[idx], 1.0)
 
@@ -1381,11 +1520,12 @@ func _percentile_length_from_origin(pts: Array, pct: float) -> float:
 	"""点列の原点からの距離の pct% タイル（理想輪郭用）"""
 	if pts.is_empty():
 		return 0.001
-	var dists: Array = []
-	for p in pts:
-		dists.append(p.length())
+	var n: int = pts.size()
+	var dists: PackedFloat32Array = PackedFloat32Array()
+	dists.resize(n)
+	for i in range(n):
+		dists[i] = pts[i].length()
 	dists.sort()
-	var n: int = dists.size()
 	var idx: int = clampi(int(ceil(n * pct / 100.0)) - 1, 0, n - 1)
 	return maxf(dists[idx], 0.001)
 
@@ -1419,28 +1559,63 @@ func _min_dist_to_points(p: Vector2, pts: Array) -> float:
 	return best
 
 
-func _hausdorff_edge_to_user(edge_pts: Array, user_pts: Array) -> float:
-	"""有向ハウスドルフ h(edge→user): 辺上の各点からユーザー輪郭（点を結んだ多角形）への距離の最大"""
+func _hausdorff_edge_to_user(
+	edge_pts: Array, user_pts: Array, sample_step: int, arc_leniency_mul: float = 1.0
+) -> float:
+	"""有向ハウスドルフ h(edge→user): 辺上のサンプル点からユーザー輪郭への距離の最大。
+	sample_step おきに間引いて評価し、端点（先頭・末尾）は常に含む。
+	arc_leniency_mul < 1 のとき弧エッジのみ距離を掛けて緩和（一致度用）。"""
+	var sz: int = edge_pts.size()
+	if sz == 0:
+		return 0.0
 	var worst: float = 0.0
-	for ep in edge_pts:
-		# ユーザー「点」ではなく輪郭（閉じたポリライン）への距離を使う
-		var d: float = _distance_to_polyline(ep, user_pts)
+	var step: int = maxi(sample_step, 1)
+	var i: int = 0
+	while i < sz:
+		var d: float = _distance_to_polyline(edge_pts[i], user_pts)
+		if arc_leniency_mul < 0.999:
+			d *= arc_leniency_mul
 		worst = maxf(worst, d)
+		i += step
+	var last: int = sz - 1
+	if last % step != 0:
+		var d_last: float = _distance_to_polyline(edge_pts[last], user_pts)
+		if arc_leniency_mul < 0.999:
+			d_last *= arc_leniency_mul
+		worst = maxf(worst, d_last)
 	return worst
 
 
-func _eval_arc_error_per_edge_hausdorff(curr_scaled: Array, edges: Array, ref_size: float) -> float:
-	"""辺・弧ごとに h(edge→user) を算出し、平均で集約。ref_size で正規化して誤差率に"""
+func _arc_controls_for_hausdorff_metrics() -> Dictionary:
+	match stage_type:
+		"circle":
+			return get_circle_arc_controls()
+		"cat_face":
+			return _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
+		"fish":
+			return _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_fish_arc_controls()
+		"star":
+			return get_star_arc_controls()
+		"rugby_ball":
+			return _cfg_shape_arc if not _cfg_shape_arc.is_empty() else rugby_ball_arc_controls_embedded()
+		"heptagram", "heptagram_silhouette":
+			return _cfg_shape_arc
+		_:
+			return {}
+
+
+func _eval_arc_error_per_edge_hausdorff(
+	curr_scaled: Array, edges: Array, ref_size: float, sample_step: int, arc_ctrls: Dictionary = {}
+) -> float:
+	"""辺・弧ごとに h(edge→user) を算出し、平均で集約。ref_size で正規化して誤差率に。
+	sample_step で辺サンプル点を間引く（端点は常に評価）。"""
 	if edges.is_empty():
 		return 100.0
-	var per_edge_h: Array = []
-	for edge_pts in edges:
-		per_edge_h.append(_hausdorff_edge_to_user(edge_pts, curr_scaled))
 	var sum_h: float = 0.0
-	for h in per_edge_h:
-		sum_h += h
-	var avg_h: float = sum_h / float(edges.size())
-	return avg_h / ref_size * 100.0
+	for ei in range(edges.size()):
+		var emul: float = ARC_SEGMENT_MATCH_LENIENCY_MUL if arc_ctrls.has(ei) else 1.0
+		sum_h += _hausdorff_edge_to_user(edges[ei], curr_scaled, sample_step, emul)
+	return sum_h / float(edges.size()) / ref_size * 100.0
 
 
 func _distance_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
@@ -1466,6 +1641,35 @@ func _distance_to_polyline(p: Vector2, polyline: Array) -> float:
 		var a: Vector2 = polyline[i]
 		var b: Vector2 = polyline[(i + 1) % polyline.size()]
 		best = minf(best, _distance_to_segment(p, a, b))
+	return best
+
+
+func _guide_vertex_adjacent_to_arc(vertex_idx: int, segment_is_arc: Array) -> bool:
+	var m: int = segment_is_arc.size()
+	if m < 1 or vertex_idx < 0:
+		return false
+	return bool(segment_is_arc[(vertex_idx - 1 + m) % m]) or bool(segment_is_arc[vertex_idx % m])
+
+
+func _distance_to_polyline_with_arc_leniency(
+	p: Vector2, polyline: Array, segment_is_arc: Array, arc_distance_mul: float
+) -> float:
+	"""閉じたポリラインへ、弧サンプル辺だけ距離に arc_distance_mul（<1）を掛けて最短を取る"""
+	if polyline.is_empty():
+		return INF
+	if polyline.size() == 1:
+		return p.distance_to(polyline[0])
+	if arc_distance_mul >= 0.999 or segment_is_arc.size() != polyline.size():
+		return _distance_to_polyline(p, polyline)
+	var best: float = INF
+	var m: int = polyline.size()
+	for i in range(m):
+		var a: Vector2 = polyline[i] as Vector2
+		var b: Vector2 = polyline[(i + 1) % m] as Vector2
+		var d: float = _distance_to_segment(p, a, b)
+		if bool(segment_is_arc[i]):
+			d *= arc_distance_mul
+		best = minf(best, d)
 	return best
 
 
@@ -1625,8 +1829,40 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			_set_correspondence_scale_from_outline()
 			if stage_type == "triangle":
 				polygon_rotation = -PI / 2.0  # 頂点上向きでガイド表示
-		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			_calculate_unified_arc_metrics(point_positions)
+	_rebuild_accuracy_alpha_cache(point_positions)
+
+
+func _rebuild_accuracy_alpha_cache(point_positions: Array[Vector2]) -> void:
+	"""全点の精度アルファを事前計算してキャッシュする。描画パスでの距離計算を排除する。"""
+	var n: int = point_positions.size()
+	_accuracy_alpha_cache.resize(n)
+	for i in range(n):
+		_accuracy_alpha_cache[i] = _compute_one_accuracy_alpha(i, point_positions)
+
+
+## 閉じたガイド輪郭（末尾≠先頭・_resample と同様に閉じる）の各頂点で、進行方向の「曲がり角」が閾値以上なら { "pos", "weight" } を追加。weight は曲がりのラジアン。
+func _get_guide_sharp_vertices(polyline: Array) -> Array:
+	var out: Array = []
+	var m: int = polyline.size()
+	if m < 3:
+		return out
+	var min_turn: float = deg_to_rad(VERTEX_MIN_TURNING_DEG)
+	for i in range(m):
+		var prev: Vector2 = polyline[(i - 1 + m) % m] as Vector2
+		var curr: Vector2 = polyline[i] as Vector2
+		var next: Vector2 = polyline[(i + 1) % m] as Vector2
+		var v1: Vector2 = curr - prev
+		var v2: Vector2 = next - curr
+		var len1: float = v1.length()
+		var len2: float = v2.length()
+		if len1 < 1e-5 or len2 < 1e-5:
+			continue
+		var turning_rad: float = acos(clampf(v1.normalized().dot(v2.normalized()), -1.0, 1.0))
+		if turning_rad >= min_turn:
+			out.append({"pos": curr, "weight": turning_rad})
+	return out
 
 
 func _calc_hud_screen_arc_metrics(
@@ -1645,18 +1881,38 @@ func _calc_hud_screen_arc_metrics(
 		return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
 	var ref_r: float = maxf(hud_guide_ref_px, 1.0)
 	var per_pt: Array = []
+	var player_outline: Array = []
 	if ring_mode:
 		for i in range(from_idx, to_idx):
 			per_pt.append(_distance_point_to_circle_ring_outline(pts[i], ring_center, ring_r))
 	else:
 		var guide_outline_src: Array = hud_guide_query_world if hud_guide_query_world.size() >= 2 else hud_guide_outline_world
-		var sample_count: int = maxi(n * 4, 64)
-		var player_outline: Array = _resample_closed_polyline_points(group_pts, sample_count)
-		var guide_outline: Array = _resample_closed_polyline_points(guide_outline_src, sample_count)
-		for p in player_outline:
-			per_pt.append(_distance_to_polyline(p, guide_outline_src))
-		for gp in guide_outline:
-			per_pt.append(_distance_to_polyline(gp, player_outline))
+		var use_arc_lenient: bool = (
+			hud_guide_segment_is_arc.size() == hud_guide_outline_world.size()
+			and hud_guide_outline_world.size() >= 2
+			and ARC_SEGMENT_MATCH_LENIENCY_MUL < 0.9
+			and _segment_flags_include_arc(hud_guide_segment_is_arc)
+		)
+		var guide_for_dist: Array = hud_guide_outline_world if use_arc_lenient else guide_outline_src
+		var K: int = maxi(guide_for_dist.size(), 16)
+		player_outline = _resample_closed_polyline_points(group_pts, K)
+		if use_arc_lenient:
+			for p in player_outline:
+				per_pt.append(
+					_distance_to_polyline_with_arc_leniency(
+						p, hud_guide_outline_world, hud_guide_segment_is_arc, ARC_SEGMENT_MATCH_LENIENCY_MUL
+					)
+				)
+			for j in range(hud_guide_outline_world.size()):
+				var d_gp: float = _distance_to_polyline(hud_guide_outline_world[j] as Vector2, player_outline)
+				if _guide_vertex_adjacent_to_arc(j, hud_guide_segment_is_arc):
+					d_gp *= ARC_SEGMENT_MATCH_LENIENCY_MUL
+				per_pt.append(d_gp)
+		else:
+			for p in player_outline:
+				per_pt.append(_distance_to_polyline(p, guide_outline_src))
+			for gp in guide_outline_src:
+				per_pt.append(_distance_to_polyline(gp, player_outline))
 	var avg_d: float = 0.0
 	var max_d: float = 0.0
 	for d in per_pt:
@@ -1665,6 +1921,20 @@ func _calc_hud_screen_arc_metrics(
 	avg_d /= per_pt.size()
 	var combined: float = ARC_ERROR_AVG_WEIGHT * avg_d + ARC_ERROR_MAX_WEIGHT * max_d
 	var circ_err: float = combined / ref_r * 100.0
+	if not ring_mode:
+		var sharp: Array = _get_guide_sharp_vertices(hud_guide_outline_world)
+		if not sharp.is_empty():
+			var tip_num: float = 0.0
+			var tip_den: float = 0.0
+			for item in sharp:
+				var w: float = float(item.get("weight", 0.0))
+				var pos: Vector2 = item.get("pos", Vector2.ZERO) as Vector2
+				var d_tip: float = _distance_to_polyline(pos, player_outline)
+				tip_num += w * (d_tip / ref_r * 100.0)
+				tip_den += w
+			if tip_den > 0.0:
+				var tip_err: float = tip_num / tip_den
+				circ_err = circ_err * (1.0 - VERTEX_TIP_WEIGHT) + tip_err * VERTEX_TIP_WEIGHT
 	return {
 		"centroid": centroid,
 		"avg_r": avg_r,
@@ -1707,8 +1977,10 @@ func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) 
 	if USE_PER_EDGE_HAUSDORFF:
 		var edges: Array = _get_outline_edges_for_stage(stage_type)
 		if not edges.is_empty():
-			# 辺・弧ごとハウスドルフ h(edge→user) を平均で集約
-			circ_err = _eval_arc_error_per_edge_hausdorff(curr_scaled, edges, ref_size)
+			# 辺・弧ごとハウスドルフ h(edge→user) を平均で集約（弧エッジのみ距離を緩和）
+			circ_err = _eval_arc_error_per_edge_hausdorff(
+				curr_scaled, edges, ref_size, HAUSDORFF_SAMPLE_STEP, _arc_controls_for_hausdorff_metrics()
+			)
 		else:
 			# circle: 辺定義なし → 従来方式
 			if USE_COMBINED_ARC_ERROR:
@@ -1795,13 +2067,31 @@ func _transform_ideal_point(ideal: Vector2) -> Vector2:
 	) * correspondence_scale
 
 
-func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> float:
-	"""全図形で統一: 理想輪郭への距離から精度を算出"""
+func get_point_accuracy_alpha(idx: int, _point_positions: Array[Vector2]) -> float:
+	"""キャッシュから精度アルファを返す。calculate_metrics() 呼び出し後に有効。"""
+	if idx >= 0 and idx < _accuracy_alpha_cache.size():
+		return _accuracy_alpha_cache[idx]
+	return 1.0
+
+
+func _compute_one_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> float:
+	"""全図形で統一: 理想輪郭への距離から精度を算出（キャッシュ再構築用の実計算）"""
 	if idx < 0 or idx >= point_positions.size():
 		return 1.0
 	var p: Vector2 = point_positions[idx]
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
-		var ideal_dist_hud: float = get_distance_to_hint_guide_outline(p)
+		var ideal_dist_hud: float
+		if (
+			hud_guide_segment_is_arc.size() == hud_guide_outline_world.size()
+			and hud_guide_outline_world.size() >= 2
+			and ARC_SEGMENT_MATCH_LENIENCY_MUL < 0.9
+			and _segment_flags_include_arc(hud_guide_segment_is_arc)
+		):
+			ideal_dist_hud = _distance_to_polyline_with_arc_leniency(
+				p, hud_guide_outline_world, hud_guide_segment_is_arc, ARC_SEGMENT_MATCH_LENIENCY_MUL
+			)
+		else:
+			ideal_dist_hud = get_distance_to_hint_guide_outline(p)
 		var ref_r_hud: float = maxf(hud_guide_ref_px, 1.0)
 		var error_ratio_hud: float = clampf(ideal_dist_hud / ref_r_hud, 0.0, 1.0)
 		var accuracy_hud: float = 1.0 - error_ratio_hud
@@ -1820,7 +2110,7 @@ func get_point_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> floa
 	match stage_type:
 		"triangle", "circle":
 			ideal_dist = get_distance_to_hint_guide_outline(p)
-		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			if idx >= 0 and idx < ideal_points.size():
 				var ideal_pos: Vector2 = _fixed_guide_target_position_from_ideal(guide_center_1, ideal_points[idx])
 				ideal_dist = p.distance_to(ideal_pos)
@@ -1888,7 +2178,7 @@ func get_fixed_guide_loops_world() -> Array:
 			loops.append(_regular_polygon_loop_world(guide_center_1, guide_radius_val, 3, polygon_rotation))
 		"square", "hexagon":
 			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, ideal_points))
-		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette":
+		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
 			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, pts))
 		_:
@@ -1969,7 +2259,7 @@ func is_clear() -> bool:
 	# 実現率100でクリア = current >= goal_pct (clear_pct)
 	var goal_pct: float = 100.0 - clear_threshold
 	match stage_type:
-		"triangle", "circle", "square", "hexagon", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette":
+		"triangle", "circle", "square", "hexagon", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette", "rugby_ball":
 			return current_circularity >= goal_pct
 	return false
 

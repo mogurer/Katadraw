@@ -11,6 +11,8 @@ const EXPERIENCE_VERSION := false
 
 ## 本編を「1 面だけ」繰り返しプレイするときのマスタ行インデックス（manifest / StageData.get_stages() の 0 始まり）。
 ## -1 で無効（通常は全ステージを順にプレイ）。例: 星 10 点のみ試すなら 3（star_10.json の並び）
+## 有効時は get_play_stage_rows() が stage_index を 0 に固定するため、進行スロットだけでは HUD 基準点（Y オフセット）が本番と一致しない。
+## game.gd の hud_layout_slot が、単面本番試行中だけこの値をレイアウト用スロットに使う（F2 ステージデバッグ起動時は行インデックスのまま）。
 const DEBUG_PLAY_SINGLE_MASTER_INDEX := -1
 
 

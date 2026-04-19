@@ -81,9 +81,9 @@ const SELECTED_POINT_BLACK_LAYERS: Array[Array] = [
 	[1.10, 0.38],
 ]
 
-# --- 選択ポイントから接続2点へのレーザーエフェクト ---
-const LASER_BLUE := Color(0.95, 0.19, 0.32, 1.0)
-const LASER_WHITE := Color(1.0, 0.937, 0.89, 1.0)
+# --- 選択ポイントから接続2点へのレーザー／稲妻放電／右スティックコリドー塗りのベース（RGB 黒、アルファで濃淡）
+const LASER_BLUE := Color(0, 0, 0, 1.0)
+const LASER_WHITE := Color(0, 0, 0, 1.0)
 const LASER_LENGTH_RATIO := 2.0 / 3.0  # ポイント間距離の何割で消えるか
 const LASER_SEGMENTS := 16
 const LASER_THICK_LAYERS: Array[Array] = [  # [幅, alpha] 外側→内側
@@ -693,7 +693,7 @@ func _draw_stage_custom_shape_preview(verts: Array[Vector2], edges: Array[Dictio
 
 
 func _draw_stage_debug_type_icon(center: Vector2, r: float, type_str: String, c: Color) -> void:
-	if type_str == "fish" or type_str == "cat_face":
+	if type_str == "fish" or type_str == "cat_face" or type_str == "rugby_ball":
 		var pts: Array = _game.stage_manager.get_normalized_outline_for_icon_debug(type_str)
 		if pts.size() >= 2:
 			_draw_icon_outline_closed(pts, center, r, c)
@@ -1502,7 +1502,7 @@ func _draw_game(vp: Vector2) -> void:
 	_draw_bg(vp)
 
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
-		var sc: Vector2 = GameConfig.hud_playfield_shape_center(vp, _game.stage_manager.current_stage)
+		var sc: Vector2 = GameConfig.hud_playfield_shape_center(vp, _game.hud_layout_slot(_game.stage_manager.current_stage))
 		_game.shape_center = sc
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(sc, vp)
 		_game.guide_center_1 = _game.stage_manager.guide_center_1
@@ -1716,7 +1716,7 @@ func _draw_discharge_lightning_between(
 		return
 	var dir: Vector2 = delta / dist
 	var perpendicular: Vector2 = Vector2(-dir.y, dir.x)
-	var pink: Color = LASER_BLUE
+	var bolt_rgb: Color = LASER_BLUE
 	var segs: int = clampi(int(dist / 42.0) + 7, 7, 18)
 	var points: Array[Vector2] = []
 	points.append(p0)
@@ -1732,11 +1732,11 @@ func _draw_discharge_lightning_between(
 		var fade: float = pow(1.0 - t_mid, 0.85) * alpha_mul
 		if fade < 0.02:
 			continue
-		var glow_color: Color = Color(pink.r, pink.g, pink.b, 0.25 * fade)
+		var glow_color: Color = Color(bolt_rgb.r, bolt_rgb.g, bolt_rgb.b, 0.25 * fade)
 		_game.draw_line(points[i], points[i + 1], glow_color, 6.0, true)
-		var bolt_color: Color = Color(pink.r, pink.g, pink.b, 0.95 * fade)
+		var bolt_color: Color = Color(bolt_rgb.r, bolt_rgb.g, bolt_rgb.b, 0.95 * fade)
 		_game.draw_line(points[i], points[i + 1], bolt_color, 2.5, true)
-		var core_color: Color = Color(LASER_WHITE.r, LASER_WHITE.g, LASER_WHITE.b, 0.95 * fade)
+		var core_color: Color = Color(LASER_BLUE.r, LASER_BLUE.g, LASER_BLUE.b, 0.95 * fade)
 		_game.draw_line(points[i], points[i + 1], core_color, 1.0, true)
 	var n_branch: int = clampi(int(dist / 100.0) + 3, 2, 8)
 	for _j in range(n_branch):
@@ -1748,7 +1748,7 @@ func _draw_discharge_lightning_between(
 		var branch_len: float = randf_range(18.0, 52.0) * jitter_scale
 		var to_p: Vector2 = from_p + branch_dir * branch_len
 		var branch_fade: float = pow(1.0 - float(idx) / float(last), 0.85) * alpha_mul
-		_game.draw_line(from_p, to_p, Color(pink.r, pink.g, pink.b, 0.55 * branch_fade), 1.5, true)
+		_game.draw_line(from_p, to_p, Color(bolt_rgb.r, bolt_rgb.g, bolt_rgb.b, 0.55 * branch_fade), 1.5, true)
 
 
 ## A+X（またはマウス左右同時）長押し: 頂点間斥力を右スティックと同系の放電で表示
@@ -2037,11 +2037,13 @@ func _draw_guide_info(vp: Vector2) -> void:
 			guide_shape_scale = 0.375  # 従来 index1 の 0.75 の半分
 		"cat_face":
 			guide_shape_scale = 0.75
+		"rugby_ball":
+			guide_shape_scale = 0.42
 		_:
 			match _game.stage_manager.current_stage:
+				8:
+					guide_shape_scale = 0.90  # マグカップ（最終面）
 				6:
-					guide_shape_scale = 0.90  # マグカップ
-				7:
 					guide_shape_scale = 0.88  # 七芒星シルエット
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(
