@@ -26,7 +26,9 @@ const GUIDE_COLOR := Color(0.95, 0.19, 0.32, 0.75)
 const GUIDE_STAR_COLOR := Color(0.75, 0.15, 0.25, 0.75)
 const SELECT_RECT_COLOR := Color(0.95, 0.19, 0.32, 0.25)
 const SELECT_RECT_BORDER := Color(0.95, 0.19, 0.32, 0.60)
-const RULES_DEMO_POINTS := 7
+const RULES_DEMO_POINTS := 4
+## rules デモ: ガイド図形・KATA 初期円の中心 Y = 画面高 × この値（0.5=縦中央、大きいほど下）
+const RULES_DEMO_CENTER_Y_FRAC := 0.56
 
 # --- Game State ---
 var current_stage: int = 0
@@ -883,6 +885,7 @@ func _on_input_points_changed() -> void:
 	if input_handler.has_player_avatar():
 		ui_renderer.spawn_spore_burst([input_handler.get_player_position()], 0)
 	if game_state == "rules":
+		_calculate_metrics()
 		queue_redraw()
 		return
 	# プレイ中かつつかみ中のみ、「動いた」フラグを立てる（カウントは離した時点で行う）
@@ -1880,23 +1883,21 @@ func _enter_rules() -> void:
 	game_state = "rules"
 	rules_focus_button = false
 	var vp: Vector2 = get_viewport_rect().size
-	var guide_h: float = 270.0
-	var btn_h: float = 100.0
-	var shift_down: float = vp.y * 0.15
-	rules_demo_center = Vector2(vp.x / 2.0, guide_h + shift_down + (vp.y - guide_h - shift_down - btn_h) / 2.0)
+	rules_demo_center = Vector2(vp.x * 0.5, vp.y * RULES_DEMO_CENTER_Y_FRAC)
 	rules_demo_radius = minf(vp.x, vp.y) * 0.03
 	var demo_cfg: Dictionary = StageConfig.build_effective_config({
-		"type": "circle",
+		"type": "rhombus",
 		"num_points": RULES_DEMO_POINTS,
 		"min_radius": rules_demo_radius,
 		"max_radius": rules_demo_radius,
 		"variance": 0.0,
 		"clear_pct": 100.0,
 		"display_rate_min_pct": 0.0,
-		# min/max だけでは縮まない（HUD フィット後に点が再配置される）。見た目の目標円をここで縮小。
+		"rhombus_vertical_half": 0.5,
+		# min/max だけでは縮まない（HUD フィット後に点が再配置される）。見た目の目標形をここで縮小。
 		"hud_guide_layout_scale_mul": 0.5,
 	})
-	# skip_hud を付けない: 通常ステージ同様に HUD エリアへフィットした円形ガイドを組み立てる。
+	# skip_hud を付けない: 通常ステージ同様に HUD エリアへフィットしたガイドを組み立てる。
 	# skip ありだと hud_guide が再計算されず、前画面のガイドが残って拘束が強く不自然になることがある。
 	_begin_stage_with_config(-1, demo_cfg, rules_demo_center, "rules", false)
 

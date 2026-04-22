@@ -401,6 +401,25 @@ func _hud_square_corner_world_positions() -> Array[Vector2]:
 	return out
 
 
+## HUD ひし形: 輪郭サンプル密度は正方形と同一（辺 8 × 4）
+func _hud_rhombus_corner_world_positions() -> Array[Vector2]:
+	return _hud_square_corner_world_positions()
+
+
+## ひし形・4 点: 正方形と同じ「角からわずかに内側」初期配置
+func _rebuild_initial_points_hud_rhombus_attract_friendly(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
+	var corners: Array[Vector2] = _hud_rhombus_corner_world_positions()
+	if corners.size() != 4:
+		return false
+	point_positions.clear()
+	var cent: Vector2 = hud_guide_spawn_centroid
+	var t: float = HUD_SPAWN_SQUARE_CORNER_INWARD
+	for i in range(4):
+		var cw: Vector2 = corners[i]
+		point_positions.append(cent + (cw - cent) * t)
+	return true
+
+
 ## HUD 正六角形: 輪郭の 6 頂点（各辺先頭サンプル）を world 座標で取得（辺8サンプル×6＝48点）
 func _hud_hex_corner_world_positions() -> Array[Vector2]:
 	var out: Array[Vector2] = []
@@ -477,6 +496,12 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
 			return
 
+	# ひし形: 正方形と同様（輪郭 32 点・4 角）
+	if stage_type == "rhombus" and num_points == 4:
+		if _rebuild_initial_points_hud_rhombus_attract_friendly(point_positions, viewport_size):
+			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
+			return
+
 	# 正六角形: 6 頂点をガイドよりわずかに外側（同重心）
 	if stage_type == "hexagon" and num_points == 6:
 		if _rebuild_initial_points_hud_hex_ring_outward(point_positions, viewport_size):
@@ -489,13 +514,17 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 			_finalize_hud_spawn_points_circle_on_guide(point_positions, viewport_size)
 			return
 
-	# 単一閉曲線ステージ（fish / mug / heptagram_silhouette / rugby_ball 等）:
-	# ガイド幾何重心を中心に、ガイドより大きめの円周上等間隔（多角形ガイドと同系のリング初期配置）
+	# 単一閉曲線ステージ（fish / mug / heptagram_silhouette / rugby_ball 等）ほか、
+	# 正方形・六角・円以外: 横長のなめらかな楕円周上に等角度配置（円形リングは使わない）
 	var n_pts: int = num_points
 	var ring_r: float = maxf(hud_guide_spawn_ring_radius, 12.0)
+	var ax: float = ring_r
+	var ay: float = ring_r * GameConfig.HUD_SPAWN_ELLIPSE_VERTICAL_FRAC
 	for i in range(n_pts):
 		var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
-		point_positions.append(hud_guide_spawn_centroid + Vector2(cos(ang), sin(ang)) * ring_r)
+		point_positions.append(
+			hud_guide_spawn_centroid + Vector2(ax * cos(ang), ay * sin(ang))
+		)
 
 	_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
 
@@ -555,6 +584,12 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		"square":
 			_generate_square_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_square_outline()
+			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
+			correspondence_scale = guide_radius_val
+		"rhombus":
+			_generate_rhombus_shape(shape_center, point_positions, cfg)
+			var b_rh: float = float(cfg.get("rhombus_vertical_half", 0.5))
+			ideal_outline_points = _build_rhombus_outline(b_rh)
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
 		"hexagon":
@@ -718,6 +753,71 @@ func _generate_square_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 		ideal_points.append(ideal)
 		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
 		pts.append(center + (ideal + noise) * base_r)
+
+
+func _generate_rhombus_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
+	"""ひし形: 4 辺上に理想点。輪郭は _build_rhombus_outline と辺 8 サンプルで整合"""
+	var b_half: float = float(cfg.get("rhombus_vertical_half", 0.5))
+	var a: float = 1.0
+	var verts: Array = [
+		Vector2(0.0, -b_half),
+		Vector2(a, 0.0),
+		Vector2(0.0, b_half),
+		Vector2(-a, 0.0),
+	]
+	var base_r: float = (min_radius + max_radius) / 2.0
+	var variance_factor: float = float(cfg.get("variance", 0.0))
+	var n: int = num_points
+	ideal_points.clear()
+	for i in range(n):
+		var t: float = float(i) / float(n)
+		var side: int = int(t * 4.0) % 4
+		var u: float = (t * 4.0) - floor(t * 4.0)
+		var p1: Vector2 = verts[side]
+		var p2: Vector2 = verts[(side + 1) % 4]
+		var ideal: Vector2 = p1.lerp(p2, u)
+		ideal_points.append(ideal)
+		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
+		pts.append(center + (ideal + noise) * base_r)
+
+
+func _build_rhombus_outline(vertical_half: float) -> Array:
+	"""横長のひし形（半横 a=1、半縦 = vertical_half）。辺 8 サンプル×4=32 点。"""
+	var a: float = 1.0
+	var b: float = vertical_half
+	var verts: Array = [
+		Vector2(0.0, -b),
+		Vector2(a, 0.0),
+		Vector2(0.0, b),
+		Vector2(-a, 0.0),
+	]
+	var result: Array = []
+	for i in range(verts.size()):
+		var p1: Vector2 = verts[i]
+		var p2: Vector2 = verts[(i + 1) % verts.size()]
+		for k in range(8):
+			result.append(p1.lerp(p2, float(k) / 8.0))
+	return result
+
+
+func _build_rhombus_edges(vertical_half: float) -> Array:
+	var a: float = 1.0
+	var b: float = vertical_half
+	var verts: Array = [
+		Vector2(0.0, -b),
+		Vector2(a, 0.0),
+		Vector2(0.0, b),
+		Vector2(-a, 0.0),
+	]
+	var result: Array = []
+	for i in range(verts.size()):
+		var p1: Vector2 = verts[i]
+		var p2: Vector2 = verts[(i + 1) % verts.size()]
+		var edge_pts: Array = []
+		for k in range(8):
+			edge_pts.append(p1.lerp(p2, float(k) / 8.0))
+		result.append(edge_pts)
+	return result
 
 
 func _generate_hexagon_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
@@ -1367,6 +1467,8 @@ func _get_outline_edges_for_stage(stage_t: String) -> Array:
 			return _build_polygon_arc_edges(get_circle_polygon_vertices(), get_circle_arc_controls())
 		"square":
 			return _build_square_edges()
+		"rhombus":
+			return _build_rhombus_edges(float(effective_config.get("rhombus_vertical_half", 0.5)))
 		"hexagon":
 			return _build_hexagon_edges()
 		"cat_face":
@@ -1829,7 +1931,7 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 			_set_correspondence_scale_from_outline()
 			if stage_type == "triangle":
 				polygon_rotation = -PI / 2.0  # 頂点上向きでガイド表示
-		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
+		"square", "rhombus", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			_calculate_unified_arc_metrics(point_positions)
 	_rebuild_accuracy_alpha_cache(point_positions)
 
@@ -2110,7 +2212,7 @@ func _compute_one_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> f
 	match stage_type:
 		"triangle", "circle":
 			ideal_dist = get_distance_to_hint_guide_outline(p)
-		"square", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
+		"square", "rhombus", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			if idx >= 0 and idx < ideal_points.size():
 				var ideal_pos: Vector2 = _fixed_guide_target_position_from_ideal(guide_center_1, ideal_points[idx])
 				ideal_dist = p.distance_to(ideal_pos)
@@ -2176,7 +2278,7 @@ func get_fixed_guide_loops_world() -> Array:
 	match stage_type:
 		"triangle":
 			loops.append(_regular_polygon_loop_world(guide_center_1, guide_radius_val, 3, polygon_rotation))
-		"square", "hexagon":
+		"square", "rhombus", "hexagon":
 			loops.append(_fixed_guide_polyline_from_ideal(guide_center_1, ideal_points))
 		"circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			var pts: Array = ideal_outline_points if ideal_outline_points.size() > 0 else ideal_points
@@ -2259,7 +2361,7 @@ func is_clear() -> bool:
 	# 実現率100でクリア = current >= goal_pct (clear_pct)
 	var goal_pct: float = 100.0 - clear_threshold
 	match stage_type:
-		"triangle", "circle", "square", "hexagon", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette", "rugby_ball":
+		"triangle", "circle", "square", "rhombus", "hexagon", "cat_face", "fish", "star", "heptagram", "heptagram_silhouette", "rugby_ball":
 			return current_circularity >= goal_pct
 	return false
 

@@ -66,6 +66,8 @@ const HUD_GUIDE_MARGIN_FRAC := 0.15
 const USE_SCREEN_HUD_GUIDE := true
 ## HUD ガイドの幾何重心を基準にした KATA 初期円の半径にかける倍率（ガイドと即一致しないよう大きめ）
 const HUD_INITIAL_RING_SCALE_MUL := 1.48
+## 三角形・星など「円形デフォルト配置」以外: 楕円周上の縦半軸 = 横方向の基準半径 × この値（1 未満で横長のなめらかな楕円）
+const HUD_SPAWN_ELLIPSE_VERTICAL_FRAC := 0.58
 
 # --- ヒント ---
 const HINT_TIMES := [60.0, 90.0]

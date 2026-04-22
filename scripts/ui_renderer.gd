@@ -94,10 +94,29 @@ const LASER_THICK_LAYERS: Array[Array] = [  # [幅, alpha] 外側→内側
 ]
 const LASER_WHITE_WIDTH := 1.5
 
-# X（引力）: 内向き円波の秒間回数（長押しでは変えない）
-const PLAYER_ATTRACT_INWARD_WAVE_HZ := 1.0
+# X（引力）: 1 周期の秒当たり回転（従来同等）。**半径方向の遅速**は相対位相 s→q（非線形）で出す
+const PLAYER_ATTRACT_INWARD_WAVE_HZ := 0.75
+const PLAYER_ATTRACT_INWARD_WAVE_LAYERS: int = 6
+# 外周でのみ「早く進む」倍率 F の上限。内側 s→1 では常に q'(1)=1（従来の周期終端感）
+const PLAYER_ATTRACT_F_OUTER_MAX := 3.2
+# 実効/基準半径比の扱いに使う上限制限（可視上の F の上限用）
+const PLAYER_ATTRACT_EXPAND_RATIO_CAP := 4.0
 # A（斥力）: 外向き円波の秒間回数（長押しでは変えない）
 const PLAYER_REPULSE_OUTWARD_WAVE_HZ := 1.0
+# 引力・斥力の実効範囲（field_r）に塗る薄い色（波は後から上に重ねる）
+const PLAYER_FORCE_FIELD_FILL_ATTRACT := Color(0.42, 0.78, 1.0, 0.075)
+const PLAYER_FORCE_FIELD_FILL_REPEL := Color(1.0, 0.48, 0.62, 0.065)
+
+# assets/UI 画像（操作デモ・プレイ中ヒント）。大きさ・位置は下記フラクションで調整
+const _UI_ASSETS_DIR := "res://assets/UI/"
+# rules 画面: 上半分付近の左右配置。各画像の長辺 = min(画面) * この値
+const RULES_CTRL_IMAGES_SIZE_FRAC := 1.0 / 6.0
+const RULES_CTRL_IMAGES_GAP_FRAC := 0.15  # vp.x 比の隙間
+const RULES_CTRL_IMAGES_CENTER_Y_FRAC := 0.15  # 上半分の中央付近（+ _draw_rules の shift_down）
+# playing: 右下第4象限のやや右下。長辺 = min(画面) * この値
+const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 8.0
+const STAGE_CTRL_HINT_Q4_NUDGE_X := 0.10  # 第4象限中心から右 direction（vp.x 比）
+const STAGE_CTRL_HINT_Q4_NUDGE_Y := -0.50  # 上方向（vp.y 比）
 
 # --- Particle state ---
 var particles: Array[Dictionary] = []
@@ -112,6 +131,12 @@ var _transition_dir: int = 0          # 0=なし, 1=フェードイン, -1=フ�
 var _transition_speed: float = 4.0    # 1/秒（0.25秒で完了）
 var _pending_state: String = ""       # フェードアウト完了後に切り替えるステート
 
+# 自キャラ円中心から実現率テキストをずらす（右＋上＝+x, -y）
+const REPRO_RATE_OFFSET_FROM_PLAYER := Vector2(32.0, -28.0)
+const REPRO_FLOAT_CHANGE_MIN_PCT := 0.02
+const REPRO_FLOAT_SHOW_MS := 2000
+var _repro_rate_prev_for_float: float = -1000.0
+var _repro_rate_float_show_until_msec: int = 0
 var _result_mouse_pos: Vector2 = Vector2(-1.0, -1.0)  # リザルト画面のマウス座標
 ## 0=スクリーンショット 1=Twitter 2=NEXT（マウスが各ボタン上ならそちらを優先）
 var results_action_focus_index: int = 2
@@ -147,6 +172,8 @@ var _guide_dist_min: float = 0.0
 var _guide_dist_max: float = 0.0
 var _guide_dist_have_bounds: bool = false
 var _guide_point_distances: Array[float] = []
+## assets/UI 内テクスチャのキャッシュ（ファイル名 → Texture2D）
+var _ui_texture_cache: Dictionary = {}
 
 # --- Title Intro Animation（描画・タイムラインは title_intro_animation.gd）---
 var title_intro: TitleIntroAnimator
@@ -346,6 +373,13 @@ func on_state_changed(new_state: String) -> void:
 			_game._reset_ui_menu_stick_navigation()
 	if new_state == "title_intro":
 		title_intro.reset()
+	# 一致度の「変化直後」表示: プレイ/ルール以外に出たらリセット
+	if new_state != "playing" and new_state != "rules":
+		_repro_rate_prev_for_float = -1000.0
+		_repro_rate_float_show_until_msec = 0
+	elif new_state == "playing" or new_state == "rules":
+		_repro_rate_prev_for_float = -1000.0
+		_repro_rate_float_show_until_msec = 0
 	_prev_state = new_state
 
 
@@ -1201,6 +1235,96 @@ func _config_fit_label_text(font: Font, text: String, max_w: float, fs: int) -> 
 	return ell
 
 
+func _get_ui_texture(filename: String) -> Texture2D:
+	if _ui_texture_cache.has(filename):
+		return _ui_texture_cache[filename] as Texture2D
+	var path: String = _UI_ASSETS_DIR + filename
+	var t: Texture2D = load(path) as Texture2D
+	if t == null:
+		push_warning("UIRenderer: failed to load texture: " + path)
+	_ui_texture_cache[filename] = t
+	return t
+
+
+func _draw_ui_texture_centered(tex: Texture2D, center: Vector2, max_side: float) -> void:
+	if tex == null:
+		return
+	var sz: Vector2 = tex.get_size()
+	if sz.x < 1.0 or sz.y < 1.0:
+		return
+	var scale: float = max_side / maxf(sz.x, sz.y)
+	var w: float = sz.x * scale
+	var h: float = sz.y * scale
+	var r: Rect2 = Rect2(center.x - w * 0.5, center.y - h * 0.5, w, h)
+	_game.draw_texture_rect(tex, r, false, Color.WHITE)
+
+
+## rules（デモ）: 上半分中央に mouse（左）・controller_AX（右）
+func _draw_rules_demo_control_images(vp: Vector2, shift_down: float) -> void:
+	var tex_mouse: Texture2D = _get_ui_texture("mouse.png")
+	var tex_ax: Texture2D = _get_ui_texture("controller_AX.png")
+	if tex_mouse == null or tex_ax == null:
+		return
+	var vmin: float = minf(vp.x, vp.y)
+	var max_side: float = vmin * RULES_CTRL_IMAGES_SIZE_FRAC
+	var gap: float = vp.x * RULES_CTRL_IMAGES_GAP_FRAC
+	var sm: Vector2 = tex_mouse.get_size()
+	var sa: Vector2 = tex_ax.get_size()
+	var scale_m: float = max_side / maxf(sm.x, sm.y)
+	var scale_a: float = max_side / maxf(sa.x, sa.y)
+	var wm: float = sm.x * scale_m
+	var wa: float = sa.x * scale_a
+	var total_w: float = wm + gap + wa
+	var cx: float = vp.x * 0.5
+	var cy: float = vp.y * RULES_CTRL_IMAGES_CENTER_Y_FRAC + shift_down
+	var left_c: Vector2 = Vector2(cx - total_w * 0.5 + wm * 0.5, cy)
+	var right_c: Vector2 = Vector2(cx + total_w * 0.5 - wa * 0.5, cy)
+	_draw_ui_texture_centered(tex_mouse, left_c, max_side)
+	_draw_ui_texture_centered(tex_ax, right_c, max_side)
+
+
+## playing: ステージ種別ごとに右下でコントローラ画像を一定周期で切り替え
+func _draw_stage_playing_controller_hint(vp: Vector2) -> void:
+	if _game.game_state != "playing":
+		return
+	var t_first: float = 0.5
+	var t_second: float
+	var second_file: String
+	match _game.stage_type:
+		"triangle":
+			t_second = 0.5
+			second_file = "controller_A.png"
+		"square":
+			t_second = 1.5
+			second_file = "controller_A.png"
+		"hexagon":
+			t_second = 1.5
+			second_file = "controller_X.png"
+		"circle":
+			t_second = 1.5
+			second_file = "controller_AX.png"
+		_:
+			return
+	var cycle: float = t_first + t_second
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var ph: float = fmod(now, cycle)
+	var use_base: bool = ph < t_first
+	var fname: String = "controller.png" if use_base else second_file
+	var tex: Texture2D = _get_ui_texture(fname)
+	if tex == null:
+		return
+	var vmin: float = minf(vp.x, vp.y)
+	var max_side: float = vmin * STAGE_CTRL_HINT_SIZE_FRAC
+	# 第4象限（右下）の中心から、やや右下へ
+	var qcx: float = vp.x * 0.75
+	var qcy: float = vp.y * 0.75
+	var center: Vector2 = Vector2(
+		qcx + vp.x * STAGE_CTRL_HINT_Q4_NUDGE_X,
+		qcy + vp.y * STAGE_CTRL_HINT_Q4_NUDGE_Y
+	)
+	_draw_ui_texture_centered(tex, center, max_side)
+
+
 # --- 操作説明の共通定義（rules / ポーズの操作説明で共有） ---
 # 各要素: [key_tr, desc_tr, key_width]
 const _CTRL_MOUSE_ITEMS: Array[Array] = [
@@ -1376,14 +1500,15 @@ func _draw_rules(vp: Vector2) -> void:
 	var title_c := Color(0.26, 0.21, 0.28)
 	_game.draw_string(_game.font_bold, Vector2(0, vp.y * 0.06 + shift_down - vp.y * 0.10), tr("RULES_MAIN"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 46, title_c)
 
-	# 操作説明（縦スタック）— さらに7%上へ
-	_draw_controls_stacked(vp, vp.y * 0.12 + shift_down - vp.y * 0.07)
+	# 操作デモ: 文言の代わりに mouse（左）・ controller_AX（右）を上半分中央に表示
+	_draw_rules_demo_control_images(vp, shift_down)
 
-	# 本編と同じ HUD 円形ガイド（物理の get_active_guide_loops と一致させるため shape_center で再計算）
+	# 本編と同じ HUD ガイド（物理の get_active_guide_loops と一致させるため shape_center で再計算）
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(_game.shape_center, vp)
 		_game.guide_center_1 = _game.stage_manager.guide_center_1
 		_stage_renderer.draw_hud_overlay_guide(0.7)
+	_refresh_guide_point_distance_bounds()
 
 	# 中央: デモ図形の線・頂点（自キャラは [つぎへ] の上に重ねる）
 	_draw_rules_demo_lines_only(vp)
@@ -1426,7 +1551,7 @@ func permute_guide_point_distances_for_vertex_reorder(ord: PackedInt32Array) -> 
 func _refresh_guide_point_distance_bounds() -> void:
 	_guide_dist_have_bounds = false
 	_guide_point_distances.clear()
-	if _game.game_state != "playing":
+	if _game.game_state != "playing" and _game.game_state != "rules":
 		return
 	var n: int = _game.point_positions.size()
 	if n == 0:
@@ -1450,7 +1575,7 @@ func _refresh_guide_point_distance_bounds() -> void:
 
 
 func _point_radius_by_guide(idx: int) -> float:
-	if _game.game_state != "playing" or idx < 0 or idx >= _game.point_positions.size():
+	if (_game.game_state != "playing" and _game.game_state != "rules") or idx < 0 or idx >= _game.point_positions.size():
 		return POINT_RADIUS
 	var d: float = INF
 	if idx < _guide_point_distances.size():
@@ -1486,7 +1611,23 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
-		_game.draw_circle(pos, POINT_RADIUS, POINT_COLOR)
+		var r: float = _point_radius_by_guide(i)
+		var base_c: Color = POINT_COLOR
+		var alpha: float = _game._point_accuracy_alpha(i)
+		_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
+
+
+func _repro_rate_float_on_metric(circ_val: float) -> void:
+	if _repro_rate_prev_for_float < -500.0:
+		_repro_rate_prev_for_float = circ_val
+		return
+	if absf(circ_val - _repro_rate_prev_for_float) > REPRO_FLOAT_CHANGE_MIN_PCT:
+		_repro_rate_float_show_until_msec = Time.get_ticks_msec() + REPRO_FLOAT_SHOW_MS
+	_repro_rate_prev_for_float = circ_val
+
+
+func _repro_rate_should_show_temporary() -> bool:
+	return Time.get_ticks_msec() < _repro_rate_float_show_until_msec
 
 
 func _draw_rules_demo_player_layer(vp: Vector2) -> void:
@@ -1496,6 +1637,16 @@ func _draw_rules_demo_player_layer(vp: Vector2) -> void:
 	_draw_player_avatar()
 	_draw_laser_effect()
 	_draw_spore_particles()
+	# 本編同様: 実現率（掴み中 or 一致度が動いた直後）
+	var focus_idx: int = _game.input_handler.get_player_focus_index()
+	if focus_idx >= 0 and focus_idx < _game.point_positions.size():
+		var circ_val: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
+		_repro_rate_float_on_metric(circ_val)
+		if _game.input_handler.grab_input_active or _repro_rate_should_show_temporary():
+			var pt: Vector2 = _game.input_handler.get_player_position()
+			var rate_text: String = "%.1f%%" % circ_val
+			var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(circ_val)
+			_draw_realization_rate_with_glow(pt + REPRO_RATE_OFFSET_FROM_PLAYER, rate_text, rate_color)
 	_draw_right_stick_debug_line(vp)
 
 
@@ -1523,6 +1674,9 @@ func _draw_game(vp: Vector2) -> void:
 
 	# 1.5. 完成済みオブジェクトの塗りつぶし（線の下に描画）
 	_draw_clear_fill()
+
+	# 1.6 コントローラ操作ヒント（controller.png 等）: 図形・自キャラより下に重ね、手前の要素で隠れないようにする
+	_draw_stage_playing_controller_hint(vp)
 
 	# 2. ユーザーの図形（線・ポイント・エフェクト）
 	_stage_renderer.draw_stage_lines()
@@ -1569,16 +1723,18 @@ func _draw_game(vp: Vector2) -> void:
 	_draw_player_avatar()
 	_draw_spore_particles()
 
-	# 3. 実現率（最上層）: 近傍力が働いている時だけ、プレイヤー円のやや右下に表示
-	if focus_idx >= 0 and _game.input_handler.grab_input_active:
-		var idx: int = focus_idx
-		if idx >= 0 and idx < _game.point_positions.size():
-			var pt: Vector2 = _game.input_handler.get_player_position()
-			var offset: Vector2 = Vector2(28.0, 32.0)
-			var circ_val: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
-			var rate_text: String = "%.1f%%" % circ_val
-			var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(circ_val)
-			_draw_realization_rate_with_glow(pt + offset, rate_text, rate_color)
+	# 3. 実現率（最上層）: 掴み中は常に / 掴まないでも一致度が動いた直後。自キャラのやや右上
+	if _game.game_state == "playing":
+		var circ_tracked: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
+		_repro_rate_float_on_metric(circ_tracked)
+	if _game.input_handler.has_player_avatar() and (
+		_game.input_handler.grab_input_active or _repro_rate_should_show_temporary()
+	):
+		var pt: Vector2 = _game.input_handler.get_player_position()
+		var circ_val: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
+		var rate_text: String = "%.1f%%" % circ_val
+		var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(circ_val)
+		_draw_realization_rate_with_glow(pt + REPRO_RATE_OFFSET_FROM_PLAYER, rate_text, rate_color)
 
 	# イントロ演出のtransformをリセット（HUDはスケーリングしない）
 	if intro_scale != 1.0:
@@ -1673,33 +1829,70 @@ func _draw_laser_effect() -> void:
 			_game.draw_line(p0, p1, white_c, LASER_WHITE_WIDTH, true)
 
 
+func _attract_f_outer_from_expand_ratio(expand_ratio: float) -> float:
+	"""影響範囲（field/基準）が広いほど、**外周でだけ**大きい F（=そこで早く飛ばす）。"""
+	var r: float = clampf(expand_ratio, 1.0, PLAYER_ATTRACT_EXPAND_RATIO_CAP)
+	if PLAYER_ATTRACT_EXPAND_RATIO_CAP <= 1.0:
+		return 1.0
+	var t: float = (r - 1.0) / (PLAYER_ATTRACT_EXPAND_RATIO_CAP - 1.0)
+	return lerpf(1.0, PLAYER_ATTRACT_F_OUTER_MAX, t)
+
+
+## 1 周期内の線形相対時間 s から、半径 0(外)〜1(内) への道のり q。q'(0)=F, q'(1)=1
+func _attract_inward_path_q(s: float, f_outer: float) -> float:
+	var F: float = clampf(f_outer, 1.0, PLAYER_ATTRACT_F_OUTER_MAX)
+	return s + (F - 1.0) * s * (1.0 - s) * (1.0 - s)
+
+
 func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
-	"""X 長押し（引力）: 最外周の固定ラインは描かず、円弧が外→内へグラデーションしながら吸い込まれる波のみ。"""
+	"""X 長押し: 一周期内は周波数一定。沖（外）ほど d(半径位置)/d(時間) が大きく、内（s→1）では当初と同程度。"""
 	var t_sec: float = Time.get_ticks_msec() * 0.001
 	var hz: float = PLAYER_ATTRACT_INWARD_WAVE_HZ
+	var n_waves: int = maxi(3, PLAYER_ATTRACT_INWARD_WAVE_LAYERS)
+	var base_fr: float = _game.input_handler.get_base_player_force_visual_radius()
+	var f_outer: float = _attract_f_outer_from_expand_ratio(field_r / maxf(base_fr, 1.0))
 	var outer_rr: float = maxf(field_r - 1.5, inner_r + 6.0)
-	# 影響半径がチャージで伸びても、波の収束先は自キャラ周りに固定（中心が最も濃い見え方を維持）
 	var inner_limit: float = maxf(inner_r + 3.0, core_r * 1.75)
 	if inner_limit >= outer_rr - 2.0:
 		inner_limit = outer_rr * 0.28
-	# 位相をずらした複数リングで連続した吸い込みを表現
-	for wave_idx in range(4):
-		var p: float = fmod(t_sec * hz + float(wave_idx) * 0.25, 1.0)
-		var p_ease: float = p * p * (3.0 - 2.0 * p)
+	# 各層: 一周期内の線形位相 s → 道のり q(s)（外速・内遅＆内終端 q'=1）→ smoothstep で半径
+	for wave_idx in range(n_waves):
+		var s: float = fmod(t_sec * hz + float(wave_idx) / float(n_waves), 1.0)
+		var q: float = _attract_inward_path_q(s, f_outer)
+		var p_ease: float = q * q * (3.0 - 2.0 * q)
 		var rr: float = lerpf(outer_rr, inner_limit, p_ease)
-		var ring_alpha: float = pow(sin(p * PI), 1.15) * 0.42
-		# 外周（波頭）ほど濃く、中心へ近づくほど淡く（p: 0=外 → 1=内）
-		var t_in: float = p * p * (3.0 - 2.0 * p)
-		var c_outer_glow := Color(0.28, 0.62, 1.0, ring_alpha * 0.75)
-		var c_inner_glow := Color(0.92, 0.97, 1.0, ring_alpha * 0.06)
-		var c_outer_core := Color(0.22, 0.58, 1.0, ring_alpha * 0.98)
-		var c_inner_core := Color(0.88, 0.95, 1.0, ring_alpha * 0.05)
-		var c_soft: Color = c_outer_glow.lerp(c_inner_glow, t_in)
-		var c_bright: Color = c_outer_core.lerp(c_inner_core, t_in)
-		const W_SOFT := 13.6
-		const W_CORE := 5.4
-		_game.draw_arc(center, rr, 0.0, TAU, 80, c_soft, W_SOFT, true)
-		_game.draw_arc(center, rr, 0.0, TAU, 80, c_bright, W_CORE, true)
+		var crest: float = pow(sin(s * PI), 0.75)
+		if crest < 0.02:
+			continue
+		# まだ外にいる波ほど発光（寄せてくる途中を強調）
+		var from_outside: float = sqrt(1.0 - p_ease * p_ease)
+		var head_boost: float = 0.35 + 0.65 * (0.45 + 0.55 * from_outside)
+		# 半径オフセット・幅: [外＝先走りの薄帯, 中＝高さ, 内＝引き摺る尾]
+		var wave_layers: Array = [
+			[3.0, 0.14, 16.0, 0.26],
+			[1.0, 0.4, 12.0, 0.55],
+			[0.0, 1.0, 5.0, 0.88],
+			[-1.2, 0.22, 9.0, 0.28],
+		]
+		for wl in wave_layers:
+			var d_r: float = float(wl[0])
+			var w_mul: float = float(wl[1])
+			var w_pix: float = float(wl[2])
+			var a_mul: float = float(wl[3])
+			var r_draw: float = rr + d_r
+			if r_draw < inner_limit * 0.85 or r_draw > outer_rr + 5.0:
+				continue
+			var ring_a: float = crest * 0.5 * head_boost * a_mul * w_mul
+			var t_in: float = clampf((r_draw - inner_limit) / maxf(outer_rr - inner_limit, 0.001), 0.0, 1.0)
+			var c_soft: Color = Color(0.28, 0.62, 1.0, _attract_ring_alpha_from_base(ring_a, 0.75, t_in))
+			var c_core: Color = Color(0.2, 0.56, 1.0, _attract_ring_alpha_from_base(ring_a, 0.98, t_in))
+			_game.draw_arc(center, r_draw, 0.0, TAU, 88, c_soft, w_pix, true)
+			_game.draw_arc(center, r_draw, 0.0, TAU, 88, c_core, w_pix * 0.4, true)
+
+
+## _draw_player_attract_inward_waves 用: 沖寄りほど濃く、中心寄りほど抜ける
+func _attract_ring_alpha_from_base(base: float, peak_mul: float, t_toward_center: float) -> float:
+	return clampf(base * peak_mul * lerpf(1.0, 0.18, t_toward_center * t_toward_center * t_toward_center), 0.0, 1.0)
 
 
 func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
@@ -1730,7 +1923,12 @@ func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r
 
 
 func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r: float, attracting: bool) -> void:
-	"""影響範囲：引力は内向き円波、斥力は外向き円波（最外周の固定ラインは描かない）。"""
+	"""影響範囲：薄塗り → 引力は内向き円波、斥力は外向き円波（最外周の固定ラインは描かない）。"""
+	if field_r > 1.0:
+		var fill_c: Color = (
+			PLAYER_FORCE_FIELD_FILL_ATTRACT if attracting else PLAYER_FORCE_FIELD_FILL_REPEL
+		)
+		_game.draw_circle(center, field_r, fill_c)
 	var base_fr: float = _game.input_handler.get_base_player_force_visual_radius()
 	var inner_r: float = maxf(core_r * 1.2, base_fr * 0.2)
 	if attracting:

@@ -28,6 +28,18 @@ const TYPE_DEFAULTS: Dictionary = {
 		"clear_pct": 98.0,
 		"display_rate_min_pct": 50.0,
 		"guide_follows_player_radius": 0,
+		"hud_guide_layout_scale_mul": 0.75,
+	},
+	"rhombus": {
+		"num_points": 4,
+		"min_radius": 180.0,
+		"max_radius": 260.0,
+		"variance": 0.0,
+		"zigzag": 0.0,
+		"clear_pct": 98.0,
+		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
+		"rhombus_vertical_half": 0.5,
 		"hud_guide_layout_scale_mul": 0.5,
 	},
 	"hexagon": {
