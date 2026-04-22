@@ -94,14 +94,10 @@ const LASER_THICK_LAYERS: Array[Array] = [  # [幅, alpha] 外側→内側
 ]
 const LASER_WHITE_WIDTH := 1.5
 
-# X（引力）長押し: 円周→自キャラへ向かう吸い込み波の基準（秒間回数）。長押し秒に比例して加算され上限まで上がる
+# X（引力）: 内向き円波の秒間回数（長押しでは変えない）
 const PLAYER_ATTRACT_INWARD_WAVE_HZ := 1.0
-const PLAYER_ATTRACT_INWARD_WAVE_HZ_PER_HOLD_SEC := 1.0
-const PLAYER_ATTRACT_INWARD_WAVE_HZ_MAX := 12.0
-# A（斥力）: 中心→外周へ広がる波。Hz 仕様は引力と対称
+# A（斥力）: 外向き円波の秒間回数（長押しでは変えない）
 const PLAYER_REPULSE_OUTWARD_WAVE_HZ := 1.0
-const PLAYER_REPULSE_OUTWARD_WAVE_HZ_PER_HOLD_SEC := 1.0
-const PLAYER_REPULSE_OUTWARD_WAVE_HZ_MAX := 12.0
 
 # --- Particle state ---
 var particles: Array[Dictionary] = []
@@ -1680,11 +1676,7 @@ func _draw_laser_effect() -> void:
 func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
 	"""X 長押し（引力）: 最外周の固定ラインは描かず、円弧が外→内へグラデーションしながら吸い込まれる波のみ。"""
 	var t_sec: float = Time.get_ticks_msec() * 0.001
-	var hold_sec: float = _game.input_handler.get_player_attract_visual_hold_ms() / 1000.0
-	var hz: float = mini(
-		PLAYER_ATTRACT_INWARD_WAVE_HZ + hold_sec * PLAYER_ATTRACT_INWARD_WAVE_HZ_PER_HOLD_SEC,
-		PLAYER_ATTRACT_INWARD_WAVE_HZ_MAX
-	)
+	var hz: float = PLAYER_ATTRACT_INWARD_WAVE_HZ
 	var outer_rr: float = maxf(field_r - 1.5, inner_r + 6.0)
 	# 影響半径がチャージで伸びても、波の収束先は自キャラ周りに固定（中心が最も濃い見え方を維持）
 	var inner_limit: float = maxf(inner_r + 3.0, core_r * 1.75)
@@ -1713,11 +1705,7 @@ func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r:
 func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
 	"""A 長押し（斥力）: 円弧が中心→外周へ広がり、最外周に近いほど色が濃くなる。"""
 	var t_sec: float = Time.get_ticks_msec() * 0.001
-	var hold_sec: float = _game.input_handler.get_player_repulse_visual_hold_ms() / 1000.0
-	var hz: float = mini(
-		PLAYER_REPULSE_OUTWARD_WAVE_HZ + hold_sec * PLAYER_REPULSE_OUTWARD_WAVE_HZ_PER_HOLD_SEC,
-		PLAYER_REPULSE_OUTWARD_WAVE_HZ_MAX
-	)
+	var hz: float = PLAYER_REPULSE_OUTWARD_WAVE_HZ
 	var outer_rr: float = maxf(field_r - 1.5, inner_r + 6.0)
 	var inner_limit: float = maxf(inner_r + 3.0, core_r * 1.75)
 	if inner_limit >= outer_rr - 2.0:
