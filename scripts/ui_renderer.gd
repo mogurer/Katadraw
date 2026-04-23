@@ -2293,16 +2293,18 @@ func _draw_guide_countdown(vp: Vector2) -> void:
 	var cy: float = vp.y / 2.0
 	var base_fs: int = 540
 
-	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _game.guide_start_time
+	var count_speed: float = 3.0 if _game.pause_retry_elapsed >= 0.0 else 1.0
+	var elapsed: float = (Time.get_ticks_msec() / 1000.0 - _game.guide_start_time) * count_speed
 	var remaining: float = maxf(0.0, 3.0 - elapsed)
 	var countdown: int = ceili(remaining)
 
-	# 数字切り替え時のスケールアニメ（1.3→1.0 を0.3秒で）
+	# 数字切り替え時のスケールアニメ（1.3→1.0 を0.3秒で、リトライ時は1/3の速さ）
 	if countdown != _countdown_prev:
 		_countdown_prev = countdown
 		_countdown_scales[countdown] = Time.get_ticks_msec() / 1000.0
 	var num_start: float = _countdown_scales.get(countdown, Time.get_ticks_msec() / 1000.0)
-	var num_t: float = clampf((Time.get_ticks_msec() / 1000.0 - num_start) / 0.3, 0.0, 1.0)
+	var anim_dur: float = 0.3 / count_speed
+	var num_t: float = clampf((Time.get_ticks_msec() / 1000.0 - num_start) / anim_dur, 0.0, 1.0)
 	var num_ease: float = _ease_out_cubic(num_t)
 	var scale_val: float = lerp(1.3, 1.0, num_ease)
 	var alpha_val: float = lerp(0.0, 1.0, minf(num_t * 3.0, 1.0))  # 素早くフェードイン

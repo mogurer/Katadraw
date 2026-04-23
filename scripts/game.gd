@@ -469,8 +469,10 @@ var sfx_window_close: AudioStreamPlayer
 var sfx_catch: AudioStreamPlayer
 var sfx_move: AudioStreamPlayer
 var sfx_stageclear: AudioStreamPlayer
+var sfx_stageclear02: AudioStreamPlayer
 var sfx_point: AudioStreamPlayer
 var sfx_motion: AudioStreamPlayer
+var sfx_stagestart: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 
 # --- Debug ---
@@ -726,6 +728,11 @@ func _setup_audio() -> void:
 	sfx_motion.volume_db = -14.5
 	add_child(sfx_motion)
 
+	sfx_stagestart = AudioStreamPlayer.new()
+	sfx_stagestart.stream = _load_audio("res://assets/sounds/katadraw_stagestart.wav")
+	sfx_stagestart.volume_db = -14.5
+	add_child(sfx_stagestart)
+
 	sfx_click = AudioStreamPlayer.new()
 	sfx_click.stream = _load_audio("res://assets/sounds/se_click.wav")
 	sfx_click.volume_db = -14.5
@@ -755,6 +762,11 @@ func _setup_audio() -> void:
 	sfx_stageclear.stream = _load_audio("res://assets/sounds/se_stageclear.wav")
 	sfx_stageclear.volume_db = -14.5
 	add_child(sfx_stageclear)
+
+	sfx_stageclear02 = AudioStreamPlayer.new()
+	sfx_stageclear02.stream = _load_audio("res://assets/sounds/se_stageclear02.wav")
+	sfx_stageclear02.volume_db = -14.5
+	add_child(sfx_stageclear02)
 
 	_apply_bgm_volume()
 	_apply_se_volume()
@@ -1866,8 +1878,10 @@ func _apply_se_volume() -> void:
 	sfx_catch.volume_db = -14.5 + offset_db
 	sfx_move.volume_db = -14.5 + offset_db
 	sfx_stageclear.volume_db = -14.5 + offset_db
+	sfx_stageclear02.volume_db = -14.5 + offset_db
 	sfx_point.volume_db = -14.5 + offset_db
 	sfx_motion.volume_db = -14.5 + offset_db
+	sfx_stagestart.volume_db = -14.5 + offset_db
 
 
 func _volume_offset_db(level: int) -> float:
@@ -3930,13 +3944,13 @@ func _process(delta: float) -> void:
 			game_state = "title"
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			_apply_title_bgm_for_debug_mode()
-			_play_sfx(sfx_stageclear)
+			_play_sfx(sfx_stageclear02)
 		elif ui_renderer.is_title_intro_done():
 			ui_renderer.suppress_hover_sfx(1.0)
 			game_state = "title"
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			_apply_title_bgm_for_debug_mode()
-			_play_sfx(sfx_stageclear)
+			_play_sfx(sfx_stageclear02)
 		queue_redraw()
 		return
 
@@ -3953,11 +3967,13 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "guide_countdown":
-		var elapsed: float = Time.get_ticks_msec() / 1000.0 - guide_start_time
+		var count_speed: float = 3.0 if pause_retry_elapsed >= 0.0 else 1.0
+		var elapsed: float = (Time.get_ticks_msec() / 1000.0 - guide_start_time) * count_speed
 		# Play count SE at each second tick (at 0s, 1s, 2s)
 		var count_tick: int = int(elapsed) + 1  # 1 at 0-1s, 2 at 1-2s, 3 at 2-3s
 		if count_tick > guide_count_played and guide_count_played < 3 and not sfx_count.playing:
 			guide_count_played = count_tick
+			sfx_count.pitch_scale = count_speed
 			_play_sfx(sfx_count)
 		if elapsed >= 3.0:
 			game_state = "playing"
