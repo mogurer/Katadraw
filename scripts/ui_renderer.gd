@@ -110,7 +110,7 @@ const PLAYER_FORCE_FIELD_FILL_REPEL := Color(1.0, 0.48, 0.62, 0.065)
 # assets/UI 画像（操作デモ・プレイ中ヒント）。大きさ・位置は下記フラクションで調整
 const _UI_ASSETS_DIR := "res://assets/UI/"
 # rules 画面: 上半分付近の左右配置。各画像の長辺 = min(画面) * この値
-const RULES_CTRL_IMAGES_SIZE_FRAC := 1.0 / 6.0
+const RULES_CTRL_IMAGES_SIZE_FRAC := 2.0 / 5.0
 const RULES_CTRL_IMAGES_CENTER_Y_FRAC := 0.15  # 上半分の中央付近（+ _draw_rules の shift_down）
 # playing: 右下第4象限のやや右下。長辺 = min(画面) * この値
 const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 8.0

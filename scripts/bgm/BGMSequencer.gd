@@ -70,8 +70,7 @@ func advance(
 			if not all_cleared:
 				return _transition(Phase.PHASE_JOIN)
 			else:
-				# all_cleared 時は TitleEnd を経由してから JoinLong へ
-				return _transition(Phase.PHASE_TITLE_END)
+				return _transition(Phase.PHASE_JOIN_LONG)
 
 		Phase.PHASE_JOIN:
 			if match_rate > 0.9:

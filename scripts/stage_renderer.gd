@@ -7,6 +7,11 @@
 class_name StageRenderer
 extends RefCounted
 
+## HUD 固定ガイド: 法線方向の外側グラデーション（px）。旧実装の最大 19 付近の約3倍
+const _HUD_GUIDE_GLOW_MAX_OFFSET_PX := 10.0
+## 層数（多いほど滑らか。外にいくほど透過率が下がる）
+const _HUD_GUIDE_GLOW_LAYERS := 8
+
 var _game: Node2D
 var _renderer: UIRenderer
 
@@ -140,8 +145,29 @@ func draw_hud_overlay_guide(alpha: float) -> void:
 	_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
 
 
-## HUD 固定ガイド: 1 パス・均一太さ。旧実装の多層オフセット重ね（ぼかし）は図形によって濃淡が付きやすいため廃止。
+## HUD 固定ガイド: 法線方向に外側へ薄くなるグラデーション → 最後に均一の芯線（図形間で色の差は出さない）
 func _draw_hud_polyline_world(verts: Array, color: Color, width: float) -> void:
+	if verts.size() < 2:
+		return
+	var n: int = verts.size()
+	# 大オフセット（外＝最も薄い）→ 小の順に下敷き
+	for li in range(_HUD_GUIDE_GLOW_LAYERS, 0, -1):
+		var r: float = float(li) / float(_HUD_GUIDE_GLOW_LAYERS + 1)  # 0 にはならず、1 も取らない
+		var off: float = _HUD_GUIDE_GLOW_MAX_OFFSET_PX * r
+		# 外 (r 大) ほど乗算アルファが小さく
+		var am: float = pow(1.0 - r, 1.15) * 0.5
+		var w_g: float = maxf(0.6, width * (0.4 + 0.55 * (1.0 - r)))
+		var line_c: Color = Color(color.r, color.g, color.b, color.a * am)
+		for side in [-1.0, 1.0]:
+			for i in range(n):
+				var a: Vector2 = verts[i] as Vector2
+				var b: Vector2 = verts[(i + 1) % n] as Vector2
+				var seg: Vector2 = b - a
+				var el: float = seg.length()
+				if el < 0.001:
+					continue
+				var orth: Vector2 = Vector2(-seg.y, seg.x) / el * (off * side)
+				_game.draw_line(a + orth, b + orth, line_c, w_g, true)
 	_draw_world_loop(verts, color, width)
 
 
