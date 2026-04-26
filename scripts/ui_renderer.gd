@@ -111,7 +111,6 @@ const PLAYER_FORCE_FIELD_FILL_REPEL := Color(1.0, 0.48, 0.62, 0.065)
 const _UI_ASSETS_DIR := "res://assets/UI/"
 # rules 画面: 上半分付近の左右配置。各画像の長辺 = min(画面) * この値
 const RULES_CTRL_IMAGES_SIZE_FRAC := 1.0 / 6.0
-const RULES_CTRL_IMAGES_GAP_FRAC := 0.15  # vp.x 比の隙間
 const RULES_CTRL_IMAGES_CENTER_Y_FRAC := 0.15  # 上半分の中央付近（+ _draw_rules の shift_down）
 # playing: 右下第4象限のやや右下。長辺 = min(画面) * この値
 const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 8.0
@@ -1259,28 +1258,16 @@ func _draw_ui_texture_centered(tex: Texture2D, center: Vector2, max_side: float)
 	_game.draw_texture_rect(tex, r, false, Color.WHITE)
 
 
-## rules（デモ）: 上半分中央に mouse（左）・controller_AX（右）
+## rules（デモ）: 上半分中央に操作デモ用の統合画像（Xbox コントローラ）
 func _draw_rules_demo_control_images(vp: Vector2, shift_down: float) -> void:
-	var tex_mouse: Texture2D = _get_ui_texture("mouse.png")
-	var tex_ax: Texture2D = _get_ui_texture("controller_AX.png")
-	if tex_mouse == null or tex_ax == null:
+	var tex: Texture2D = _get_ui_texture("demo_controller_xbox.png")
+	if tex == null:
 		return
 	var vmin: float = minf(vp.x, vp.y)
 	var max_side: float = vmin * RULES_CTRL_IMAGES_SIZE_FRAC
-	var gap: float = vp.x * RULES_CTRL_IMAGES_GAP_FRAC
-	var sm: Vector2 = tex_mouse.get_size()
-	var sa: Vector2 = tex_ax.get_size()
-	var scale_m: float = max_side / maxf(sm.x, sm.y)
-	var scale_a: float = max_side / maxf(sa.x, sa.y)
-	var wm: float = sm.x * scale_m
-	var wa: float = sa.x * scale_a
-	var total_w: float = wm + gap + wa
 	var cx: float = vp.x * 0.5
 	var cy: float = vp.y * RULES_CTRL_IMAGES_CENTER_Y_FRAC + shift_down
-	var left_c: Vector2 = Vector2(cx - total_w * 0.5 + wm * 0.5, cy)
-	var right_c: Vector2 = Vector2(cx + total_w * 0.5 - wa * 0.5, cy)
-	_draw_ui_texture_centered(tex_mouse, left_c, max_side)
-	_draw_ui_texture_centered(tex_ax, right_c, max_side)
+	_draw_ui_texture_centered(tex, Vector2(cx, cy), max_side)
 
 
 ## playing: ステージ種別ごとに右下でコントローラ画像を一定周期で切り替え
@@ -1500,7 +1487,7 @@ func _draw_rules(vp: Vector2) -> void:
 	var title_c := Color(0.26, 0.21, 0.28)
 	_game.draw_string(_game.font_bold, Vector2(0, vp.y * 0.06 + shift_down - vp.y * 0.10), tr("RULES_MAIN"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 46, title_c)
 
-	# 操作デモ: 文言の代わりに mouse（左）・ controller_AX（右）を上半分中央に表示
+	# 操作デモ: 文言の代わりに demo_controller_xbox.png を上半分中央に表示
 	_draw_rules_demo_control_images(vp, shift_down)
 
 	# 本編と同じ HUD ガイド（物理の get_active_guide_loops と一致させるため shape_center で再計算）

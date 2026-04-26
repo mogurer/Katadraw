@@ -70,15 +70,9 @@ func draw_ideal_shape() -> void:
 func draw_guide_shape(alpha: float, width_scale: float = 1.0) -> void:
 	var width: float = 3.5 * width_scale
 	var loops: Array = _game.stage_manager.get_fixed_guide_loops_world()
-	match _game.stage_type:
-		"star", "heptagram", "heptagram_silhouette":
-			var col_star := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
-			for loop in loops:
-				_draw_world_loop(loop as Array, col_star, width)
-		_:
-			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			for loop in loops:
-				_draw_world_loop(loop as Array, col, width)
+	var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+	for loop in loops:
+		_draw_world_loop(loop as Array, col, width)
 
 
 func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0, size_scale: float = 1.0) -> void:
@@ -108,15 +102,15 @@ func draw_guide_shape_at(center: Vector2, alpha: float, width_scale: float = 1.0
 			var base_ci: float = _game.guide_radius_val
 			_draw_ideal_points_outline(center + offset1, pts, base_ci * size_scale, _game.correspondence_rotation, col, width)
 		"star":
-			var col := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
+			var col_st := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			var base_st: float = _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, pts, base_st * size_scale, _game.correspondence_rotation, col, width)
+			_draw_ideal_points_outline(center + offset1, pts, base_st * size_scale, _game.correspondence_rotation, col_st, width)
 		"heptagram", "heptagram_silhouette":
-			var col := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
+			var col_hp := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			var pts: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
 			var base_hp: float = _game.guide_radius_val
-			_draw_ideal_points_outline(center + offset1, pts, base_hp * size_scale, _game.correspondence_rotation, col, width)
+			_draw_ideal_points_outline(center + offset1, pts, base_hp * size_scale, _game.correspondence_rotation, col_hp, width)
 		"cat_face":
 			var col := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 			var pts_cf: Array = _game.ideal_outline_points if _game.ideal_outline_points.size() > 0 else _game.ideal_points
@@ -142,40 +136,13 @@ func draw_hud_overlay_guide(alpha: float) -> void:
 		return
 	var sm = _game.stage_manager
 	var width: float = 3.5
-	match _game.stage_type:
-		"star", "heptagram", "heptagram_silhouette":
-			var col_s := Color(_game.GUIDE_STAR_COLOR.r, _game.GUIDE_STAR_COLOR.g, _game.GUIDE_STAR_COLOR.b, _game.GUIDE_STAR_COLOR.a * alpha)
-			_draw_hud_polyline_world(sm.hud_guide_outline_world, col_s, width)
-		_:
-			var col_g := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
-			_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
+	var col_g := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
+	_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
 
 
+## HUD 固定ガイド: 1 パス・均一太さ。旧実装の多層オフセット重ね（ぼかし）は図形によって濃淡が付きやすいため廃止。
 func _draw_hud_polyline_world(verts: Array, color: Color, width: float) -> void:
-	if verts.size() < 2:
-		return
-	var n: int = verts.size()
-	var offsets: Array[float] = [0.0, 5.0, 11.0, 19.0]
-	var alphas: Array[float] = [1.0, 0.48, 0.22, 0.07]
-	for li in range(offsets.size()):
-		var off: float = offsets[li]
-		var am: float = alphas[li]
-		var w: float = width if li == 0 else width * (1.0 - li * 0.18)
-		var sides: Array = [0.0]
-		if off > 0.0:
-			sides = [-1.0, 1.0]
-		var line_c: Color = Color(color.r, color.g, color.b, color.a * am)
-		for side in sides:
-			var orth_mul: float = off * side
-			for i in range(n):
-				var a: Vector2 = verts[i] as Vector2
-				var b: Vector2 = verts[(i + 1) % n] as Vector2
-				var seg: Vector2 = b - a
-				var el: float = seg.length()
-				if el < 0.001:
-					continue
-				var orth: Vector2 = Vector2(-seg.y, seg.x) / el * orth_mul
-				_game.draw_line(a + orth, b + orth, line_c, w, true)
+	_draw_world_loop(verts, color, width)
 
 
 func get_object_count() -> int:

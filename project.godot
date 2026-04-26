@@ -18,6 +18,10 @@ boot_splash/show_image=false
 config/icon="res://assets/icons/icon.svg"
 config/windows_native_icon="res://assets/icons/kataicon256.ico"
 
+[autoload]
+
+BGMManager="*res://scripts/bgm/BGMManager.gd"
+
 [display]
 
 window/size/viewport_width=1920

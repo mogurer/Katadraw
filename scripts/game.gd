@@ -23,7 +23,6 @@ const GRAB_STATE_EFFECT_COLOR := Color(0.95, 0.19, 0.32)       # 赤色（収束
 const IDEAL_CIRCLE_COLOR := Color(0.95, 0.19, 0.32, 0.55)
 const IDEAL_STAR_COLOR := Color(0.75, 0.15, 0.25, 0.60)
 const GUIDE_COLOR := Color(0.95, 0.19, 0.32, 0.75)
-const GUIDE_STAR_COLOR := Color(0.75, 0.15, 0.25, 0.75)
 const SELECT_RECT_COLOR := Color(0.95, 0.19, 0.32, 0.25)
 const SELECT_RECT_BORDER := Color(0.95, 0.19, 0.32, 0.60)
 const RULES_DEMO_POINTS := 4
@@ -455,11 +454,8 @@ var logo_start_time: float = 0.0
 var title_start_time: float = 0.0
 
 # --- Audio ---
-# 一時: BGM を聞こえないようにする。通常に戻すときは false にして _apply_bgm_volume() の通常分岐を有効にする。
+# BGMManager に移行: 一時消音は BGMManager.set_mute() で対応
 const BGM_TEMPORARILY_SILENT := false
-var bgm_title: AudioStreamPlayer
-var bgm_game: AudioStreamPlayer
-var bgm_result: AudioStreamPlayer
 var sfx_count: AudioStreamPlayer
 var sfx_clear: AudioStreamPlayer
 var sfx_on: AudioStreamPlayer
@@ -679,30 +675,7 @@ func _apply_cursor_policy() -> void:
 # =============================================================================
 
 func _setup_audio() -> void:
-	bgm_title = AudioStreamPlayer.new()
-	bgm_title.stream = _load_audio("res://assets/sounds/bgm_katadraw_main_theme.mp3")
-	bgm_title.volume_db = -22.5
-	bgm_title.autoplay = false
-	if bgm_title.stream is AudioStreamMP3:
-		bgm_title.stream.loop = true
-	add_child(bgm_title)
-
-	bgm_game = AudioStreamPlayer.new()
-	bgm_game.stream = _load_audio("res://assets/sounds/bgm_katadraw_playing01.mp3")
-	bgm_game.volume_db = -16.5
-	bgm_game.autoplay = false
-	if bgm_game.stream is AudioStreamMP3:
-		bgm_game.stream.loop = true
-	add_child(bgm_game)
-
-	bgm_result = AudioStreamPlayer.new()
-	bgm_result.stream = _load_audio("res://assets/sounds/bgm_katadraw_result.mp3")
-	bgm_result.volume_db = -16.5
-	bgm_result.autoplay = false
-	if bgm_result.stream is AudioStreamMP3:
-		bgm_result.stream.loop = true
-	add_child(bgm_result)
-
+	# BGMManager に移行: bgm_title / bgm_game / bgm_result は BGMManager が管理
 	sfx_count = AudioStreamPlayer.new()
 	sfx_count.stream = _load_audio("res://assets/sounds/se_count.wav")
 	sfx_count.volume_db = -14.5
@@ -772,18 +745,9 @@ func _setup_audio() -> void:
 	_apply_se_volume()
 
 
-func _play_bgm(player: AudioStreamPlayer) -> void:
-	if player and player.stream and not player.playing:
-		player.play()
-
-func _stop_bgm(player: AudioStreamPlayer) -> void:
-	if player and player.playing:
-		player.stop()
-
-
-## タイトル画面では常にタイトルBGMを鳴らす。
+## タイトル画面では常にタイトルBGMを鳴らす。BGMManager に移行
 func _apply_title_bgm_for_debug_mode() -> void:
-	_play_bgm(bgm_title)
+	BGMManager.play_title()  # BGMManager に移行
 
 
 func _play_sfx(player: AudioStreamPlayer) -> void:
@@ -989,6 +953,7 @@ func _start_stage(idx: int) -> void:
 func _calculate_metrics() -> void:
 	stage_manager.calculate_metrics(point_positions)
 	_sync_stage_vars()
+	BGMManager.set_match_rate(current_circularity / 100.0)  # BGMManager に移行
 
 
 func _point_accuracy_alpha(idx: int) -> float:
@@ -1024,6 +989,7 @@ func _check_clear() -> void:
 		ui_renderer.spawn_particles(current_centroid)
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
+		BGMManager.set_match_rate(1.0)  # BGMSequencer 再実装: クリアは match_rate 1.0 で表現
 
 
 func _force_clear_for_debug() -> void:
@@ -1039,6 +1005,7 @@ func _force_clear_for_debug() -> void:
 	ui_renderer.spawn_particles(current_centroid)
 	_play_sfx(sfx_clear)
 	_play_sfx(sfx_stageclear)
+	BGMManager.set_match_rate(1.0)  # BGMSequencer 再実装: クリアは match_rate 1.0 で表現
 
 
 # =============================================================================
@@ -1328,6 +1295,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "title":
+		BGMManager.notify_input()  # BGMSequencer 再実装: タイトル操作で no_input_time をリセット
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
 			_enter_stage_debug_screen()
 		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
@@ -1404,7 +1372,7 @@ func _input(event: InputEvent) -> void:
 				return
 			if _hit_results_button(event.position):
 				ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
-					_stop_bgm(bgm_result)
+					BGMManager.stop()  # BGMManager に移行
 					_return_to_title_or_stage_debug_from_test()
 					queue_redraw()
 				)
@@ -1419,7 +1387,7 @@ func _input(event: InputEvent) -> void:
 				_open_twitter_post()
 			else:
 				ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
-					_stop_bgm(bgm_result)
+					BGMManager.stop()  # BGMManager に移行
 					_return_to_title_or_stage_debug_from_test()
 					queue_redraw()
 				)
@@ -1430,14 +1398,14 @@ func _input(event: InputEvent) -> void:
 		if stage_session.debug_test_mode:
 			if is_confirm_key or is_confirm_pad:
 				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					_stop_bgm(bgm_game)
+					BGMManager.stop()  # BGMManager に移行
 					_return_to_title_or_stage_debug_from_test()
 					queue_redraw()
 				, false)
 				queue_redraw()
 			elif is_confirm_click and _hit_cleared_button(event.position):
 				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					_stop_bgm(bgm_game)
+					BGMManager.stop()  # BGMManager に移行
 					_return_to_title_or_stage_debug_from_test()
 					queue_redraw()
 				, false)
@@ -1854,17 +1822,9 @@ func _apply_internal_viewport_size() -> void:
 
 
 func _apply_bgm_volume() -> void:
-	if BGM_TEMPORARILY_SILENT:
-		bgm_title.volume_db = -80.0
-		bgm_game.volume_db = -80.0
-		bgm_result.volume_db = -80.0
-		return
-	# レベル5を基準(0dB補正)とし、0=ミュート, 10=最大
-	# BGM基準音量: title=-22.5, game/result=-16.5
-	var offset_db: float = _volume_offset_db(bgm_volume)
-	bgm_title.volume_db = -16.5 + offset_db
-	bgm_game.volume_db = -16.5 + offset_db
-	bgm_result.volume_db = -16.5 + offset_db
+	# BGMManager に移行: 音量・ミュート設定を BGMManager に転送
+	BGMManager.set_mute(BGM_TEMPORARILY_SILENT)
+	BGMManager.set_volume_db(_volume_offset_db(bgm_volume))
 
 
 func _apply_se_volume() -> void:
@@ -1896,6 +1856,7 @@ func _volume_offset_db(level: int) -> float:
 func _enter_rules() -> void:
 	game_state = "rules"
 	rules_focus_button = false
+	BGMManager.set_demo_reached()  # BGMManager に移行: デモ画面到達を通知
 	var vp: Vector2 = get_viewport_rect().size
 	rules_demo_center = Vector2(vp.x * 0.5, vp.y * RULES_DEMO_CENTER_Y_FRAC)
 	rules_demo_radius = minf(vp.x, vp.y) * 0.03
@@ -2282,7 +2243,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 				pause_active = false
 				pause_confirm_title = false
 				pause_retry_elapsed = -1.0
-				_stop_bgm(bgm_game)
+				BGMManager.stop()  # BGMManager に移行
 				_play_sfx(sfx_window_close)
 				_return_to_title_or_stage_debug_from_test()
 			else:  # いいえ
@@ -2308,7 +2269,7 @@ func _resume_from_pause() -> void:
 func _start_game() -> void:
 	stage_session.clear_debug_test()
 	input_recorder = null
-	_stop_bgm(bgm_title)
+	BGMManager.stop()  # BGMManager に移行
 	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(0)
@@ -2318,9 +2279,8 @@ func _advance_stage() -> void:
 	if current_stage < GameConfig.get_max_stage_index():
 		_start_stage(current_stage + 1)
 	else:
-		_stop_bgm(bgm_game)
+		BGMManager.set_all_cleared()  # BGMSequencer 再実装: 全ステージクリアを通知
 		game_state = "results"
-		_play_bgm(bgm_result)
 		queue_redraw()
 
 
@@ -2340,9 +2300,8 @@ func _enter_results_screen_debug() -> void:
 		return
 	const SLOT_COUNT: int = 10
 	stage_session.fill_dummy_results(SLOT_COUNT)
-	_stop_bgm(bgm_title)
+	BGMManager.stop()  # BGMManager に移行
 	game_state = "results"
-	_play_bgm(bgm_result)
 	queue_redraw()
 
 
@@ -2363,14 +2322,14 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		game_state = "title"
 	title_start_time = Time.get_ticks_msec() / 1000.0
 	if back_to_stage_debug:
-		_stop_bgm(bgm_title)
+		BGMManager.stop()  # BGMManager に移行
 	else:
 		_apply_title_bgm_for_debug_mode()
 
 
 func _enter_stage_debug_screen() -> void:
 	debug_mode = true
-	_stop_bgm(bgm_title)
+	BGMManager.stop()  # BGMManager に移行
 	stage_debug_state.reset_for_screen(_debug_tools_enabled(), STAGE_DEBUG_FIELD_KEYS)
 	game_state = "stage_debug"
 	_stage_debug_sync_ime_for_field_focus()
@@ -3982,7 +3941,7 @@ func _process(delta: float) -> void:
 				pause_retry_elapsed = -1.0
 			else:
 				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
-			_play_bgm(bgm_game)
+			BGMManager.play_ingame()  # BGMManager に移行
 		queue_redraw()
 
 	elif game_state == "playing":
