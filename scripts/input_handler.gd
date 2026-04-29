@@ -1053,21 +1053,6 @@ func process_pad(delta: float) -> void:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
 
-	var max_charge_ms_ax: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
-	if in_play_ef and _ax_spacing_active:
-		var stationary_ax: bool = player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
-		if stationary_ax:
-			_ax_spacing_region_stationary_ms = minf(
-				_ax_spacing_region_stationary_ms + delta * 1000.0,
-				max_charge_ms_ax
-			)
-		var tr_ax: float = 1.0 + _ax_spacing_region_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
-		tr_ax = minf(tr_ax, float(EMPTY_FORCE_RADIUS_TICK_CAP))
-		_ax_spacing_region_radius_bonus = _force_radius_bonus_smooth(tr_ax)
-	else:
-		_ax_spacing_region_stationary_ms = 0.0
-		_ax_spacing_region_radius_bonus = 0.0
-
 	var speed_mul: float = _get_player_speed_multiplier()
 	var moved: bool = false
 	var wish: Vector2 = Vector2.ZERO
@@ -1095,6 +1080,23 @@ func process_pad(delta: float) -> void:
 	else:
 		_pad_move_ramp_ms = 0.0
 		player_velocity *= exp(-PLAYER_VEL_FRICTION * delta)
+
+	# A+X 均等化領域半径: A+X 長押し中は「静止」の間だけチャージ進行。
+	# 移動中（速度が閾値超え）はチャージを止め、既に広がった分はそのまま（再び静止すると再開）。
+	var max_charge_ms_ax: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
+	if in_play_ef and _ax_spacing_active:
+		var stationary_ax: bool = player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
+		if stationary_ax:
+			_ax_spacing_region_stationary_ms = minf(
+				_ax_spacing_region_stationary_ms + delta * 1000.0,
+				max_charge_ms_ax
+			)
+		var tr_ax: float = 1.0 + _ax_spacing_region_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
+		tr_ax = minf(tr_ax, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+		_ax_spacing_region_radius_bonus = _force_radius_bonus_smooth(tr_ax)
+	else:
+		_ax_spacing_region_stationary_ms = 0.0
+		_ax_spacing_region_radius_bonus = 0.0
 
 	player_position += player_velocity * delta
 	if wish.length_squared() > 0.0001 or player_velocity.length_squared() > 3600.0:
@@ -1602,6 +1604,11 @@ func _build_guide_constraint_mul_array(nearest_features: Array) -> PackedFloat32
 	for i in range(n):
 		out[i] = _guide_constraint_force_mul(nearest_features[i] as Dictionary)
 	return out
+
+
+## UIRenderer 等から多角形の辺（均等化 UI 用）を参照する場合
+func get_polygon_edges_for_repulsion() -> Array[Vector2i]:
+	return _get_polygon_edges_for_repulsion()
 
 
 func _get_polygon_edges_for_repulsion() -> Array[Vector2i]:

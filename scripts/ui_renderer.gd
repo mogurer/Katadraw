@@ -125,8 +125,14 @@ const PLAYING_BTN_DEMO_CENTER_X_FRAC := 0.22
 const PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC := 0.18
 const PLAYING_BTN_DEMO_MAX_R_FRAC := 0.22
 const PLAYING_BTN_DEMO_RING_ALPHA_MUL := 2.0  # 拡大する円の塗り・縁のみ濃く（ダミー自キャラは対象外）
+# A+X: 均等化領域内ポイント周りのピンク円（隣との距離の半分まで拡げ、離れると追随）
+const AX_SPACING_VIS_PINK_EXPAND_PX_SEC := 520.0
+const AX_SPACING_VIS_PINK_SHRINK_PX_SEC := 720.0
+const AX_SPACING_VIS_PINK_FILL := Color(0.98, 0.34, 0.52, 0.26)
+const AX_SPACING_VIS_PINK_STROKE := Color(1.0, 0.55, 0.72, 0.72)
 
 # --- Particle state ---
+var _ax_spacing_pink_ring_r: Array[float] = []
 var particles: Array[Dictionary] = []
 var particle_spawn_time: float = 0.0
 var spore_particles: Array[Dictionary] = []
@@ -277,6 +283,8 @@ func update_animations(delta: float) -> void:
 		# シャドウ: ホバー中は3.5に向かって上昇、非ホバーは0に減衰
 		var shadow_target: float = 3.5 if target > 1.0 else 0.0
 		_btn_hover_shadows[key] = move_toward(_btn_hover_shadows[key], shadow_target, delta * 25.0)
+
+	_update_ax_spacing_pink_bubble_rings(delta)
 
 	# 押下アニメーション進行
 	var finished_keys: Array = []
@@ -1741,6 +1749,9 @@ func _draw_game(vp: Vector2) -> void:
 	# 2. ユーザーの図形（線・ポイント・エフェクト）
 	_stage_renderer.draw_stage_lines()
 
+	# A+X 均等化: 隣接点間の「押し合い」ピンク円（頂点より下のレイヤー）
+	_draw_ax_spacing_equalization_pink_bubbles()
+
 	_refresh_guide_point_distance_bounds()
 	var focus_idx: int = _game.input_handler.get_player_focus_index()
 	for i in range(n):
@@ -1802,9 +1813,6 @@ func _draw_game(vp: Vector2) -> void:
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
 		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
 		_stage_renderer.draw_hud_overlay_guide(hud_a)
-
-	# A+X 斥力の可視化: HUD 見本より手前に描く（下に隠れないように）
-	_draw_ax_spacing_repulsion_debug()
 
 	# square: A 斥力（ピンク）／hex: X 引力（水色）。左・コントロよりやや上
 	_draw_square_stage_repulse_demo(vp)
@@ -2048,26 +2056,72 @@ func _draw_discharge_lightning_between(
 		_game.draw_line(from_p, to_p, Color(bolt_rgb.r, bolt_rgb.g, bolt_rgb.b, 0.55 * branch_fade), 1.5, true)
 
 
-## A+X（またはマウス左右同時）長押し: 頂点間斥力を右スティックと同系の放電で表示
-func _draw_ax_spacing_repulsion_debug() -> void:
+func _update_ax_spacing_pink_bubble_rings(delta: float) -> void:
+	var ih: InputHandler = _game.input_handler
+	var n: int = _game.point_positions.size()
+	while _ax_spacing_pink_ring_r.size() < n:
+		_ax_spacing_pink_ring_r.append(0.0)
+	while _ax_spacing_pink_ring_r.size() > n:
+		_ax_spacing_pink_ring_r.pop_back()
+	if n < 2 or _game.game_state != "playing" or not ih.is_ax_spacing_mode_active():
+		for k in range(_ax_spacing_pink_ring_r.size()):
+			_ax_spacing_pink_ring_r[k] = move_toward(
+				_ax_spacing_pink_ring_r[k], 0.0, AX_SPACING_VIS_PINK_SHRINK_PX_SEC * delta
+			)
+		return
+	var pp: Vector2 = ih.get_player_position()
+	var Rlim: float = ih.get_ax_spacing_equalization_radius()
+	var rsq: float = Rlim * Rlim
+	var targets: Array[float] = []
+	targets.resize(n)
+	for ii in range(n):
+		targets[ii] = INF
+	var edges: Array[Vector2i] = ih.get_polygon_edges_for_repulsion()
+	for e in edges:
+		var ia: int = e.x
+		var ib: int = e.y
+		if ia < 0 or ib < 0 or ia >= n or ib >= n:
+			continue
+		var pi: Vector2 = _game.point_positions[ia]
+		var pj: Vector2 = _game.point_positions[ib]
+		var half: float = pi.distance_to(pj) * 0.5
+		if not _game._is_locked(ia):
+			targets[ia] = minf(targets[ia], half)
+		if not _game._is_locked(ib):
+			targets[ib] = minf(targets[ib], half)
+	for i in range(n):
+		var tr: float = 0.0
+		if (
+			not _game._is_locked(i)
+			and targets[i] < 1e17
+			and pp.distance_squared_to(_game.point_positions[i]) <= rsq
+		):
+			tr = targets[i]
+		var cur: float = _ax_spacing_pink_ring_r[i]
+		if tr <= 0.01:
+			_ax_spacing_pink_ring_r[i] = move_toward(cur, 0.0, AX_SPACING_VIS_PINK_SHRINK_PX_SEC * delta)
+		elif cur <= tr:
+			_ax_spacing_pink_ring_r[i] = move_toward(cur, tr, AX_SPACING_VIS_PINK_EXPAND_PX_SEC * delta)
+		else:
+			_ax_spacing_pink_ring_r[i] = move_toward(cur, tr, AX_SPACING_VIS_PINK_SHRINK_PX_SEC * delta)
+		if tr > 0.02:
+			_ax_spacing_pink_ring_r[i] = minf(_ax_spacing_pink_ring_r[i], tr)
+
+
+func _draw_ax_spacing_equalization_pink_bubbles() -> void:
 	if _game.game_state != "playing":
 		return
 	var ih: InputHandler = _game.input_handler
 	if not ih.is_ax_spacing_mode_active():
 		return
-	var segs: Array = ih.get_ax_spacing_repulsion_debug_segments()
-	var ref_mag: float = (
-		InputHandler.AX_SPACING_REPULSE_STRENGTH * InputHandler.AX_SPACING_MAX_STRENGTH_MUL
-	)
-	for item in segs:
-		var d: Dictionary = item as Dictionary
-		var a: Vector2 = d["from"] as Vector2
-		var b: Vector2 = d["to"] as Vector2
-		var mag: float = float(d.get("magnitude", 0.0))
-		var t: float = clampf(mag / maxf(ref_mag, 1.0), 0.0, 1.0)
-		var alpha: float = lerpf(0.42, 1.0, t)
-		var jitter_s: float = lerpf(0.75, 1.15, t)
-		_draw_discharge_lightning_between(a, b, alpha, jitter_s)
+	var n: int = _game.point_positions.size()
+	for i in range(n):
+		var rad: float = _ax_spacing_pink_ring_r[i] if i < _ax_spacing_pink_ring_r.size() else 0.0
+		if rad < 0.4:
+			continue
+		var pos: Vector2 = _game.point_positions[i]
+		_game.draw_circle(pos, rad, AX_SPACING_VIS_PINK_FILL)
+		_game.draw_arc(pos, rad, 0.0, TAU, 64, AX_SPACING_VIS_PINK_STROKE, 2.25, true)
 
 
 func _draw_player_avatar() -> void:
