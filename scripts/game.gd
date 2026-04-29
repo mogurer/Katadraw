@@ -258,8 +258,10 @@ const DISPLAY_MODE_FULLSCREEN := 2
 var display_mode: int = DISPLAY_MODE_WINDOW_1080
 const WINDOW_CLIENT_SIZE_720 := Vector2i(1280, 720)
 const WINDOW_CLIENT_SIZE_1080 := Vector2i(1920, 1080)
-## ウィンドウ時: マウスカーソルをウィンドウ外へ出さない（Input.MOUSE_MODE_CONFINED）
+## ウィンドウ時: マウスカーソルをウィンドウ外へ出さない（Input.MOUSE_MODE_CONFINED）。OS が前面でないときは拘束しない。
 var mouse_confine_to_window: bool = true
+## プレイ中: true のときだけマウス移動が自キャラ位置を更新する（クリック未取得はパッド専用。パッド入力で再度 false）。
+var playing_mouse_steers_player: bool = false
 const INTERNAL_VIEWPORT_SIZE := Vector2i(1920, 1080)
 var bgm_volume: int = 5         # 0(ミュート)〜10(最大), デフォルト5
 var se_volume: int = 5          # 0(ミュート)〜10(最大), デフォルト5
@@ -624,11 +626,13 @@ func _setup_game_cursor() -> void:
 
 const CURSOR_PAD_AXIS_HIDE_THRESHOLD := 0.22
 const CURSOR_IDLE_HIDE_SECONDS := 2.5
-## マウスを「操作した」とみなしてカーソルを出すまでの累積移動量（px）。微小な振動は相殺されにくくなる
-const CURSOR_MOUSE_REVEAL_MOVE_PX := 14.0
+## マウスを「操作した」とみなしてカーソルを出すまでの累積移動量（px）。大きいほどマウスに奪われにくく（値を緩める＝増やす）。
+const CURSOR_MOUSE_REVEAL_MOVE_PX := 36.0
 var _cursor_last_mouse_activity_sec: float = -1_000_000.0
 var _cursor_pad_override_hidden: bool = false
 var _cursor_mouse_motion_accum: Vector2 = Vector2.ZERO
+## アプリまたはゲームウィンドウがフォーカスを失ったときマウス拘束をかけない（他ウィンドウ・スタートメニューなど）
+var _cursor_os_focused_for_confine: bool = true
 
 
 func _cursor_event_should_hide_for_pad(event: InputEvent) -> bool:
@@ -648,15 +652,22 @@ func _cursor_register_mouse_activity() -> void:
 func _cursor_register_pad_activity() -> void:
 	_cursor_pad_override_hidden = true
 	_cursor_mouse_motion_accum = Vector2.ZERO
+	if game_state == "playing":
+		playing_mouse_steers_player = false
 
 
 func _cursor_visible_mode() -> Input.MouseMode:
+	if not _cursor_os_focused_for_confine:
+		return Input.MOUSE_MODE_VISIBLE
 	if not is_fullscreen and mouse_confine_to_window:
 		return Input.MOUSE_MODE_CONFINED
 	return Input.MOUSE_MODE_VISIBLE
 
 
 func _apply_cursor_policy() -> void:
+	if not _cursor_os_focused_for_confine:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
 	if pause_active:
 		Input.mouse_mode = _cursor_visible_mode()
 		return
@@ -668,6 +679,22 @@ func _apply_cursor_policy() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	else:
 		Input.mouse_mode = _cursor_visible_mode()
+
+
+func _notification(what: int) -> void:
+	# メニューや別アプリへフォーカスが移ったら CONFINED を外し、ウィンドウ内に縛られたままになるのを防ぐ
+	if (
+		what == NOTIFICATION_APPLICATION_FOCUS_OUT
+		or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT
+	):
+		_cursor_os_focused_for_confine = false
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif (
+		what == NOTIFICATION_APPLICATION_FOCUS_IN
+		or what == NOTIFICATION_WM_WINDOW_FOCUS_IN
+	):
+		_cursor_os_focused_for_confine = true
+		_apply_cursor_policy()
 
 
 # =============================================================================
@@ -930,6 +957,7 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	hovered_index = -1
 	is_dragging = false
 	selected_indices.clear()
+	playing_mouse_steers_player = false
 	if reset_move_track:
 		stage_move_count = 0
 		_reset_stage_move_track_internal()
@@ -1467,9 +1495,12 @@ func _input(event: InputEvent) -> void:
 			_flush_debug_input_log()
 			return
 	if event is InputEventMouseMotion:
-		input_handler.handle_mouse_motion(event.position)
+		var mm: InputEventMouseMotion = event as InputEventMouseMotion
+		if input_handler.is_bb_dragging() or playing_mouse_steers_player:
+			input_handler.handle_mouse_motion(mm.position, mm.relative)
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
+			playing_mouse_steers_player = true
 			var prev_dragging: bool = is_dragging
 			input_handler.handle_mouse_press(event.position, event.button_index)
 			if not prev_dragging and is_dragging:
@@ -1909,7 +1940,8 @@ func _input_rules(event: InputEvent, _is_confirm_key: bool, _is_confirm_pad: boo
 
 	# デモ操作: マウス/コントローラを input_handler へ
 	if event is InputEventMouseMotion:
-		input_handler.handle_mouse_motion(event.position)
+		var mm_rules: InputEventMouseMotion = event as InputEventMouseMotion
+		input_handler.handle_mouse_motion(mm_rules.position, mm_rules.relative)
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
 			if _hit_rules_button(event.position):

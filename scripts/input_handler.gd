@@ -82,6 +82,8 @@ const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
 ## A+X 同時長押し: 頂点同士を押し広げて周上の等間隔に近づける追加斥力（長押しで増幅、上限あり）
 ## 長押しは最大 3 秒で頭打ち。最大強さは旧実装（飽和時）比 2 倍。
 const AX_SPACING_HOLD_CAP_MS := 3000.0
+## A+X 「長押し」として均等化領域のチャージ・追加斥力などを許可するまでの最短時間（ms）。旧 0.5 は単位ズレ（0.5ms）だった。
+const AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS := 500.0
 ## A+X 追加斥力は「多角形の辺で隣り合う頂点ペア」のみ（全ペアだと n² で描画・物理とも重い）。
 ## 周上の等間隔化は主に隣接間隔の調整で足りる想定。
 ## この距離より遠いペアには追加斥力は乗らない（大きい輪郭でも隣同士に効くよう余裕を持たせる）
@@ -125,6 +127,8 @@ const PLAYER_MOVE_RAMP_ACCEL_MAX_MUL := 1.82
 
 ## この速度以下なら「静止」とみなし、引力・斥力の影響半径チャージを進める（px/秒）
 const PLAYER_FORCE_CHARGE_STATIONARY_EPS := 14.0
+## このフレームのマウス相対移動(px)がこれ以上ならパッドの速度に相当し「移動」とみなしチャージを止める
+const PLAYER_FORCE_CHARGE_MOUSE_MOVE_PX_EPS := 2.0
 ## 静止中、A/X 長押しで影響半径を幾何級数的に拡張（移動中は成長停止し、既に拡がった分は維持）
 const EMPTY_FORCE_RADIUS_TICK_MS := 200
 const EMPTY_FORCE_RADIUS_TICK_CAP := 22
@@ -199,6 +203,8 @@ var mouse_force_pressed: bool = false
 
 ## パッド移動の速度（マウス操作時は毎フレームゼロに戻す）
 var player_velocity: Vector2 = Vector2.ZERO
+## 同一フレーム内の InputEventMouseMotion.relative ノルム累積（チャージ静止判定用）
+var _mouse_rel_motion_for_charge: float = 0.0
 ## 左スティック／十字の移動入力が続いている累積時間（ms）。ニュートラルでリセット
 var _pad_move_ramp_ms: float = 0.0
 ## 斥力ホールド中、静止していた累積時間（ms）。移動中は増えず、再静止で続きから成長
@@ -213,6 +219,10 @@ var _ax_spacing_hold_ms: float = 0.0
 ## A+X中の静止のみで増える均等化半径（引力・斥力と同じ幾何ボーナス）
 var _ax_spacing_region_stationary_ms: float = 0.0
 var _ax_spacing_region_radius_bonus: float = 0.0
+## A+X 中の stationary_charge が直前フレームから false→true になったとき用（移動後の再ウェイトだけに使う）
+var _ax_spacing_prev_stationary_for_region: bool = true
+## 上記のとき、領域チャージが再び進むまでの絶対時刻（msec）。0 のとき無効
+var _ax_spacing_region_charge_suppress_until_msec: int = 0
 ## 均等化半径内での頂点別滞在累積（ms）。半径外へ出たフレームで 0 に戻す
 var _ax_spacing_vertex_dwell_ms: Array[float] = []
 
@@ -304,7 +314,10 @@ func reset_for_stage() -> void:
 	_ax_spacing_hold_ms = 0.0
 	_ax_spacing_region_stationary_ms = 0.0
 	_ax_spacing_region_radius_bonus = 0.0
+	_ax_spacing_prev_stationary_for_region = true
+	_ax_spacing_region_charge_suppress_until_msec = 0
 	_ax_spacing_vertex_dwell_ms.clear()
+	_mouse_rel_motion_for_charge = 0.0
 	_pad_move_ramp_ms = 0.0
 	_reset_player_position()
 
@@ -334,10 +347,12 @@ func _refresh_hovered_point() -> void:
 	_game.hovered_index = get_player_focus_index(HOVER_DISTANCE)
 
 
-func handle_mouse_motion(mouse: Vector2) -> void:
+func handle_mouse_motion(mouse: Vector2, motion_relative: Vector2 = Vector2.ZERO) -> void:
 	if bb_dragging:
+		_mouse_rel_motion_for_charge += motion_relative.length()
 		_handle_bb_motion(mouse)
 		return
+	_mouse_rel_motion_for_charge += motion_relative.length()
 	player_position = mouse
 	player_position_initialized = true
 	player_velocity = Vector2.ZERO
@@ -921,6 +936,8 @@ func process_pad(delta: float) -> void:
 		_ax_spacing_hold_ms = 0.0
 		_ax_spacing_region_stationary_ms = 0.0
 		_ax_spacing_region_radius_bonus = 0.0
+		_ax_spacing_prev_stationary_for_region = true
+		_ax_spacing_region_charge_suppress_until_msec = 0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
@@ -934,6 +951,8 @@ func process_pad(delta: float) -> void:
 		_ax_spacing_hold_ms = 0.0
 		_ax_spacing_region_stationary_ms = 0.0
 		_ax_spacing_region_radius_bonus = 0.0
+		_ax_spacing_prev_stationary_for_region = true
+		_ax_spacing_region_charge_suppress_until_msec = 0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
@@ -947,6 +966,8 @@ func process_pad(delta: float) -> void:
 		_ax_spacing_hold_ms = 0.0
 		_ax_spacing_region_stationary_ms = 0.0
 		_ax_spacing_region_radius_bonus = 0.0
+		_ax_spacing_prev_stationary_for_region = true
+		_ax_spacing_region_charge_suppress_until_msec = 0
 		_pad_move_ramp_ms = 0.0
 		return
 	if not player_position_initialized:
@@ -1020,38 +1041,8 @@ func process_pad(delta: float) -> void:
 
 	mouse_force_pressed = mouse_left or mouse_right
 
-	# 静止中のみ影響半径が成長。移動中は成長停止し、既に拡がった分は維持。頂点との距離は不問。
-	_empty_repulse_radius_bonus = 0.0
-	_empty_attract_radius_bonus = 0.0
 	var in_play_ef: bool = _game.game_state == "playing" or _game.game_state == "rules"
 	var max_charge_ms: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
-	if in_play_ef:
-		var stationary: bool = player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
-		if player_force_repelling:
-			if stationary:
-				_empty_repulse_stationary_ms = minf(
-					_empty_repulse_stationary_ms + delta * 1000.0,
-					max_charge_ms
-				)
-			var tr_f: float = 1.0 + _empty_repulse_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
-			tr_f = minf(tr_f, float(EMPTY_FORCE_RADIUS_TICK_CAP))
-			_empty_repulse_radius_bonus = _force_radius_bonus_smooth(tr_f)
-		else:
-			_empty_repulse_stationary_ms = 0.0
-		if player_force_attracting:
-			if stationary:
-				_empty_attract_stationary_ms = minf(
-					_empty_attract_stationary_ms + delta * 1000.0,
-					max_charge_ms
-				)
-			var ta_f: float = 1.0 + _empty_attract_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
-			ta_f = minf(ta_f, float(EMPTY_FORCE_RADIUS_TICK_CAP))
-			_empty_attract_radius_bonus = _force_radius_bonus_smooth(ta_f)
-		else:
-			_empty_attract_stationary_ms = 0.0
-	else:
-		_empty_repulse_stationary_ms = 0.0
-		_empty_attract_stationary_ms = 0.0
 
 	var speed_mul: float = _get_player_speed_multiplier()
 	var moved: bool = false
@@ -1081,15 +1072,64 @@ func process_pad(delta: float) -> void:
 		_pad_move_ramp_ms = 0.0
 		player_velocity *= exp(-PLAYER_VEL_FRICTION * delta)
 
-	# A+X 均等化領域半径: A+X 長押し中は「静止」の間だけチャージ進行。
-	# 移動中（速度が閾値超え）はチャージを止め、既に広がった分はそのまま（再び静止すると再開）。
-	var max_charge_ms_ax: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
+	# 静止判定: パッド速度に加え、このフレームのマウス相対移動が大きいときも「移動」（マウスは毎フレーム velocity が 0 に戻るため）
+	var mouse_moved_for_charge: bool = _mouse_rel_motion_for_charge >= PLAYER_FORCE_CHARGE_MOUSE_MOVE_PX_EPS
+	_mouse_rel_motion_for_charge = 0.0
+	var stationary_charge: bool = (
+		player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
+		and not mouse_moved_for_charge
+	)
+
+	# 静止中のみ引力・斥力の影響半径が成長。移動中は成長停止し、既に拡がった分は維持（速度更新後と同一基準）
+	_empty_repulse_radius_bonus = 0.0
+	_empty_attract_radius_bonus = 0.0
+	if in_play_ef:
+		if player_force_repelling:
+			if stationary_charge:
+				_empty_repulse_stationary_ms = minf(
+					_empty_repulse_stationary_ms + delta * 1000.0,
+					max_charge_ms
+				)
+			var tr_f: float = 1.0 + _empty_repulse_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
+			tr_f = minf(tr_f, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+			_empty_repulse_radius_bonus = _force_radius_bonus_smooth(tr_f)
+		else:
+			_empty_repulse_stationary_ms = 0.0
+		if player_force_attracting:
+			if stationary_charge:
+				_empty_attract_stationary_ms = minf(
+					_empty_attract_stationary_ms + delta * 1000.0,
+					max_charge_ms
+				)
+			var ta_f: float = 1.0 + _empty_attract_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
+			ta_f = minf(ta_f, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+			_empty_attract_radius_bonus = _force_radius_bonus_smooth(ta_f)
+		else:
+			_empty_attract_stationary_ms = 0.0
+	else:
+		_empty_repulse_stationary_ms = 0.0
+		_empty_attract_stationary_ms = 0.0
+
+	# A+X 均等化領域: 上記と同じ stationary_charge。ホールド閾値・移動→再静止での再ウェイトは A 初回長押しと同程度に揃える。
 	if in_play_ef and _ax_spacing_active:
-		var stationary_ax: bool = player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
-		if stationary_ax:
+		if stationary_charge and not _ax_spacing_prev_stationary_for_region:
+			if _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
+				_ax_spacing_region_charge_suppress_until_msec = (
+					Time.get_ticks_msec()
+					+ int(AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS)
+				)
+		_ax_spacing_prev_stationary_for_region = stationary_charge
+
+		var hold_ok_region: bool = _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS
+		var region_suppressed: bool = (
+			stationary_charge
+			and Time.get_ticks_msec() < _ax_spacing_region_charge_suppress_until_msec
+		)
+		var can_charge_ax_region: bool = stationary_charge and hold_ok_region and not region_suppressed
+		if can_charge_ax_region:
 			_ax_spacing_region_stationary_ms = minf(
 				_ax_spacing_region_stationary_ms + delta * 1000.0,
-				max_charge_ms_ax
+				max_charge_ms
 			)
 		var tr_ax: float = 1.0 + _ax_spacing_region_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
 		tr_ax = minf(tr_ax, float(EMPTY_FORCE_RADIUS_TICK_CAP))
@@ -1097,6 +1137,8 @@ func process_pad(delta: float) -> void:
 	else:
 		_ax_spacing_region_stationary_ms = 0.0
 		_ax_spacing_region_radius_bonus = 0.0
+		_ax_spacing_prev_stationary_for_region = stationary_charge
+		_ax_spacing_region_charge_suppress_until_msec = 0
 
 	player_position += player_velocity * delta
 	if wish.length_squared() > 0.0001 or player_velocity.length_squared() > 3600.0:
@@ -1191,7 +1233,7 @@ func _step_drag_physics(delta: float) -> bool:
 	# 空間グリッドを1回だけ構築して pair/edge 両方の斥力計算で使い回す
 	var _pos_grid: Dictionary = _build_position_grid(POINT_PAIR_REPULSE_DISTANCE)
 	_apply_point_pair_repulsion(forces, _pos_grid)
-	if _ax_spacing_active and _ax_spacing_hold_ms > 0.5:
+	if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
 		_apply_ax_spacing_equal_spacing_repulsion(forces)
 	var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
 	_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
@@ -1530,7 +1572,7 @@ func get_polygon_loop_edge_endpoints_world() -> Array:
 func get_ax_spacing_repulsion_debug_segments() -> Array:
 	"""描画用: A+X 等間隔斥力が作用する辺ごとに { from, to, magnitude }（ワールド座標）"""
 	var out: Array = []
-	if not _ax_spacing_active or _ax_spacing_hold_ms <= 0.5:
+	if not _ax_spacing_active or _ax_spacing_hold_ms < AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
 		return out
 	var R: float = get_ax_spacing_equalization_radius()
 	var rsq: float = R * R
