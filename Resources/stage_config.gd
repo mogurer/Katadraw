@@ -17,6 +17,7 @@ const TYPE_DEFAULTS: Dictionary = {
 		"clear_pct": 98.0,
 		"display_rate_min_pct": 50.0,
 		"guide_follows_player_radius": 0,
+		"hud_guide_layout_scale_mul": 0.8,
 	},
 	"square": {
 		"num_points": 4,

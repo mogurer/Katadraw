@@ -112,10 +112,19 @@ const _UI_ASSETS_DIR := "res://assets/UI/"
 # rules 画面: 上半分付近の左右配置。各画像の長辺 = min(画面) * この値
 const RULES_CTRL_IMAGES_SIZE_FRAC := 2.0 / 5.0
 const RULES_CTRL_IMAGES_CENTER_Y_FRAC := 0.15  # 上半分の中央付近（+ _draw_rules の shift_down）
-# playing: 右下第4象限のやや右下。長辺 = min(画面) * この値
-const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 8.0
-const STAGE_CTRL_HINT_Q4_NUDGE_X := 0.10  # 第4象限中心から右 direction（vp.x 比）
-const STAGE_CTRL_HINT_Q4_NUDGE_Y := -0.50  # 上方向（vp.y 比）
+# playing: 左下角付近。長辺 = min(画面) * この値
+const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 2.0
+const STAGE_CTRL_HINT_BL_CENTER_X_FRAC := 0.22
+const STAGE_CTRL_HINT_BL_CENTER_Y_FRAC := 0.82
+const STAGE_CTRL_HINT_BL_NUDGE_X := -0.08  # 左寄り（vp.x 比）
+const STAGE_CTRL_HINT_BL_NUDGE_Y := -0.06  # わずかに上（vp.y 比）
+# square（ピンク）／ hex（水色）のコーナー説明ループ用。0.5s 非表示→2.5s 拡大・位置共通
+const PLAYING_BTN_DEMO_PAUSE_SEC := 0.5
+const PLAYING_BTN_DEMO_EXPAND_SEC := 2.5
+const PLAYING_BTN_DEMO_CENTER_X_FRAC := 0.22
+const PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC := 0.18
+const PLAYING_BTN_DEMO_MAX_R_FRAC := 0.22
+const PLAYING_BTN_DEMO_RING_ALPHA_MUL := 2.0  # 拡大する円の塗り・縁のみ濃く（ダミー自キャラは対象外）
 
 # --- Particle state ---
 var particles: Array[Dictionary] = []
@@ -1270,7 +1279,7 @@ func _draw_rules_demo_control_images(vp: Vector2, shift_down: float) -> void:
 	_draw_ui_texture_centered(tex, Vector2(cx, cy), max_side)
 
 
-## playing: ステージ種別ごとに右下でコントローラ画像を一定周期で切り替え
+## playing: ステージ種別ごとに左下角付近でコントローラ画像を一定周期で切り替え
 func _draw_stage_playing_controller_hint(vp: Vector2) -> void:
 	if _game.game_state != "playing":
 		return
@@ -1280,36 +1289,100 @@ func _draw_stage_playing_controller_hint(vp: Vector2) -> void:
 	match _game.stage_type:
 		"triangle":
 			t_second = 0.5
-			second_file = "controller_A.png"
+			second_file = "con_bt_A1.png"
 		"square":
-			t_second = 1.5
-			second_file = "controller_A.png"
+			t_second = 2.5
+			second_file = "con_bt_A1.png"
 		"hexagon":
-			t_second = 1.5
-			second_file = "controller_X.png"
+			t_second = 2.5
+			second_file = "con_bt_X1.png"
 		"circle":
-			t_second = 1.5
-			second_file = "controller_AX.png"
+			t_second = 2.5
+			second_file = "con_bt_AX1.png"
 		_:
 			return
 	var cycle: float = t_first + t_second
 	var now: float = Time.get_ticks_msec() / 1000.0
 	var ph: float = fmod(now, cycle)
 	var use_base: bool = ph < t_first
-	var fname: String = "controller.png" if use_base else second_file
+	var fname: String = "con_bt_non.png" if use_base else second_file
 	var tex: Texture2D = _get_ui_texture(fname)
 	if tex == null:
 		return
 	var vmin: float = minf(vp.x, vp.y)
 	var max_side: float = vmin * STAGE_CTRL_HINT_SIZE_FRAC
-	# 第4象限（右下）の中心から、やや右下へ
-	var qcx: float = vp.x * 0.75
-	var qcy: float = vp.y * 0.75
+	var qcx: float = vp.x * STAGE_CTRL_HINT_BL_CENTER_X_FRAC
+	var qcy: float = vp.y * STAGE_CTRL_HINT_BL_CENTER_Y_FRAC
 	var center: Vector2 = Vector2(
-		qcx + vp.x * STAGE_CTRL_HINT_Q4_NUDGE_X,
-		qcy + vp.y * STAGE_CTRL_HINT_Q4_NUDGE_Y
+		qcx + vp.x * STAGE_CTRL_HINT_BL_NUDGE_X,
+		qcy + vp.y * STAGE_CTRL_HINT_BL_NUDGE_Y
 	)
 	_draw_ui_texture_centered(tex, center, max_side)
+
+
+## square のみ: X とは別に「A でピンクの斥力圏」説明ループ（0.5s 非表示→2.5s 拡大）
+func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
+	if _game.game_state != "playing" or _game.stage_type != "square":
+		return
+	var cycle: float = PLAYING_BTN_DEMO_PAUSE_SEC + PLAYING_BTN_DEMO_EXPAND_SEC
+	var t: float = fmod(Time.get_ticks_msec() * 0.001, cycle)
+	if t < PLAYING_BTN_DEMO_PAUSE_SEC:
+		return
+	var u: float = (t - PLAYING_BTN_DEMO_PAUSE_SEC) / PLAYING_BTN_DEMO_EXPAND_SEC
+	var ease: float = u * u * (3.0 - 2.0 * u)
+	var vmin: float = minf(vp.x, vp.y)
+	var ctrl_y: float = vp.y * STAGE_CTRL_HINT_BL_CENTER_Y_FRAC + vp.y * STAGE_CTRL_HINT_BL_NUDGE_Y
+	var center := Vector2(
+		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
+		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
+	)
+	var dm: float = 0.5  # 説明用ダミーは通常の 50% の不透明度
+	var core_r: float = InputHandler.PLAYER_RADIUS
+	var max_r: float = vmin * PLAYING_BTN_DEMO_MAX_R_FRAC
+	var ring_r: float = lerpf(core_r * 1.25, max_r, ease)
+	var fill_a: float = clampf(lerpf(0.14, 0.06, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
+	var fill_c: Color = Color(PLAYER_FORCE_FIELD_FILL_REPEL.r, PLAYER_FORCE_FIELD_FILL_REPEL.g, PLAYER_FORCE_FIELD_FILL_REPEL.b, fill_a)
+	_game.draw_circle(center, ring_r, fill_c)
+	var edge_a: float = clampf(lerpf(0.55, 0.22, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
+	_game.draw_arc(center, ring_r, 0.0, TAU, 72, Color(0.98, 0.38, 0.55, edge_a), 3.5, true)
+	_game.draw_circle(center, core_r * 1.45, Color(0.06, 0.05, 0.08, 0.92 * dm))
+	_game.draw_circle(center, core_r, Color(0.01, 0.01, 0.02, 1.0 * dm))
+	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
+
+
+## hexagon のみ: 「X で水色の引力圏」（square のピンクと同構成）
+func _draw_hexagon_stage_attract_demo(vp: Vector2) -> void:
+	if _game.game_state != "playing" or _game.stage_type != "hexagon":
+		return
+	var cycle: float = PLAYING_BTN_DEMO_PAUSE_SEC + PLAYING_BTN_DEMO_EXPAND_SEC
+	var tt: float = fmod(Time.get_ticks_msec() * 0.001, cycle)
+	if tt < PLAYING_BTN_DEMO_PAUSE_SEC:
+		return
+	var u: float = (tt - PLAYING_BTN_DEMO_PAUSE_SEC) / PLAYING_BTN_DEMO_EXPAND_SEC
+	var ease: float = u * u * (3.0 - 2.0 * u)
+	var vmin: float = minf(vp.x, vp.y)
+	var ctrl_y: float = vp.y * STAGE_CTRL_HINT_BL_CENTER_Y_FRAC + vp.y * STAGE_CTRL_HINT_BL_NUDGE_Y
+	var center := Vector2(
+		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
+		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
+	)
+	var dm: float = 0.5
+	var core_r: float = InputHandler.PLAYER_RADIUS
+	var max_r: float = vmin * PLAYING_BTN_DEMO_MAX_R_FRAC
+	var ring_r: float = lerpf(core_r * 1.25, max_r, ease)
+	var fill_a: float = clampf(lerpf(0.16, 0.05, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
+	var fill_c: Color = Color(
+		PLAYER_FORCE_FIELD_FILL_ATTRACT.r,
+		PLAYER_FORCE_FIELD_FILL_ATTRACT.g,
+		PLAYER_FORCE_FIELD_FILL_ATTRACT.b,
+		fill_a
+	)
+	_game.draw_circle(center, ring_r, fill_c)
+	var edge_a: float = clampf(lerpf(0.52, 0.2, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
+	_game.draw_arc(center, ring_r, 0.0, TAU, 72, Color(0.42, 0.82, 1.0, edge_a), 3.5, true)
+	_game.draw_circle(center, core_r * 1.45, Color(0.06, 0.05, 0.08, 0.92 * dm))
+	_game.draw_circle(center, core_r, Color(0.01, 0.01, 0.02, 1.0 * dm))
+	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
 
 
 # --- 操作説明の共通定義（rules / ポーズの操作説明で共有） ---
@@ -1662,7 +1735,7 @@ func _draw_game(vp: Vector2) -> void:
 	# 1.5. 完成済みオブジェクトの塗りつぶし（線の下に描画）
 	_draw_clear_fill()
 
-	# 1.6 コントローラ操作ヒント（controller.png 等）: 図形・自キャラより下に重ね、手前の要素で隠れないようにする
+	# 1.6 コントローラ操作ヒント（con_bt_non.png / con_bt_*1.png の切り替え）: 図形・自キャラより下に重ねる
 	_draw_stage_playing_controller_hint(vp)
 
 	# 2. ユーザーの図形（線・ポイント・エフェクト）
@@ -1688,8 +1761,7 @@ func _draw_game(vp: Vector2) -> void:
 			color = Color(0.40, 0.33, 0.38, 0.5)
 			radius = r_guide
 		elif on_guide_outline:
-			var alpha_g: float = _game._point_accuracy_alpha(i)
-			_draw_guide_snapped_point_with_pink_halo(pos, r_guide, alpha_g)
+			_draw_guide_snapped_point_black_disc(pos)
 			skip_fill_circle = true
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
@@ -1733,6 +1805,10 @@ func _draw_game(vp: Vector2) -> void:
 
 	# A+X 斥力の可視化: HUD 見本より手前に描く（下に隠れないように）
 	_draw_ax_spacing_repulsion_debug()
+
+	# square: A 斥力（ピンク）／hex: X 引力（水色）。左・コントロよりやや上
+	_draw_square_stage_repulse_demo(vp)
+	_draw_hexagon_stage_attract_demo(vp)
 
 	if _game.game_state == "cleared":
 		_stage_renderer.draw_ideal_shape()
@@ -1831,7 +1907,7 @@ func _attract_inward_path_q(s: float, f_outer: float) -> float:
 	return s + (F - 1.0) * s * (1.0 - s) * (1.0 - s)
 
 
-func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
+func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float, alpha_scale: float = 1.0) -> void:
 	"""X 長押し: 一周期内は周波数一定。沖（外）ほど d(半径位置)/d(時間) が大きく、内（s→1）では当初と同程度。"""
 	var t_sec: float = Time.get_ticks_msec() * 0.001
 	var hz: float = PLAYER_ATTRACT_INWARD_WAVE_HZ
@@ -1871,8 +1947,8 @@ func _draw_player_attract_inward_waves(center: Vector2, inner_r: float, field_r:
 				continue
 			var ring_a: float = crest * 0.5 * head_boost * a_mul * w_mul
 			var t_in: float = clampf((r_draw - inner_limit) / maxf(outer_rr - inner_limit, 0.001), 0.0, 1.0)
-			var c_soft: Color = Color(0.28, 0.62, 1.0, _attract_ring_alpha_from_base(ring_a, 0.75, t_in))
-			var c_core: Color = Color(0.2, 0.56, 1.0, _attract_ring_alpha_from_base(ring_a, 0.98, t_in))
+			var c_soft: Color = Color(0.28, 0.62, 1.0, _attract_ring_alpha_from_base(ring_a, 0.75, t_in) * alpha_scale)
+			var c_core: Color = Color(0.2, 0.56, 1.0, _attract_ring_alpha_from_base(ring_a, 0.98, t_in) * alpha_scale)
 			_game.draw_arc(center, r_draw, 0.0, TAU, 88, c_soft, w_pix, true)
 			_game.draw_arc(center, r_draw, 0.0, TAU, 88, c_core, w_pix * 0.4, true)
 
@@ -1882,7 +1958,7 @@ func _attract_ring_alpha_from_base(base: float, peak_mul: float, t_toward_center
 	return clampf(base * peak_mul * lerpf(1.0, 0.18, t_toward_center * t_toward_center * t_toward_center), 0.0, 1.0)
 
 
-func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float) -> void:
+func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r: float, core_r: float, alpha_scale: float = 1.0) -> void:
 	"""A 長押し（斥力）: 円弧が中心→外周へ広がり、最外周に近いほど色が濃くなる。"""
 	var t_sec: float = Time.get_ticks_msec() * 0.001
 	var hz: float = PLAYER_REPULSE_OUTWARD_WAVE_HZ
@@ -1903,25 +1979,28 @@ func _draw_player_repulse_outward_waves(center: Vector2, inner_r: float, field_r
 		var c_strong_core := Color(0.92, 0.18, 0.38, ring_alpha * 0.98)
 		var c_soft: Color = c_faint_glow.lerp(c_strong_glow, t_edge)
 		var c_bright: Color = c_faint_core.lerp(c_strong_core, t_edge)
+		c_soft.a *= alpha_scale
+		c_bright.a *= alpha_scale
 		const W_SOFT := 13.6
 		const W_CORE := 5.4
 		_game.draw_arc(center, rr, 0.0, TAU, 80, c_soft, W_SOFT, true)
 		_game.draw_arc(center, rr, 0.0, TAU, 80, c_bright, W_CORE, true)
 
 
-func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r: float, attracting: bool) -> void:
+func _draw_player_force_influence_visual(center: Vector2, core_r: float, field_r: float, attracting: bool, alpha_scale: float = 1.0) -> void:
 	"""影響範囲：薄塗り → 引力は内向き円波、斥力は外向き円波（最外周の固定ラインは描かない）。"""
 	if field_r > 1.0:
 		var fill_c: Color = (
 			PLAYER_FORCE_FIELD_FILL_ATTRACT if attracting else PLAYER_FORCE_FIELD_FILL_REPEL
 		)
+		fill_c.a *= alpha_scale
 		_game.draw_circle(center, field_r, fill_c)
 	var base_fr: float = _game.input_handler.get_base_player_force_visual_radius()
 	var inner_r: float = maxf(core_r * 1.2, base_fr * 0.2)
 	if attracting:
-		_draw_player_attract_inward_waves(center, inner_r, field_r, core_r)
+		_draw_player_attract_inward_waves(center, inner_r, field_r, core_r, alpha_scale)
 	else:
-		_draw_player_repulse_outward_waves(center, inner_r, field_r, core_r)
+		_draw_player_repulse_outward_waves(center, inner_r, field_r, core_r, alpha_scale)
 
 
 ## 右スティックのデバッグ線／A+X 斥力可視化の共用: 2 点間の稲妻状放電
@@ -1989,13 +2068,6 @@ func _draw_ax_spacing_repulsion_debug() -> void:
 		var alpha: float = lerpf(0.42, 1.0, t)
 		var jitter_s: float = lerpf(0.75, 1.15, t)
 		_draw_discharge_lightning_between(a, b, alpha, jitter_s)
-	if segs.is_empty() and ih.get_ax_spacing_hold_ms() > 0.5:
-		var edges: Array = ih.get_polygon_loop_edge_endpoints_world()
-		for ed in edges:
-			var e: Dictionary = ed as Dictionary
-			var ep0: Vector2 = e["from"] as Vector2
-			var ep1: Vector2 = e["to"] as Vector2
-			_draw_discharge_lightning_between(ep0, ep1, 0.28, 0.65)
 
 
 func _draw_player_avatar() -> void:
@@ -2004,25 +2076,34 @@ func _draw_player_avatar() -> void:
 	var center: Vector2 = _game.input_handler.get_player_position()
 	var core_r: float = InputHandler.PLAYER_RADIUS
 	var field_r: float = _game.input_handler.get_effective_player_force_visual_radius()
+	var ax_mode: bool = _game.input_handler.is_ax_spacing_mode_active()
+	if ax_mode:
+		field_r = _game.input_handler.get_ax_spacing_equalization_radius()
 	var attracting: bool = _game.input_handler.is_player_attracting()
 	var repelling: bool = _game.input_handler.is_player_repelling()
-	var ring_color: Color = Color(0.58, 0.62, 0.74, 0.08)
-	var edge_color: Color = Color(0.88, 0.9, 0.97, 0.18)
+	var av_mul: float = 1.0
+	if _game.game_state == "playing" and _game.stage_type == "square":
+		av_mul = 0.5
+	var ring_color: Color = Color(0.58, 0.62, 0.74, 0.08 * av_mul)
+	var edge_color: Color = Color(0.88, 0.9, 0.97, 0.18 * av_mul)
 	if attracting:
-		ring_color = Color(0.55, 0.78, 1.0, 0.16)
-		edge_color = Color(0.86, 0.93, 1.0, 0.36)
+		ring_color = Color(0.55, 0.78, 1.0, 0.16 * av_mul)
+		edge_color = Color(0.86, 0.93, 1.0, 0.36 * av_mul)
 	elif repelling:
-		ring_color = Color(1.0, 0.55, 0.62, 0.14)
-		edge_color = Color(1.0, 0.82, 0.86, 0.28)
+		ring_color = Color(1.0, 0.55, 0.62, 0.14 * av_mul)
+		edge_color = Color(1.0, 0.82, 0.86, 0.28 * av_mul)
+	elif ax_mode:
+		ring_color = Color(0.62, 0.78, 1.0, 0.12 * av_mul)
+		edge_color = Color(0.78, 0.9, 1.0, 0.24 * av_mul)
 	if attracting or repelling:
-		_draw_player_force_influence_visual(center, core_r, field_r, attracting)
+		_draw_player_force_influence_visual(center, core_r, field_r, attracting, av_mul)
 	else:
 		_game.draw_circle(center, field_r, ring_color)
 		_game.draw_arc(center, field_r, 0.0, TAU, 64, edge_color, 2.0)
-	_game.draw_circle(center, core_r * 1.45, Color(0.06, 0.05, 0.08, 0.92))
-	_game.draw_circle(center, core_r, Color(0.01, 0.01, 0.02, 1.0))
-	_game.draw_arc(center, core_r * 0.72, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7), 2.5)
-	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95))
+	_game.draw_circle(center, core_r * 1.45, Color(0.06, 0.05, 0.08, 0.92 * av_mul))
+	_game.draw_circle(center, core_r, Color(0.01, 0.01, 0.02, 1.0 * av_mul))
+	_game.draw_arc(center, core_r * 0.72, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7 * av_mul), 2.5)
+	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * av_mul))
 
 
 func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:
@@ -2036,32 +2117,13 @@ func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void
 	_game.draw_circle(center, r, SELECTED_POINT_WHITE)
 
 
-## ガイド上の白丸: 外側へ薄くなるピンクのグラデーション + 縁取り
-func _draw_guide_snapped_point_with_pink_halo(center: Vector2, core_r: float, alpha_base: float) -> void:
-	if core_r < 0.5:
+## ガイド輪郭上: ガイド線幅の5倍の直径の黒塗り円（`StageRenderer.HUD_GUIDE_LINE_WIDTH_PX` と同期）
+func _draw_guide_snapped_point_black_disc(center: Vector2) -> void:
+	var diameter: float = StageRenderer.HUD_GUIDE_LINE_WIDTH_PX * 5.0
+	var r: float = diameter * 0.5
+	if r < 0.5:
 		return
-	var pink_core := Color(1.0, 0.38, 0.62, 1.0)
-	const HALO_SEGMENTS := 56
-	const HALO_LAYERS := 14
-	const HALO_OUTER_PX := 22.0
-	# 外側ほど薄いリング（弧の重なりでぼかし）
-	for h in range(HALO_LAYERS):
-		var t: float = float(h) / float(maxi(HALO_LAYERS - 1, 1))
-		var rr: float = core_r + 2.5 + (HALO_OUTER_PX - 2.5) * t
-		var fall: float = (1.0 - t)
-		var a: float = fall * fall * 0.42 * alpha_base
-		var w: float = lerpf(2.2, 1.2, t)
-		_game.draw_arc(center, rr, 0.0, TAU, HALO_SEGMENTS, Color(pink_core.r, pink_core.g, pink_core.b, a), w)
-	_game.draw_circle(center, core_r, Color(1.0, 1.0, 1.0, alpha_base))
-	_game.draw_arc(
-		center,
-		core_r,
-		0.0,
-		TAU,
-		HALO_SEGMENTS,
-		Color(pink_core.r, pink_core.g, pink_core.b, 0.92 * alpha_base),
-		2.6
-	)
+	_game.draw_circle(center, r, Color.BLACK)
 
 
 func _effect_hover_base(base_r: float) -> float:
@@ -2259,10 +2321,10 @@ func _draw_guide_info(vp: Vector2) -> void:
 			guide_shape_scale = 0.42
 		_:
 			match _game.stage_manager.current_stage:
-				8:
+				9:
 					guide_shape_scale = 0.90  # マグカップ（最終面）
-				6:
-					guide_shape_scale = 0.88  # 七芒星シルエット
+				7, 8:
+					guide_shape_scale = 0.88  # 家・オカリナ（複雑シルエット）
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(
 			Vector2(play_cx, shape_cy),

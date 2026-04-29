@@ -54,6 +54,19 @@ const GUIDE_VERTEX_LOCK_RADIUS := 7.0
 const GUIDE_VERTEX_LOCK_SPRING := 220.0
 const GUIDE_VERTEX_LOCK_DAMPING := 30.0
 const GUIDE_VERTEX_CONTACT_RELEASE_MUL := 0.35
+## 「強制力」(CCW・点-辺斥力): ガイドへの最短距離がこの値より内側ほど弱く（0 で無効に近い）
+const GUIDE_CONSTRAINT_SUPPRESS_DIST := GUIDE_EDGE_SNAP_RADIUS
+const GUIDE_CONSTRAINT_SUPPRESS_EXP := 2.2
+## ガイド上の留まり: スナップ・ロック・スライドの上乗せ（strength 1 付近での最大ブースト）
+const GUIDE_STICK_VERTEX_SPRING_EXTRA := 0.62
+const GUIDE_STICK_EDGE_SPRING_EXTRA := 0.48
+const GUIDE_STICK_SNAP_DAMP_EXTRA := 0.58
+const GUIDE_STICK_VERTEX_LOCK_SPRING_EXTRA := 0.42
+const GUIDE_STICK_EDGE_GLIDE_DAMP_EXTRA := 0.45
+const GUIDE_STICK_EDGE_SLIDE_TRACK_EXTRA := 0.58
+## 積分後のガイド寄せ lerp を少し強める（0〜1 にクランプ）
+const GUIDE_STICK_POST_LOCK_LERP_ADD := 0.10
+const GUIDE_STICK_POST_EDGE_LERP_ADD := 0.12
 const PLAYER_RADIUS := 16.0
 const PLAYER_FORCE_RADIUS := 128.0
 const PLAYER_SPEED_BOOST_PER_BUTTON := 0.35
@@ -76,6 +89,9 @@ const AX_SPACING_REPULSE_DISTANCE := 400.0
 const AX_SPACING_REPULSE_STRENGTH := 10240.0
 const AX_SPACING_REPULSE_MIN_DISTANCE := 2.0
 const AX_SPACING_MAX_STRENGTH_MUL := 2.0
+## 均等化半径内での滞在累積（ms）から強さ係数 0〜1 に飽和させる時間
+const AX_SPACING_DWELL_RAMP_FULL_MS := 2500.0
+const AX_SPACING_DWELL_ACCUM_CAP_MS := 4000.0
 ## 頂点と非隣接辺が近づいたときの斥力（線の交差を抑える）
 const POINT_EDGE_REPULSE_DISTANCE := 56.0
 const POINT_EDGE_REPULSE_STRENGTH := 3400.0
@@ -194,6 +210,11 @@ var _empty_attract_radius_bonus: float = 0.0
 ## A+X（またはマウス左右同時）長押しで等間隔用斥力を有効にしているフレーム
 var _ax_spacing_active: bool = false
 var _ax_spacing_hold_ms: float = 0.0
+## A+X中の静止のみで増える均等化半径（引力・斥力と同じ幾何ボーナス）
+var _ax_spacing_region_stationary_ms: float = 0.0
+var _ax_spacing_region_radius_bonus: float = 0.0
+## 均等化半径内での頂点別滞在累積（ms）。半径外へ出たフレームで 0 に戻す
+var _ax_spacing_vertex_dwell_ms: Array[float] = []
 
 # --- 空間グリッド用: 点-辺斥力の visited 世代管理 ---
 ## _apply_point_edge_repulsion 内での重複チェックを Dictionary 割り当てなしで行うための世代カウンタ
@@ -281,6 +302,9 @@ func reset_for_stage() -> void:
 	_empty_attract_radius_bonus = 0.0
 	_ax_spacing_active = false
 	_ax_spacing_hold_ms = 0.0
+	_ax_spacing_region_stationary_ms = 0.0
+	_ax_spacing_region_radius_bonus = 0.0
+	_ax_spacing_vertex_dwell_ms.clear()
 	_pad_move_ramp_ms = 0.0
 	_reset_player_position()
 
@@ -895,6 +919,8 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
+		_ax_spacing_region_stationary_ms = 0.0
+		_ax_spacing_region_radius_bonus = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
@@ -906,6 +932,8 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
+		_ax_spacing_region_stationary_ms = 0.0
+		_ax_spacing_region_radius_bonus = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
@@ -917,6 +945,8 @@ func process_pad(delta: float) -> void:
 		_empty_attract_stationary_ms = 0.0
 		_ax_spacing_active = false
 		_ax_spacing_hold_ms = 0.0
+		_ax_spacing_region_stationary_ms = 0.0
+		_ax_spacing_region_radius_bonus = 0.0
 		_pad_move_ramp_ms = 0.0
 		return
 	if not player_position_initialized:
@@ -1023,6 +1053,21 @@ func process_pad(delta: float) -> void:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
 
+	var max_charge_ms_ax: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
+	if in_play_ef and _ax_spacing_active:
+		var stationary_ax: bool = player_velocity.length() <= PLAYER_FORCE_CHARGE_STATIONARY_EPS
+		if stationary_ax:
+			_ax_spacing_region_stationary_ms = minf(
+				_ax_spacing_region_stationary_ms + delta * 1000.0,
+				max_charge_ms_ax
+			)
+		var tr_ax: float = 1.0 + _ax_spacing_region_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
+		tr_ax = minf(tr_ax, float(EMPTY_FORCE_RADIUS_TICK_CAP))
+		_ax_spacing_region_radius_bonus = _force_radius_bonus_smooth(tr_ax)
+	else:
+		_ax_spacing_region_stationary_ms = 0.0
+		_ax_spacing_region_radius_bonus = 0.0
+
 	var speed_mul: float = _get_player_speed_multiplier()
 	var moved: bool = false
 	var wish: Vector2 = Vector2.ZERO
@@ -1120,6 +1165,9 @@ func _step_drag_physics(delta: float) -> bool:
 
 	var before: Array[Vector2] = _game.point_positions.duplicate()
 
+	_ensure_drag_state_arrays()
+	_update_ax_spacing_vertex_dwell(delta)
+
 	var guide_loops: Array = _build_fixed_guide_snap_loops()
 	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
 	var vertex_locks: Dictionary = _compute_vertex_locks(nearest_features)
@@ -1143,8 +1191,9 @@ func _step_drag_physics(delta: float) -> bool:
 	_apply_point_pair_repulsion(forces, _pos_grid)
 	if _ax_spacing_active and _ax_spacing_hold_ms > 0.5:
 		_apply_ax_spacing_equal_spacing_repulsion(forces)
-	_apply_point_edge_repulsion(forces, _pos_grid)
-	_apply_polygon_ccw_order_constraint(forces)
+	var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
+	_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
+	_apply_polygon_ccw_order_constraint(forces, guide_constraint_mul)
 	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
 	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
@@ -1405,10 +1454,54 @@ func _ax_spacing_pair_repulsion_force(pi: Vector2, pj: Vector2, strength_mul: fl
 	return dir * (AX_SPACING_REPULSE_STRENGTH * strength_mul * falloff * falloff)
 
 
-func _ax_spacing_strength_mul_now() -> float:
-	var t_norm: float = clampf(_ax_spacing_hold_ms, 0.0, AX_SPACING_HOLD_CAP_MS) / maxf(AX_SPACING_HOLD_CAP_MS, 1.0)
-	var ramp: float = t_norm * t_norm
-	return ramp * AX_SPACING_MAX_STRENGTH_MUL
+## A+X 均等化が効く半径（`_get_effective_player_force_limit` と同形: 基準＋引力・斥力と同じ静止チャージボーナス）
+func get_ax_spacing_equalization_radius() -> float:
+	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS + _ax_spacing_region_radius_bonus
+
+
+func _ax_spacing_dwell_weight(ms: float) -> float:
+	if ms <= 0.001:
+		return 0.0
+	var t: float = clampf(ms / maxf(AX_SPACING_DWELL_RAMP_FULL_MS, 1.0), 0.0, 1.0)
+	return t * t
+
+
+func _ax_spacing_edge_dwell_multiplier(i: int, j: int, i_in: bool, j_in: bool) -> float:
+	if not i_in and not j_in:
+		return 0.0
+	var wi: float = _ax_spacing_dwell_weight(_ax_spacing_vertex_dwell_ms[i]) if i_in else 0.0
+	var wj: float = _ax_spacing_dwell_weight(_ax_spacing_vertex_dwell_ms[j]) if j_in else 0.0
+	var m: float
+	if wi > 0.001 and wj > 0.001:
+		m = sqrt(wi * wj)
+	elif wi > 0.001:
+		m = wi
+	elif wj > 0.001:
+		m = wj
+	else:
+		return 0.0
+	return m * AX_SPACING_MAX_STRENGTH_MUL
+
+
+func _update_ax_spacing_vertex_dwell(delta_sec: float) -> void:
+	_ensure_drag_state_arrays()
+	if not _ax_spacing_active:
+		for k in range(_ax_spacing_vertex_dwell_ms.size()):
+			_ax_spacing_vertex_dwell_ms[k] = 0.0
+		return
+	var R: float = get_ax_spacing_equalization_radius()
+	var rsq: float = R * R
+	var pp: Vector2 = player_position
+	var dm: float = delta_sec * 1000.0
+	for i in range(_game.point_positions.size()):
+		if _is_locked(i):
+			_ax_spacing_vertex_dwell_ms[i] = 0.0
+			continue
+		var inside: bool = pp.distance_squared_to(_game.point_positions[i]) <= rsq
+		if inside:
+			_ax_spacing_vertex_dwell_ms[i] = minf(_ax_spacing_vertex_dwell_ms[i] + dm, AX_SPACING_DWELL_ACCUM_CAP_MS)
+		else:
+			_ax_spacing_vertex_dwell_ms[i] = 0.0
 
 
 func is_ax_spacing_mode_active() -> bool:
@@ -1437,9 +1530,9 @@ func get_ax_spacing_repulsion_debug_segments() -> Array:
 	var out: Array = []
 	if not _ax_spacing_active or _ax_spacing_hold_ms <= 0.5:
 		return out
-	var strength_mul: float = _ax_spacing_strength_mul_now()
-	if strength_mul < 0.001:
-		return out
+	var R: float = get_ax_spacing_equalization_radius()
+	var rsq: float = R * R
+	var pp: Vector2 = player_position
 	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
 	for e in edges:
 		var i: int = e.x
@@ -1448,7 +1541,14 @@ func get_ax_spacing_repulsion_debug_segments() -> Array:
 			continue
 		var pi: Vector2 = _game.point_positions[i]
 		var pj: Vector2 = _game.point_positions[j]
-		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, strength_mul)
+		var i_in: bool = pp.distance_squared_to(pi) <= rsq
+		var j_in: bool = pp.distance_squared_to(pj) <= rsq
+		if not i_in and not j_in:
+			continue
+		var em: float = _ax_spacing_edge_dwell_multiplier(i, j, i_in, j_in)
+		if em < 0.001:
+			continue
+		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, em)
 		var mag: float = fvec.length()
 		if mag < 0.05:
 			continue
@@ -1457,25 +1557,51 @@ func get_ax_spacing_repulsion_debug_segments() -> Array:
 
 
 func _apply_ax_spacing_equal_spacing_repulsion(forces: Array[Vector2]) -> void:
-	"""A+X 長押し: 既存の近距離斥力に加え、辺で隣る頂点間のみ追加斥力（長押しで増幅）"""
-	var strength_mul: float = _ax_spacing_strength_mul_now()
-	if strength_mul < 0.001:
-		return
+	"""自キャラ中心半径内／滞在時間でゲートされた辺隣接ペアのみ、既存のアルゴで斥力追加。"""
+	var R: float = get_ax_spacing_equalization_radius()
+	var rsq: float = R * R
+	var pp: Vector2 = player_position
+	_ensure_drag_state_arrays()
 	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
 	for e in edges:
 		var i: int = e.x
 		var j: int = e.y
 		if _is_locked(i) or _is_locked(j):
 			continue
-		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(
-			_game.point_positions[i],
-			_game.point_positions[j],
-			strength_mul
-		)
+		var pi: Vector2 = _game.point_positions[i]
+		var pj: Vector2 = _game.point_positions[j]
+		var i_in: bool = pp.distance_squared_to(pi) <= rsq
+		var j_in: bool = pp.distance_squared_to(pj) <= rsq
+		if not i_in and not j_in:
+			continue
+		var strength_mul: float = _ax_spacing_edge_dwell_multiplier(i, j, i_in, j_in)
+		if strength_mul < 0.001:
+			continue
+		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, strength_mul)
 		if fvec.length_squared() < 1e-12:
 			continue
 		forces[i] -= fvec
 		forces[j] += fvec
+
+
+## ガイド（辺・頂点の近傍）にいるほど CCW・点-辺斥力を弱める。1=そのまま、0=ほぼ無効
+func _guide_constraint_force_mul(feature: Dictionary) -> float:
+	var edge_dist: float = feature.get("edge_dist", INF) as float
+	var vertex_dist: float = feature.get("vertex_dist", INF) as float
+	var d: float = minf(edge_dist, vertex_dist)
+	if d >= GUIDE_CONSTRAINT_SUPPRESS_DIST:
+		return 1.0
+	var t: float = clampf(d / maxf(GUIDE_CONSTRAINT_SUPPRESS_DIST, 0.001), 0.0, 1.0)
+	return pow(t, GUIDE_CONSTRAINT_SUPPRESS_EXP)
+
+
+func _build_guide_constraint_mul_array(nearest_features: Array) -> PackedFloat32Array:
+	var n: int = nearest_features.size()
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in range(n):
+		out[i] = _guide_constraint_force_mul(nearest_features[i] as Dictionary)
+	return out
 
 
 func _get_polygon_edges_for_repulsion() -> Array[Vector2i]:
@@ -1551,7 +1677,7 @@ func _resolve_polygon_edge_intersection_circle_around_player(lo: Vector2, hi: Ve
 		point_velocities[i] = Vector2.ZERO
 
 
-func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary) -> void:
+func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary, guide_constraint_mul: PackedFloat32Array) -> void:
 	"""グリッドでエッジ両端点の近傍セル（3×3）内の点のみ確認して点-辺斥力を適用。O(n²) → O(n)。
 	各エッジを外ループにし、近傍で見つかった点 k を世代カウンタで重複除去することで
 	Dictionary を毎エッジ割り当てずに済む。"""
@@ -1603,7 +1729,12 @@ func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 						var dist: float = maxf(sqrt(dist_sq), POINT_EDGE_REPULSE_MIN_DISTANCE)
 						var falloff: float = 1.0 - dist / thr
 						var dir: Vector2 = delta / dist
-						forces[k] += dir * (POINT_EDGE_REPULSE_STRENGTH * falloff * falloff)
+						var gmul: float = 1.0
+						if k < guide_constraint_mul.size():
+							gmul = guide_constraint_mul[k]
+						if gmul < 0.001:
+							continue
+						forces[k] += dir * (POINT_EDGE_REPULSE_STRENGTH * falloff * falloff * gmul)
 
 
 func _centroid_positions_range(start_idx: int, end_exclusive: int) -> Vector2:
@@ -1615,19 +1746,19 @@ func _centroid_positions_range(start_idx: int, end_exclusive: int) -> Vector2:
 	return s / float(maxi(c, 1))
 
 
-func _apply_polygon_ccw_order_constraint(forces: Array[Vector2]) -> void:
+func _apply_polygon_ccw_order_constraint(forces: Array[Vector2], guide_constraint_mul: PackedFloat32Array) -> void:
 	var n: int = _game.point_positions.size()
 	if n < 3:
 		return
 	if _game.is_polygon_walk_order_active():
 		var c: Vector2 = _centroid_positions_range(0, n)
-		_apply_ccw_order_for_walk_segment(forces, 0, n, c)
+		_apply_ccw_order_for_walk_segment(forces, 0, n, c, guide_constraint_mul)
 		return
 	var c0: Vector2 = _centroid_positions_range(0, n)
-	_apply_ccw_order_for_loop(forces, 0, n, c0)
+	_apply_ccw_order_for_loop(forces, 0, n, c0, guide_constraint_mul)
 
 
-func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count: int, center: Vector2) -> void:
+func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count: int, center: Vector2, guide_constraint_mul: PackedFloat32Array) -> void:
 	if idx_count < 3:
 		return
 	for offset in range(idx_count):
@@ -1644,19 +1775,24 @@ func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count
 		var cr: float = a.x * b.y - a.y * b.x
 		if cr >= 0.0:
 			continue
+		var gmul: float = 1.0
+		if i < guide_constraint_mul.size() and nxt < guide_constraint_mul.size():
+			gmul = minf(guide_constraint_mul[i], guide_constraint_mul[nxt])
+		if gmul < 0.001:
+			continue
 		var perp: Vector2 = Vector2(-a.y, a.x)
 		var pl: float = perp.length()
 		if pl < 1e-5:
 			continue
 		perp /= pl
-		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0)
+		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0) * gmul
 		if not _is_locked(nxt):
 			forces[nxt] += perp * mag
 		if not _is_locked(i):
 			forces[i] -= perp * mag * 0.42
 
 
-func _apply_ccw_order_for_walk_segment(forces: Array[Vector2], seg_start_in_order: int, seg_len: int, center: Vector2) -> void:
+func _apply_ccw_order_for_walk_segment(forces: Array[Vector2], seg_start_in_order: int, seg_len: int, center: Vector2, guide_constraint_mul: PackedFloat32Array) -> void:
 	if seg_len < 3:
 		return
 	var order: PackedInt32Array = _game.polygon_walk_order
@@ -1674,12 +1810,17 @@ func _apply_ccw_order_for_walk_segment(forces: Array[Vector2], seg_start_in_orde
 		var cr: float = a.x * b.y - a.y * b.x
 		if cr >= 0.0:
 			continue
+		var gmul: float = 1.0
+		if i < guide_constraint_mul.size() and nxt < guide_constraint_mul.size():
+			gmul = minf(guide_constraint_mul[i], guide_constraint_mul[nxt])
+		if gmul < 0.001:
+			continue
 		var perp: Vector2 = Vector2(-a.y, a.x)
 		var pl: float = perp.length()
 		if pl < 1e-5:
 			continue
 		perp /= pl
-		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0)
+		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0) * gmul
 		if not _is_locked(nxt):
 			forces[nxt] += perp * mag
 		if not _is_locked(i):
@@ -1810,6 +1951,10 @@ func _ensure_drag_state_arrays() -> void:
 		point_stop_frames.append(0)
 	while point_stop_frames.size() > _game.point_positions.size():
 		point_stop_frames.pop_back()
+	while _ax_spacing_vertex_dwell_ms.size() < _game.point_positions.size():
+		_ax_spacing_vertex_dwell_ms.append(0.0)
+	while _ax_spacing_vertex_dwell_ms.size() > _game.point_positions.size():
+		_ax_spacing_vertex_dwell_ms.pop_back()
 
 
 func _zero_all_point_velocities() -> void:
@@ -1918,27 +2063,36 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 			if edge_dist < GUIDE_EDGE_SUCTION_RADIUS:
 				var suction_t: float = 1.0 - edge_dist / GUIDE_EDGE_SUCTION_RADIUS
 				edge_spring += GUIDE_EDGE_SUCTION_SPRING * suction_t * suction_t
+			var edge_spring_mul: float = 1.0 + GUIDE_STICK_EDGE_SPRING_EXTRA * edge_strength
+			var edge_snap_damp_mul: float = 1.0 + GUIDE_STICK_SNAP_DAMP_EXTRA * edge_strength
 			var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
 			var edge_normal: Vector2 = _feature_edge_normal(feature, pos)
 			var normal_velocity: Vector2 = edge_normal * point_velocities[i].dot(edge_normal)
-			forces[i] += (edge_target - pos) * (edge_spring * edge_strength * peel_mul)
-			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength * peel_mul)
+			forces[i] += (edge_target - pos) * (edge_spring * edge_strength * peel_mul * edge_spring_mul)
+			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength * peel_mul * edge_snap_damp_mul)
 			if edge_dist < GUIDE_EDGE_GLIDE_RADIUS and vertex_dist >= GUIDE_VERTEX_LOCK_RADIUS:
 				var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
-				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t * peel_mul)
+				var glide_damp_mul: float = 1.0 + GUIDE_STICK_EDGE_GLIDE_DAMP_EXTRA * glide_t
+				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t * peel_mul * glide_damp_mul)
 		if vertex_dist < GUIDE_VERTEX_SNAP_RADIUS:
 			var vertex_strength: float = 1.0 - vertex_dist / GUIDE_VERTEX_SNAP_RADIUS
+			var vertex_spring_mul: float = 1.0 + GUIDE_STICK_VERTEX_SPRING_EXTRA * vertex_strength
+			var vertex_damp_mul: float = 1.0 + GUIDE_STICK_SNAP_DAMP_EXTRA * vertex_strength
 			var vertex_target: Vector2 = feature.get("vertex_pos", pos) as Vector2
-			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength * peel_mul)
-			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength * peel_mul)
+			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength * peel_mul * vertex_spring_mul)
+			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength * peel_mul * vertex_damp_mul)
 		var lock_data: Dictionary = vertex_locks.get(i, {}) as Dictionary
 		if lock_data.is_empty():
 			continue
 		var lock_pos: Vector2 = lock_data.get("vertex_pos", pos) as Vector2
+		var lock_dist: float = pos.distance_to(lock_pos)
+		var lock_strength: float = clampf(1.0 - lock_dist / maxf(GUIDE_VERTEX_LOCK_RADIUS, 0.001), 0.0, 1.0)
 		var player_touching: bool = _is_player_touching_point(i)
 		var lock_mul: float = GUIDE_VERTEX_CONTACT_RELEASE_MUL if player_touching else 1.0
-		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul * peel_mul)
-		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul * peel_mul)
+		var lock_spring_mul: float = 1.0 + GUIDE_STICK_VERTEX_LOCK_SPRING_EXTRA * lock_strength
+		var lock_damp_mul: float = 1.0 + GUIDE_STICK_SNAP_DAMP_EXTRA * 0.55 * lock_strength
+		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul * peel_mul * lock_spring_mul)
+		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul * peel_mul * lock_damp_mul)
 
 
 func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
@@ -1958,7 +2112,8 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		var tangent: Vector2 = _feature_edge_tangent(feature)
 		var tangent_force: Vector2 = tangent * forces[i].dot(tangent)
 		var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
-		var track_force: Vector2 = (edge_target - pos) * (GUIDE_EDGE_SLIDE_TRACK_SPRING * glide_t)
+		var slide_stick: float = 1.0 + GUIDE_STICK_EDGE_SLIDE_TRACK_EXTRA * glide_t
+		var track_force: Vector2 = (edge_target - pos) * (GUIDE_EDGE_SLIDE_TRACK_SPRING * glide_t * slide_stick)
 		forces[i] = tangent_force + track_force
 		if _get_player_force_mode() != 0:
 			var pf: Vector2 = _compute_player_force(i)
@@ -2080,7 +2235,8 @@ func _apply_post_move_guide_constraints(nearest_features: Array, vertex_locks: D
 			var lock_dist: float = pos.distance_to(lock_pos)
 			if lock_dist <= GUIDE_VERTEX_LOCK_RADIUS:
 				var lock_t: float = 1.0 - lock_dist / maxf(GUIDE_VERTEX_LOCK_RADIUS, 0.001)
-				_game.point_positions[i] = pos.lerp(lock_pos, 0.18 + 0.42 * lock_t)
+				var lk_lerp: float = clampf(0.18 + 0.42 * lock_t + GUIDE_STICK_POST_LOCK_LERP_ADD * lock_t * lock_t, 0.0, 1.0)
+				_game.point_positions[i] = pos.lerp(lock_pos, lk_lerp)
 				point_velocities[i] *= maxf(0.0, 1.0 - 0.82 * lock_t)
 				continue
 		var edge_dist: float = feature.get("edge_dist", INF) as float
@@ -2092,7 +2248,8 @@ func _apply_post_move_guide_constraints(nearest_features: Array, vertex_locks: D
 		var edge_tangent: Vector2 = _feature_edge_tangent(feature)
 		var tangent_speed: float = point_velocities[i].dot(edge_tangent)
 		var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
-		_game.point_positions[i] = pos.lerp(edge_target, 0.20 + 0.45 * glide_t)
+		var eg_lerp: float = clampf(0.20 + 0.45 * glide_t + GUIDE_STICK_POST_EDGE_LERP_ADD * glide_t * glide_t, 0.0, 1.0)
+		_game.point_positions[i] = pos.lerp(edge_target, eg_lerp)
 		point_velocities[i] = edge_tangent * tangent_speed * (1.0 - 0.10 * glide_t)
 
 
@@ -2427,5 +2584,3 @@ func _notify_points_changed() -> void:
 func _notify_selection_changed() -> void:
 	if on_selection_changed.is_valid():
 		on_selection_changed.call()
-
-

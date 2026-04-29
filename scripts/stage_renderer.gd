@@ -7,6 +7,9 @@
 class_name StageRenderer
 extends RefCounted
 
+## HUD プレイ中ガイドの芯線幅（px）。`draw_hud_overlay_guide` と UIRenderer のガイド乗り表示と同期
+const HUD_GUIDE_LINE_WIDTH_PX := 3.5
+
 ## HUD 固定ガイド: 法線方向の外側グラデーション（px）。旧実装の最大 19 付近の約3倍
 const _HUD_GUIDE_GLOW_MAX_OFFSET_PX := 10.0
 ## 層数（多いほど滑らか。外にいくほど透過率が下がる）
@@ -140,7 +143,7 @@ func draw_hud_overlay_guide(alpha: float) -> void:
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
 		return
 	var sm = _game.stage_manager
-	var width: float = 3.5
+	var width: float = HUD_GUIDE_LINE_WIDTH_PX
 	var col_g := Color(_game.GUIDE_COLOR.r, _game.GUIDE_COLOR.g, _game.GUIDE_COLOR.b, _game.GUIDE_COLOR.a * alpha)
 	_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
 
