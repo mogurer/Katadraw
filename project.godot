@@ -28,8 +28,8 @@ SteamManager="*uid://di1gsd1cdiimu"
 window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/size/resizable=false
-window/size/window_width_override=1920
-window/size/window_height_override=1080
+window/size/window_width_override=0
+window/size/window_height_override=0
 window/stretch/mode="canvas_items"
 
 [editor]

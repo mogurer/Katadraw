@@ -53,18 +53,22 @@ func advance(
 
 	match _phase:
 		Phase.PHASE_00:
-			if no_input_time >= 10.0:
-				return _transition(Phase.PHASE_TITLE_AAAA)
-			elif not demo_reached:
-				return _transition(Phase.PHASE_TITLE_AAAABB)
-			else:
-				return _transition(Phase.PHASE_TITLE_AB)
+			return _transition(Phase.PHASE_TITLE_AAAA)
+
+		Phase.PHASE_TITLE_AAAA:
+			return _transition(Phase.PHASE_TITLE_AAAABB)
+
+		Phase.PHASE_TITLE_AAAABB:
+			return _transition(Phase.PHASE_TITLE_BBBB)
+
+		Phase.PHASE_TITLE_BBBB:
+			return _transition(Phase.PHASE_TITLE_END)
 
 		Phase.PHASE_TITLE_END:
-			if not all_cleared:
-				return _transition(Phase.PHASE_JOIN)
-			else:
-				return _transition(Phase.PHASE_JOIN_LONG)
+			return _transition(Phase.PHASE_JOIN_LONG)
+
+		Phase.PHASE_JOIN_LONG:
+			return _transition(Phase.PHASE_TITLE_AAAA)
 
 		Phase.PHASE_TITLE_AB:
 			if not all_cleared:
@@ -79,34 +83,6 @@ func advance(
 				return _transition(Phase.PHASE_TITLE_AAAABB)
 			else:
 				return _transition(Phase.PHASE_TITLE_AAAA)
-
-		Phase.PHASE_JOIN_LONG:
-			if no_input_time >= 10.0:
-				return _transition(Phase.PHASE_TITLE_AAAA)
-			elif not demo_reached:
-				return _transition(Phase.PHASE_TITLE_AAAABB)
-			else:
-				return _transition(Phase.PHASE_TITLE_AB)
-
-		Phase.PHASE_TITLE_AAAA:
-			if match_rate > 0.9:
-				return _transition(Phase.PHASE_TITLE_AB)
-			elif match_rate > 0.5:
-				return _transition(Phase.PHASE_TITLE_AAAABB)
-			else:
-				return _transition(Phase.PHASE_TITLE_AAAA)   # loop
-
-		Phase.PHASE_TITLE_AAAABB:
-			if match_rate > 0.9:
-				return _transition(Phase.PHASE_TITLE_END)
-			else:
-				return _transition(Phase.PHASE_TITLE_BBBB)
-
-		Phase.PHASE_TITLE_BBBB:
-			if match_rate > 0.9:
-				return _transition(Phase.PHASE_TITLE_END)
-			else:
-				return _transition(Phase.PHASE_TITLE_BBBB)   # loop
 
 	push_error("BGMSequencer: unhandled phase %d" % _phase)
 	return ""

@@ -206,7 +206,7 @@ func get_polygon_prev_vertex_index(vert_idx: int) -> int:
 var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
 var menu_confirm_quit: bool = false
 var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
-var config_index: int = 0  # 0=画面モード,1=カーソル制限,2=言語,3=BGM,4=SE,5=戻る
+var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像度,2=カーソル…,6=戻る
 ## コンフィグ画面レイアウト（ui_renderer._draw_config とヒット判定で共通）
 const CONFIG_MENU_BASE_Y_RATIO := 0.28
 const CONFIG_MENU_SPACING := 103.5
@@ -219,7 +219,11 @@ const CONFIG_MENU_ARROW_PAD := 4.0
 const CONFIG_MENU_LABEL_GAP_TO_ARROW := 20.0
 ## コンフィグ 0〜3 行のホバー拡大（set_btn_hover / get_btn_scale と同一 ID）
 const CONFIG_ROW_BTN_IDS: Array[String] = [
-	"cfg_row_window", "cfg_row_mouse_confine", "cfg_row_lang", "cfg_row_bgm", "cfg_row_se",
+	"cfg_row_display_mode",
+	"cfg_row_mouse_confine",
+	"cfg_row_lang",
+	"cfg_row_bgm",
+	"cfg_row_se",
 ]
 # UI メニュー: 左スティック / D-pad ハット（ボタン型十字と併用。_process でポーリング）
 # JoyAxis の HAT は環境によって JOY_AXIS_LEFT_HAT_* が未定義のため、Enum と同じ番号を直指定する
@@ -251,9 +255,9 @@ var _ui_menu_stick_v_cd: float = 0.0
 var _ui_menu_stick_h_dir: int = 0
 var _ui_menu_stick_h_cd: float = 0.0
 var is_fullscreen: bool = false  # display_mode==フルスクリーンと同期（OS からも更新）
-## 0=ウィンドウ1280x720, 1=ウィンドウ1920x1080, 2=フルスクリーン
-const DISPLAY_MODE_WINDOW_720 := 0
-const DISPLAY_MODE_WINDOW_1080 := 1
+## 0=ウィンドウ1920x1080, 1=ウィンドウ1280x720, 2=フルスクリーン
+const DISPLAY_MODE_WINDOW_1080 := 0
+const DISPLAY_MODE_WINDOW_720 := 1
 const DISPLAY_MODE_FULLSCREEN := 2
 var display_mode: int = DISPLAY_MODE_WINDOW_1080
 const WINDOW_CLIENT_SIZE_720 := Vector2i(1280, 720)
@@ -520,11 +524,11 @@ func _ready() -> void:
 	result_icon02_on_texture  = _load_texture("res://assets/UI/result_icon02_on.png")
 	bg_texture = _load_texture("res://assets/UI/kata-draw_bg.png")
 	_setup_game_cursor()
+	_last_window_pos = get_window().position
+	_setup_content_scale()
 	get_window().size_changed.connect(_on_window_size_changed)
 	_sync_window_display_from_os()
-	if is_fullscreen:
-		call_deferred("_apply_internal_viewport_size")
-	else:
+	if not is_fullscreen:
 		call_deferred("_apply_window_pixel_size_impl", _window_client_size_for_display_mode())
 	game_state = "logo"
 	logo_start_time = Time.get_ticks_msec() / 1000.0
@@ -587,8 +591,6 @@ func _split_csv_row(line: String) -> PackedStringArray:
 
 func _on_window_size_changed() -> void:
 	_sync_window_display_from_os()
-	if not is_fullscreen:
-		_apply_internal_viewport_size()
 	queue_redraw()
 
 
@@ -633,6 +635,16 @@ var _cursor_pad_override_hidden: bool = false
 var _cursor_mouse_motion_accum: Vector2 = Vector2.ZERO
 ## アプリまたはゲームウィンドウがフォーカスを失ったときマウス拘束をかけない（他ウィンドウ・スタートメニューなど）
 var _cursor_os_focused_for_confine: bool = true
+## フォーカス復帰直後: MOUSE_MODE_CONFINED / HIDDEN を避け、VISIBLE のみ（WM がウィンドウをずらすのを抑制。Godot #78460 類似）。実機では 30 フレーム前後まで増やすと再現しない例あり。
+var _cursor_wm_focus_policy_holdoff_frames: int = 0
+const CURSOR_WM_FOCUS_POLICY_HOLDOFF_FRAMES := 30
+## ウィンドウドラッグ検出: 前フレームのウィンドウ位置
+var _last_window_pos: Vector2i = Vector2i.ZERO
+## ウィンドウが移動中（またはその直後）は CONFINED を適用しない
+var _window_is_being_dragged: bool = false
+## ウィンドウ移動停止後、CONFINED 再適用までの猶予フレーム数
+var _window_drag_settle_frames: int = 0
+const WINDOW_DRAG_SETTLE_FRAMES := 8
 
 
 func _cursor_event_should_hide_for_pad(event: InputEvent) -> bool:
@@ -665,7 +677,14 @@ func _cursor_visible_mode() -> Input.MouseMode:
 
 
 func _apply_cursor_policy() -> void:
+	if _window_is_being_dragged:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
 	if not _cursor_os_focused_for_confine:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
+	if _cursor_wm_focus_policy_holdoff_frames > 0:
+		_cursor_wm_focus_policy_holdoff_frames -= 1
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
 	if pause_active:
@@ -688,13 +707,16 @@ func _notification(what: int) -> void:
 		or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT
 	):
 		_cursor_os_focused_for_confine = false
+		_cursor_wm_focus_policy_holdoff_frames = 0
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif (
 		what == NOTIFICATION_APPLICATION_FOCUS_IN
 		or what == NOTIFICATION_WM_WINDOW_FOCUS_IN
 	):
+		# 先に通常の可視モードへ戻し、ClipCursor 由来のウィンドウずれを切る（_process の順が後でもフォロー）
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_cursor_os_focused_for_confine = true
-		_apply_cursor_policy()
+		_cursor_wm_focus_policy_holdoff_frames = CURSOR_WM_FOCUS_POLICY_HOLDOFF_FRAMES
 
 
 # =============================================================================
@@ -1722,7 +1744,7 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		queue_redraw()
 
 
-## コンフィグ: 値行の左右（±1）。画面モードは 720 / 1080 / フルスクリーンを循環。
+## コンフィグ: 値行の左右（±1）。0=画面モード、1=マウス制限、2=言語、3=BGM、4=SE
 func _config_apply_main_horizontal(delta: int) -> void:
 	match config_index:
 		0:
@@ -1745,29 +1767,48 @@ func _config_apply_main_horizontal(delta: int) -> void:
 
 
 func _window_client_size_for_display_mode() -> Vector2i:
-	return WINDOW_CLIENT_SIZE_1080 if display_mode == DISPLAY_MODE_WINDOW_1080 else WINDOW_CLIENT_SIZE_720
+	match display_mode:
+		DISPLAY_MODE_FULLSCREEN:
+			return WINDOW_CLIENT_SIZE_1080
+		DISPLAY_MODE_WINDOW_1080:
+			return WINDOW_CLIENT_SIZE_1080
+		_:
+			return WINDOW_CLIENT_SIZE_720
+
+
+func config_row_display_mode_label() -> String:
+	match display_mode:
+		DISPLAY_MODE_WINDOW_1080:
+			return tr("CONFIG_WINDOW_1920_1080")
+		DISPLAY_MODE_WINDOW_720:
+			return tr("CONFIG_WINDOW_1280_720")
+		DISPLAY_MODE_FULLSCREEN:
+			return tr("CONFIG_FULLSCREEN")
+		_:
+			return ""
 
 
 func _config_apply_display_mode_delta(delta: int) -> void:
-	var idx: int = posmod(display_mode + delta, 3)
-	_config_apply_display_mode_index(idx)
+	display_mode = posmod(display_mode + delta, 3)
+	_apply_video_mode_from_display_mode()
 
 
-func _config_apply_display_mode_index(idx: int) -> void:
-	display_mode = posmod(idx, 3)
+func _apply_video_mode_from_display_mode() -> void:
+	_window_is_being_dragged = false
+	_window_drag_settle_frames = 0
 	match display_mode:
 		DISPLAY_MODE_FULLSCREEN:
 			is_fullscreen = true
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
-			call_deferred("_apply_internal_viewport_size")
-		DISPLAY_MODE_WINDOW_720:
+		_:
 			is_fullscreen = false
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-			call_deferred("_apply_window_pixel_size_impl", WINDOW_CLIENT_SIZE_720)
-		DISPLAY_MODE_WINDOW_1080:
-			is_fullscreen = false
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-			call_deferred("_apply_window_pixel_size_impl", WINDOW_CLIENT_SIZE_1080)
+			var sz: Vector2i = (
+				WINDOW_CLIENT_SIZE_1080
+				if display_mode == DISPLAY_MODE_WINDOW_1080
+				else WINDOW_CLIENT_SIZE_720
+			)
+			call_deferred("_apply_window_pixel_size_impl", sz)
 	_apply_cursor_policy()
 
 
@@ -1797,16 +1838,6 @@ func config_language_ui_label() -> String:
 	return tr("CONFIG_LANG_JA") if _config_language_ui_index_from_locale() == 0 else tr("CONFIG_LANG_EN")
 
 
-func config_display_mode_ui_label() -> String:
-	match display_mode:
-		DISPLAY_MODE_WINDOW_720:
-			return tr("CONFIG_WINDOW_1280_720")
-		DISPLAY_MODE_WINDOW_1080:
-			return tr("CONFIG_WINDOW_1920_1080")
-		_:
-			return tr("CONFIG_FULLSCREEN")
-
-
 func config_mouse_confine_ui_label() -> String:
 	return tr("CONFIG_MOUSE_CONFINE_ON") if mouse_confine_to_window else tr("CONFIG_MOUSE_CONFINE_OFF")
 
@@ -1826,30 +1857,31 @@ func _sync_window_display_from_os() -> void:
 		display_mode = DISPLAY_MODE_FULLSCREEN
 		return
 	is_fullscreen = false
-	var sz: Vector2i = win.size
-	display_mode = DISPLAY_MODE_WINDOW_1080 if sz.y >= 1000 else DISPLAY_MODE_WINDOW_720
+	# display_mode はここでは変更しない（_apply_window_pixel_size_impl が責任を持つ）
 
 
 ## ウインドウのクライアントサイズのみ変更する。内部解像度は常に INTERNAL_VIEWPORT_SIZE（stretch で縮小表示）。
-func _apply_window_pixel_size_impl(new_size: Vector2i) -> void:
+## fs_retries: Exclusive 終了が次フレームまで延びている間、数フレーム再試行する。
+func _apply_window_pixel_size_impl(new_size: Vector2i, fs_retries: int = 18) -> void:
 	var win: Window = get_window()
 	var wid: int = win.get_window_id()
 	var m: DisplayServer.WindowMode = DisplayServer.window_get_mode(wid)
 	if m == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN or m == DisplayServer.WINDOW_MODE_FULLSCREEN:
-		_apply_internal_viewport_size()
+		if fs_retries > 0:
+			call_deferred("_apply_window_pixel_size_impl", new_size, fs_retries - 1)
 		return
 	DisplayServer.window_set_size(new_size, wid)
 	win.size = new_size
 	is_fullscreen = false
 	display_mode = DISPLAY_MODE_WINDOW_1080 if new_size == WINDOW_CLIENT_SIZE_1080 else DISPLAY_MODE_WINDOW_720
-	_apply_internal_viewport_size()
 	call_deferred("_center_window")
 
 
-func _apply_internal_viewport_size() -> void:
-	var vp: Viewport = get_viewport()
-	if vp:
-		vp.size = INTERNAL_VIEWPORT_SIZE
+func _setup_content_scale() -> void:
+	var win := get_window()
+	win.content_scale_size = Vector2i(1920, 1080)
+	win.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
 
 
 func _apply_bgm_volume() -> void:
@@ -3894,6 +3926,16 @@ func _process_pad(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	var cur_pos: Vector2i = get_window().position
+	if cur_pos != _last_window_pos:
+		_window_is_being_dragged = true
+		_window_drag_settle_frames = WINDOW_DRAG_SETTLE_FRAMES
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif _window_drag_settle_frames > 0:
+		_window_drag_settle_frames -= 1
+		if _window_drag_settle_frames == 0:
+			_window_is_being_dragged = false
+	_last_window_pos = cur_pos
 	ui_renderer.update_animations(delta)
 	_apply_cursor_policy()
 	# ボタン押下アニメ待ちで _process_ui_menu_stick_navigation が return してもログが出るように先に実行

@@ -103,6 +103,7 @@ GUIDE_TYPE_RUGBY_BALL,ラグビーボールの形を作ろう,Trace the prolate 
 MENU_GAME_START,ゲームスタート,Game Start,开始游戏,開始遊戲
 MENU_CONFIG,コンフィグ,Config,设置,設定
 CONFIG_WINDOW_MODE,画面モード,Window Mode,窗口模式,視窗模式
+CONFIG_DISPLAY_MODE,画面モード,Display mode,画面模式,畫面模式
 CONFIG_LANGUAGE,言語選択,Language,语言选择,語言選擇
 CONFIG_BGM_VOLUME,BGM音量,BGM Volume,BGM音量,BGM音量
 CONFIG_SE_VOLUME,SE音量,SE Volume,SE音量,SE音量
@@ -114,6 +115,8 @@ CONFIG_MOUSE_CONFINE,カーソル閉じ込め,Cursor lock,光标锁定,游標鎖
 CONFIG_MOUSE_CONFINE_ON,オン,On,开,開
 CONFIG_MOUSE_CONFINE_OFF,オフ,Off,关,關
 CONFIG_WINDOW,ウインドウ,Window,窗口,視窗
+CONFIG_FULLSCREEN_ROW,フルスクリーン表示,Fullscreen,全屏,全螢幕
+CONFIG_WINDOW_SIZE_ROW,ウィンドウの大きさ,Window Size,窗口大小,視窗大小
 CONFIG_LANG_JA,日本語,日本語,日本語,日本語
 CONFIG_LANG_EN,English,English,English,English
 CONFIG_LANG_ZH_CN,简体中文,简体中文,简体中文,简体中文

@@ -1176,12 +1176,20 @@ func _draw_config(vp: Vector2) -> void:
 	var box_h: float = (_game.font_din.get_ascent(50) + _game.font_din.get_descent(50)) * 1.5
 
 	var item_labels: Array[String] = [
-		tr("CONFIG_WINDOW_MODE"), tr("CONFIG_MOUSE_CONFINE"), tr("CONFIG_LANGUAGE"),
-		tr("CONFIG_BGM_VOLUME"), tr("CONFIG_SE_VOLUME"), tr("CONFIG_BACK"),
+		tr("CONFIG_DISPLAY_MODE"),
+		tr("CONFIG_MOUSE_CONFINE"),
+		tr("CONFIG_LANGUAGE"),
+		tr("CONFIG_BGM_VOLUME"),
+		tr("CONFIG_SE_VOLUME"),
+		tr("CONFIG_BACK"),
 	]
 	var item_values: Array[String] = [
-		_game.config_display_mode_ui_label(), _game.config_mouse_confine_ui_label(),
-		_game.config_language_ui_label(), str(_game.bgm_volume), str(_game.se_volume), "",
+		_game.config_row_display_mode_label(),
+		_game.config_mouse_confine_ui_label(),
+		_game.config_language_ui_label(),
+		str(_game.bgm_volume),
+		str(_game.se_volume),
+		"",
 	]
 
 	var arrow_fs: int = 28
