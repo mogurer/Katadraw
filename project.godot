@@ -21,6 +21,7 @@ config/windows_native_icon="res://assets/icons/kataicon256.ico"
 [autoload]
 
 BGMManager="*res://scripts/bgm/BGMManager.gd"
+SteamManager="*uid://di1gsd1cdiimu"
 
 [display]
 
@@ -35,6 +36,17 @@ window/stretch/mode="canvas_items"
 
 movie_writer/movie_file="D:/works/Godot/KATA-Draw/VIDEO/Test.avi"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godotsteam/plugin.cfg")
+
 [internationalization]
 
 locale/locale_filter_mode=1
+
+[steam]
+
+initialization/app_id=0
+initialization/initialize_on_startup=false
+initialization/embed_callbacks=false
+multiplayer_peer/max_channels=4
