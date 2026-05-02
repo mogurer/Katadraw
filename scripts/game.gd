@@ -801,7 +801,7 @@ func _setup_audio() -> void:
 
 ## タイトル画面では常にタイトルBGMを鳴らす。BGMManager に移行
 func _apply_title_bgm_for_debug_mode() -> void:
-	BGMManager.play_title()  # BGMManager に移行
+	BGMManager.play_title()
 
 
 func _play_sfx(player: AudioStreamPlayer) -> void:
@@ -953,7 +953,6 @@ func _sync_stage_vars() -> void:
 	ideal_display_radius = stage_manager.ideal_display_radius
 	guide_follows_player_radius = stage_manager.guide_follows_player_radius
 	stage_effective_cfg = stage_manager.effective_config.duplicate(true)
-	BGMManager.update_ingame_progress(current_circularity)
 
 
 ## HUD 図形中心の縦位置（hud_playfield_shape_center）は play_stage_slot==0 のときだけ Y を +100 する。
@@ -1004,12 +1003,12 @@ func _start_stage(idx: int) -> void:
 	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
 	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
 	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp, idx))
+	BGMManager.begin_countdown()  # ⑤-0: ガイド表示前にイントロへ切り替え
 
 
 func _calculate_metrics() -> void:
 	stage_manager.calculate_metrics(point_positions)
 	_sync_stage_vars()
-	BGMManager.set_match_rate(current_circularity / 100.0)  # BGMManager に移行
 
 
 func _point_accuracy_alpha(idx: int) -> float:
@@ -1045,7 +1044,7 @@ func _check_clear() -> void:
 		ui_renderer.spawn_particles(current_centroid)
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
-		BGMManager.set_match_rate(1.0)  # BGMSequencer 再実装: クリアは match_rate 1.0 で表現
+		BGMManager.play_clear()
 		_save_dwell_log()
 
 
@@ -1083,7 +1082,6 @@ func _force_clear_for_debug() -> void:
 	ui_renderer.spawn_particles(current_centroid)
 	_play_sfx(sfx_clear)
 	_play_sfx(sfx_stageclear)
-	BGMManager.set_match_rate(1.0)  # BGMSequencer 再実装: クリアは match_rate 1.0 で表現
 
 
 # =============================================================================
@@ -1373,7 +1371,6 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "title":
-		BGMManager.notify_input()  # BGMSequencer 再実装: タイトル操作で no_input_time をリセット
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
 			_enter_stage_debug_screen()
 		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
@@ -1947,7 +1944,6 @@ func _volume_offset_db(level: int) -> float:
 func _enter_rules() -> void:
 	game_state = "rules"
 	rules_focus_button = false
-	BGMManager.set_demo_reached()  # BGMManager に移行: デモ画面到達を通知
 	var vp: Vector2 = get_viewport_rect().size
 	rules_demo_center = Vector2(vp.x * 0.5, vp.y * RULES_DEMO_CENTER_Y_FRAC)
 	rules_demo_radius = minf(vp.x, vp.y) * 0.03
@@ -2361,7 +2357,8 @@ func _resume_from_pause() -> void:
 func _start_game() -> void:
 	stage_session.clear_debug_test()
 	input_recorder = null
-	BGMManager.stop()  # BGMManager に移行
+	BGMManager.stop()
+	BGMManager.play_ingame()
 	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(0)
@@ -2371,7 +2368,6 @@ func _advance_stage() -> void:
 	if current_stage < GameConfig.get_max_stage_index():
 		_start_stage(current_stage + 1)
 	else:
-		BGMManager.set_all_cleared()  # BGMSequencer 再実装: 全ステージクリアを通知
 		game_state = "results"
 		queue_redraw()
 
@@ -4047,7 +4043,7 @@ func _process(delta: float) -> void:
 				pause_retry_elapsed = -1.0
 			else:
 				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
-			BGMManager.play_ingame()  # BGMManager に移行
+			BGMManager.resume_ingame()
 		queue_redraw()
 
 	elif game_state == "playing":

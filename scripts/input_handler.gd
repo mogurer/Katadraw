@@ -1265,16 +1265,8 @@ func _step_drag_physics(delta: float) -> bool:
 
 	var topology_changed: bool = false
 	if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
-		_game.rebuild_polygon_walk_order_centroid_angular()
 		topology_changed = true
-		if _game.is_polygon_walk_order_active():
-			var ord_perm: PackedInt32Array = _game.polygon_walk_order.duplicate()
-			_game.apply_vertex_permutation_reorder_positions_from_walk_order()
-			_permute_input_state_after_vertex_reorder(ord_perm)
-		# 円ステージは実現度が頂点位置のみで決まるため、プレイヤー周りへの強制配置で図形が崩れクリア不能になりやすい
-		if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
-			if _game.stage_type != "circle":
-				_resolve_polygon_edge_intersection_circle_around_player(lo, hi)
+		_resolve_intersections_2opt(lo, hi)
 
 	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
@@ -1724,6 +1716,64 @@ func _resolve_polygon_edge_intersection_circle_around_player(lo: Vector2, hi: Ve
 		var pos: Vector2 = player_position + Vector2(cos(ang), sin(ang)) * R
 		_game.point_positions[i] = pos.clamp(lo, hi)
 		point_velocities[i] = Vector2.ZERO
+
+
+## 最初に見つかった内部交差辺ペアの辺インデックス (i, j) を返す。
+## 辺 i は point_positions[i]→point_positions[(i+1)%n]。なければ Vector2i(-1, -1)。
+func _find_first_crossing_edge_indices() -> Vector2i:
+	var n: int = _game.point_positions.size()
+	if n < 4:
+		return Vector2i(-1, -1)
+	for i in range(n - 1):
+		var i1: int = i + 1
+		var p1: Vector2 = _game.point_positions[i]
+		var p2: Vector2 = _game.point_positions[i1]
+		for j in range(i + 2, n):
+			var j1: int = (j + 1) % n
+			if j1 == i:
+				continue
+			var p3: Vector2 = _game.point_positions[j]
+			var p4: Vector2 = _game.point_positions[j1]
+			if _segment_intersect_strict_interior(p1, p2, p3, p4):
+				return Vector2i(i, j)
+	return Vector2i(-1, -1)
+
+
+## 2-opt swap: 辺 (ei→ei+1) と (ej→ej+1) の交差を解消するため、
+## point_positions[ei+1 .. ej] の区間を逆順にする置換を全ステートに適用する。
+func _2opt_swap_and_permute_state(ei: int, ej: int) -> void:
+	var n: int = _game.point_positions.size()
+	var ord := PackedInt32Array()
+	ord.resize(n)
+	for k in range(n):
+		ord[k] = k
+	var left: int = ei + 1
+	var right: int = ej
+	while left < right:
+		var tmp: int = ord[left]
+		ord[left] = ord[right]
+		ord[right] = tmp
+		left += 1
+		right -= 1
+	_game.polygon_walk_order = ord
+	var ord_perm: PackedInt32Array = ord.duplicate()
+	_game.apply_vertex_permutation_reorder_positions_from_walk_order()
+	_permute_input_state_after_vertex_reorder(ord_perm)
+
+
+## 2-opt uncrossing: 交差がなくなるまで逐次的に辺を swap する。
+## 収束しない場合に備え最大 n² 回で打ち切り、残れば円配置フォールバックを使う。
+func _resolve_intersections_2opt(lo: Vector2, hi: Vector2) -> void:
+	var n: int = _game.point_positions.size()
+	var max_iter: int = n * n
+	for _iter in range(max_iter):
+		var pair: Vector2i = _find_first_crossing_edge_indices()
+		if pair.x < 0:
+			return
+		_2opt_swap_and_permute_state(pair.x, pair.y)
+	if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
+		if _game.stage_type != "circle":
+			_resolve_polygon_edge_intersection_circle_around_player(lo, hi)
 
 
 func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary, guide_constraint_mul: PackedFloat32Array) -> void:
