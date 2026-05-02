@@ -14,6 +14,8 @@
 		"vertex_range": [3, 5],
 		"variance": 0.55,
 		"zigzag": 0.35,
+		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
 		"clear_pct": 98.5
 	}
 }

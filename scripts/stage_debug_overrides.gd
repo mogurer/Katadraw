@@ -23,12 +23,12 @@ static func validate_effective_config(cfg: Dictionary) -> String:
 	if not cfg.has("type"):
 		return "type がありません"
 	var t: String = str(cfg["type"])
-	if not StageConfig.TYPE_DEFAULTS.has(t):
+	if not StageConfig.KNOWN_SHAPE_TYPES.has(t):
 		return "未知の type: %s" % t
 	if not cfg.has("shape_type"):
 		return "shape_type がありません"
 	var st: String = str(cfg["shape_type"])
-	if not StageConfig.TYPE_DEFAULTS.has(st):
+	if not StageConfig.KNOWN_SHAPE_TYPES.has(st):
 		return "未知の shape_type: %s" % st
 	if not cfg.has("stage_id") or str(cfg["stage_id"]).strip_edges() == "":
 		return "stage_id がありません"

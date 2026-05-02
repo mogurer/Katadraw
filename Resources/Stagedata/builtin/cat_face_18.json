@@ -13,6 +13,7 @@
 		"max_radius": 280.0,
 		"variance": 0.15,
 		"display_rate_min_pct": 80.0,
+		"guide_follows_player_radius": 0,
 		"clear_pct": 99.0
 	}
 }

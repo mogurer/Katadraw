@@ -6,7 +6,8 @@
       "Bash(ffmpeg -version)",
       "PowerShell(ffmpeg -version 2>&1)",
       "PowerShell(winget --version)",
-      "PowerShell(winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements)"
+      "PowerShell(winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements)",
+      "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Katadraw\\\\scripts\\\\\" -Filter \"*.gd\" | Select-Object Name)"
     ]
   }
 }

@@ -8,7 +8,8 @@
 		"num_points": 24.0,
 		"shape_type": "rugby_ball",
 		"type": "rugby_ball",
-		"variance": 0.15
+		"variance": 0.15,
+		"hud_guide_layout_scale_mul": 0.8
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {

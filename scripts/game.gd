@@ -66,6 +66,9 @@ var _dwell_times: Array[float] = []
 var _dwell_counts: Array[int] = []
 var _dwell_prev_bucket: int = -1
 
+# --- Metrics dirty flag: 頂点が動いたフレームのみ calculate_metrics を実行する ---
+var _metrics_dirty: bool = false
+
 # --- Star ---
 var star_rotation: float = 0.0
 var star_outer_r: float = 0.0
@@ -910,19 +913,13 @@ func _finalize_move_count() -> void:
 
 
 func _on_input_points_changed() -> void:
-	# InputHandler のコールバック: メトリクス計算とクリア判定を呼ぶ
-	# つかんで移動時は胞子増量なし（処理は残し、量は0）
+	# InputHandler のコールバック: 頂点が動いたことを記録する（計算は _process で一括）
 	if input_handler.has_player_avatar():
 		ui_renderer.spawn_spore_burst([input_handler.get_player_position()], 0)
-	if game_state == "rules":
-		_calculate_metrics()
-		queue_redraw()
-		return
 	# プレイ中かつつかみ中のみ、「動いた」フラグを立てる（カウントは離した時点で行う）
 	if game_state == "playing" and _is_move_grab_active_for_count():
 		_move_count_track_valid = true
-	_calculate_metrics()
-	_check_clear()
+	_metrics_dirty = true
 
 
 func _sync_stage_vars() -> void:
@@ -995,6 +992,7 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	hint_active = false
 	hints_triggered = [false, false]
 	guide_count_played = 0
+	_metrics_dirty = true
 	queue_redraw()
 
 
@@ -1955,6 +1953,7 @@ func _enter_rules() -> void:
 		"variance": 0.0,
 		"clear_pct": 100.0,
 		"display_rate_min_pct": 0.0,
+		"guide_follows_player_radius": 0,
 		"rhombus_vertical_half": 0.5,
 		# min/max だけでは縮まない（HUD フィット後に点が再配置される）。見た目の目標形をここで縮小。
 		"hud_guide_layout_scale_mul": 0.5,
@@ -2879,7 +2878,7 @@ func _stage_edit_type_idx_from_saved_config(cfg: Dictionary) -> int:
 	var st: String = str(cfg.get("shape_type", ""))
 	if st.is_empty():
 		var tid: String = str(cfg.get("type", ""))
-		if StageConfig.TYPE_DEFAULTS.has(tid):
+		if StageConfig.KNOWN_SHAPE_TYPES.has(tid):
 			st = tid
 		else:
 			st = "fish"
@@ -3340,15 +3339,15 @@ func _stage_edit_save() -> void:
 	var tidx: int = clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)
 	var shape_kind: String = STAGE_EDIT_TYPE_OPTIONS[tidx]
 	var partial: Dictionary = {"type": base, "shape_type": shape_kind}
-	if StageConfig.TYPE_DEFAULTS.has(shape_kind):
-		var defs: Dictionary = StageConfig.TYPE_DEFAULTS[shape_kind] as Dictionary
+	if StageConfig.EDITOR_NEW_STAGE_DEFAULTS.has(shape_kind):
+		var defs: Dictionary = StageConfig.EDITOR_NEW_STAGE_DEFAULTS[shape_kind] as Dictionary
 		for k in defs:
 			partial[k] = defs[k]
 	var np: int
 	if (shape_kind == "fish" or shape_kind == "cat_face") and stage_edit_canvas_edges.size() > 0:
 		np = StageEditPolygonTools.compute_num_points_from_edges(stage_edit_canvas_edges)
 	else:
-		np = int((StageConfig.TYPE_DEFAULTS.get(shape_kind, {}) as Dictionary).get("num_points", 12))
+		np = int((StageConfig.EDITOR_NEW_STAGE_DEFAULTS.get(shape_kind, {}) as Dictionary).get("num_points", 12))
 	partial["num_points"] = np
 	partial["min_radius"] = 200.0
 	partial["max_radius"] = 400.0
@@ -4013,6 +4012,9 @@ func _process(delta: float) -> void:
 
 	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config":
 		if game_state == "rules":
+			if _metrics_dirty:
+				_metrics_dirty = false
+				_calculate_metrics()
 			ui_renderer.update_spore_particles(delta)
 		queue_redraw()
 
@@ -4047,6 +4049,10 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "playing":
+		if _metrics_dirty:
+			_metrics_dirty = false
+			_calculate_metrics()
+			_check_clear()
 		var _db: int = clampi(int(current_circularity / 10.0), 0, 9)
 		_dwell_times[_db] += delta
 		if _db != _dwell_prev_bucket:

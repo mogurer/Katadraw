@@ -115,6 +115,13 @@ var hud_guide_layout_scale_mul: float = 1.0
 ## 描画パスでの毎フレーム n×O(polyline) 距離計算をゼロにする。
 var _accuracy_alpha_cache: PackedFloat32Array = PackedFloat32Array()
 
+# --- Hausdorff 間引き ---
+## Hausdorff / HUD 距離計算は重いため、N 回に 1 回だけ実行してキャッシュを再利用する。
+const HAUSDORFF_THROTTLE_EVERY: int = 5
+var _hausdorff_call_counter: int = 0  # 0 のとき実行
+var _run_hausdorff_this_call: bool = true
+var _hausdorff_cached_err: float = 0.0
+
 
 ## 閉じた輪郭（末尾＝先頭とみなす）の幾何学的重心。面積ゼロに近いときは頂点の平均
 func _hud_outline_area_centroid_or_average(outline: Array) -> Vector2:
@@ -622,6 +629,9 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		recompute_hud_guide_layout(shape_center, viewport_size)
 	if not skip_hud_initial_layout:
 		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
+	# ステージ切り替え時は前ステージのキャッシュを破棄し、必ずフル計算を行う
+	_hausdorff_call_counter = 0
+	_hausdorff_cached_err = 100.0
 	calculate_metrics(point_positions)
 
 
@@ -1915,6 +1925,8 @@ func _set_correspondence_scale_from_outline() -> void:
 
 func calculate_metrics(point_positions: Array[Vector2]) -> void:
 	"""全図形で統一: 弧誤差のみ、回転非対応"""
+	_run_hausdorff_this_call = (_hausdorff_call_counter == 0)
+	_hausdorff_call_counter = (_hausdorff_call_counter + 1) % HAUSDORFF_THROTTLE_EVERY
 	match stage_type:
 		"triangle", "circle":
 			var m: Dictionary = _calc_unified_arc_metrics(point_positions, 0, point_positions.size())
@@ -2051,7 +2063,23 @@ func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) 
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		if n < 1:
 			return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
-		return _calc_hud_screen_arc_metrics(pts, from_idx, to_idx, Vector2.ZERO, -1.0)
+		# HUD 距離計算は重いため、THROTTLE_EVERY 回に 1 回だけ実行してキャッシュを再利用する
+		if _run_hausdorff_this_call:
+			var full_m: Dictionary = _calc_hud_screen_arc_metrics(pts, from_idx, to_idx, Vector2.ZERO, -1.0)
+			_hausdorff_cached_err = full_m["circ_err"]
+			return full_m
+		# 間引きフレーム: centroid/avg_r のみ再計算（O(n)）、circ_err はキャッシュ値を使う
+		var light_pts: Array = []
+		for i in range(from_idx, to_idx):
+			light_pts.append(pts[i])
+		var light_centroid: Vector2 = _perimeter_centroid(light_pts)
+		var light_avg_r: float = _percentile_distance_from_center(light_pts, light_centroid, REF_R_PERCENTILE)
+		return {
+			"centroid": light_centroid,
+			"avg_r": light_avg_r,
+			"circ_err": _hausdorff_cached_err,
+			"circ": maxf(0.0, 100.0 - _hausdorff_cached_err),
+		}
 	if n < 3 or ideal_outline_points.is_empty():
 		return {"centroid": Vector2.ZERO, "avg_r": 0.0, "circ_err": 100.0, "circ": 0.0}
 
@@ -2068,7 +2096,7 @@ func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) 
 	var ideal_max_r: float = 0.001
 	for p in ideal_outline_points:
 		ideal_max_r = maxf(ideal_max_r, p.length())
-	# scale_inv = 1/ref_r でプレイヤーを理想と同じ単位スケール（max≈1）に
+	# scale_inv = 1/ref_r でプレイヤーを理想と同じ単位スケールに合わせる
 	var scale_inv: float = 1.0 / maxf(ref_r, 1.0)
 	var curr_scaled: Array = []
 	for c in curr:
@@ -2080,9 +2108,12 @@ func _calc_unified_arc_metrics(pts: Array[Vector2], from_idx: int, to_idx: int) 
 		var edges: Array = _get_outline_edges_for_stage(stage_type)
 		if not edges.is_empty():
 			# 辺・弧ごとハウスドルフ h(edge→user) を平均で集約（弧エッジのみ距離を緩和）
-			circ_err = _eval_arc_error_per_edge_hausdorff(
-				curr_scaled, edges, ref_size, HAUSDORFF_SAMPLE_STEP, _arc_controls_for_hausdorff_metrics()
-			)
+			# THROTTLE_EVERY 回に 1 回だけ実行してキャッシュを再利用する
+			if _run_hausdorff_this_call:
+				_hausdorff_cached_err = _eval_arc_error_per_edge_hausdorff(
+					curr_scaled, edges, ref_size, HAUSDORFF_SAMPLE_STEP, _arc_controls_for_hausdorff_metrics()
+				)
+			circ_err = _hausdorff_cached_err
 		else:
 			# circle: 辺定義なし → 従来方式
 			if USE_COMBINED_ARC_ERROR:

@@ -4,7 +4,7 @@
 # KatadrawShapeEditor 由来の操作で編集した結果は、この形式で保存する。
 # config.type は Stage ID（ファイル名のベース名と同一であること。リネーム時は parse_file が type を揃えて保存）。
 # user://custom_stages の *.json はファイル名が [a-z0-9_]+ のみ（拡張子除く）。それ以外は一覧に出さない。
-# 図形の種類は config.shape_type（fish / triangle / … StageConfig.TYPE_DEFAULTS のキー）。
+# 図形の種類は config.shape_type（fish / triangle / … StageConfig.KNOWN_SHAPE_TYPES のいずれか）。
 # 旧形式: config.type のみが図形キーだったファイルも読み込み可能（レガシー）。
 # shape は頂点・弧など幾何のみ。未使用でも保存可。
 #
@@ -137,7 +137,7 @@ static func validate_root(raw: Dictionary) -> String:
 				return "meta.%s は文字列である必要があります" % mk
 	var id_str: String = str(cfg.get("type", ""))
 	var shape_t: String = str(cfg.get("shape_type", ""))
-	if shape_t.is_empty() and not StageConfig.TYPE_DEFAULTS.has(id_str):
+	if shape_t.is_empty() and not StageConfig.KNOWN_SHAPE_TYPES.has(id_str):
 		return "config.shape_type が必要です（図形タイプ: fish, triangle, …）。config.type は Stage ID（ユニーク）です"
 	return ""
 

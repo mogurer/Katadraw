@@ -11,7 +11,12 @@
 		"num_points": 4,
 		"min_radius": 180.0,
 		"max_radius": 260.0,
+		"vertex_range": [4, 4],
 		"variance": 0.2,
+		"zigzag": 0.08,
+		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0,
+		"hud_guide_layout_scale_mul": 0.75,
 		"clear_pct": 99.0
 	}
 }

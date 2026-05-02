@@ -1,131 +1,32 @@
 # =============================================================================
-# StageConfig - ステージパラメータのデフォルトとマージ
+# StageConfig - ステージパラメータ補助
 # =============================================================================
-# 図形タイプごとのデフォルト値を一元管理。stage_data は差分（オーバーライド）のみ記述する。
+# 有効な shape_type 一覧と、エディタ新規ステージ作成用テンプレートを管理する。
+# 各ステージの runtime パラメータは builtin JSON に記述する。
 
 class_name StageConfig
 
-## 図形タイプごとのデフォルト値。新規タイプ追加時はここにエントリを追加する。
-const TYPE_DEFAULTS: Dictionary = {
-	"triangle": {
-		"num_points": 3,
-		"min_radius": 180.0,
-		"max_radius": 260.0,
-		"vertex_range": [3, 3],
-		"variance": 0.20,
-		"zigzag": 0.08,
-		"clear_pct": 98.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-		"hud_guide_layout_scale_mul": 0.8,
-	},
-	"square": {
-		"num_points": 4,
-		"min_radius": 180.0,
-		"max_radius": 260.0,
-		"vertex_range": [4, 4],
-		"variance": 0.20,
-		"zigzag": 0.08,
-		"clear_pct": 98.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-		"hud_guide_layout_scale_mul": 0.75,
-	},
-	"rhombus": {
-		"num_points": 4,
-		"min_radius": 180.0,
-		"max_radius": 260.0,
-		"variance": 0.0,
-		"zigzag": 0.0,
-		"clear_pct": 98.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-		"rhombus_vertical_half": 0.5,
-		"hud_guide_layout_scale_mul": 0.5,
-	},
-	"hexagon": {
-		"num_points": 6,
-		"min_radius": 180.0,
-		"max_radius": 260.0,
-		"vertex_range": [6, 6],
-		"variance": 0.20,
-		"zigzag": 0.08,
-		"clear_pct": 98.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-		"hud_guide_layout_scale_mul": 0.5,
-	},
-	"circle": {
-		"num_points": 12,
-		"min_radius": 200.0,
-		"max_radius": 300.0,
-		"vertex_range": [5, 7],
-		"variance": 0.35,
-		"zigzag": 0.15,
-		"clear_pct": 97.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-	},
-	"star": {
-		"num_points": 10,
-		"min_radius": 128.0,
-		"max_radius": 420.0,
-		"vertex_range": [3, 5],
-		"variance": 0.55,
-		"zigzag": 0.35,
-		"clear_pct": 93.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-	},
-	"cat_face": {
-		"num_points": 18,
-		"min_radius": 160.0,
-		"max_radius": 280.0,
-		"variance": 0.15,
-		"clear_pct": 95.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-	},
-	"fish": {
-		"num_points": 16,
-		"min_radius": 320.0,
-		"max_radius": 560.0,
-		"variance": 0.15,
-		"clear_pct": 95.0,
-		"display_rate_min_pct": 75.0,
-		"guide_follows_player_radius": 1,
-	},
-	"heptagram": {
-		"num_points": 7,
-		"min_radius": 128.0,
-		"max_radius": 420.0,
-		"vertex_range": [3, 5],
-		"variance": 0.55,
-		"zigzag": 0.35,
-		"clear_pct": 98.0,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-	},
-	"heptagram_silhouette": {
-		"num_points": 14,
-		"min_radius": 128.0,
-		"max_radius": 420.0,
-		"variance": 0.15,
-		"clear_pct": 97.0,
-		"display_rate_min_pct": 80.0,
-		"guide_follows_player_radius": 0,
-	},
-	## ラグビーボール（8 頂点＋弧）。builtin JSON の num_points / 半径に合わせる。
-	"rugby_ball": {
-		"num_points": 24,
-		"min_radius": 400.0,
-		"max_radius": 800.0,
-		"variance": 0.15,
-		"clear_pct": 98.0,
-		"display_rate_min_pct": 80.0,
-		"guide_follows_player_radius": 0,
-		"hud_guide_layout_scale_mul": 0.80,
-	},
+## 有効な shape_type 一覧。バリデーションと UI 選択肢に使用する。
+const KNOWN_SHAPE_TYPES: PackedStringArray = [
+	"triangle", "square", "rhombus", "hexagon", "circle",
+	"star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball",
+]
+
+## エディタ新規ステージ作成時の初期値テンプレート（shape_type ごと）。
+## runtime パラメータ（min/max_radius, display_rate_min_pct, guide_follows_player_radius,
+## clear_pct）はゲーム側で明示的に設定するため含めない。
+const EDITOR_NEW_STAGE_DEFAULTS: Dictionary = {
+	"triangle":  { "num_points": 3,  "variance": 0.20, "vertex_range": [3, 3], "zigzag": 0.08, "hud_guide_layout_scale_mul": 0.8 },
+	"square":    { "num_points": 4,  "variance": 0.20, "vertex_range": [4, 4], "zigzag": 0.08, "hud_guide_layout_scale_mul": 0.75 },
+	"rhombus":   { "num_points": 4,  "variance": 0.0,  "rhombus_vertical_half": 0.5, "hud_guide_layout_scale_mul": 0.5 },
+	"hexagon":   { "num_points": 6,  "variance": 0.20, "vertex_range": [6, 6], "zigzag": 0.08, "hud_guide_layout_scale_mul": 0.5 },
+	"circle":    { "num_points": 12, "variance": 0.35, "vertex_range": [5, 7], "zigzag": 0.15 },
+	"star":      { "num_points": 10, "variance": 0.55, "vertex_range": [3, 5], "zigzag": 0.35 },
+	"cat_face":  { "num_points": 18, "variance": 0.15 },
+	"fish":      { "num_points": 16, "variance": 0.15 },
+	"heptagram": { "num_points": 7,  "variance": 0.55, "vertex_range": [3, 5], "zigzag": 0.35 },
+	"heptagram_silhouette": { "num_points": 14, "variance": 0.15 },
+	"rugby_ball": { "num_points": 24, "variance": 0.15, "hud_guide_layout_scale_mul": 0.80 },
 }
 
 
@@ -145,42 +46,17 @@ static func resolve_guide_follows_player_radius(cfg: Dictionary, stage_type_str:
 	return stage_type_str == "fish"
 
 
-## デフォルトにオーバーライドをマージして完全な設定を返す。
-## overrides には type が必須。それ以外は差分のみ指定すればよい。
-## display_rate_min_pct: 実現率表示の下限。未指定時は50。
-static func merge_config(overrides: Dictionary) -> Dictionary:
-	var type: String = overrides.get("type", "circle")
-	if not TYPE_DEFAULTS.has(type):
-		push_warning("StageConfig: 未知の type '%s'、circle として扱います" % type)
-		type = "circle"
-	var cfg: Dictionary = TYPE_DEFAULTS[type].duplicate()
-	for k in overrides:
-		cfg[k] = overrides[k]
-	if not cfg.has("display_rate_min_pct"):
-		cfg["display_rate_min_pct"] = 50.0
-	return cfg
-
-
-## 「最終的にプレイへ渡す cfg」を 1 本化して生成する。
-## built-in: partial.type が図形キー。
-## custom: config.type が stage_id、config.shape_type が図形キー。
+## config から runtime 用の有効な設定 Dictionary を返す。
+## shape_type / type フィールドを正規化し、shape ブロックのデータを組み込む。
 static func build_effective_config(partial: Dictionary, shape: Dictionary = {}) -> Dictionary:
-	var source: Dictionary = partial.duplicate(true)
-	var raw_type: String = str(source.get("type", "circle"))
-	var shape_type: String = str(source.get("shape_type", "")).strip_edges()
+	var cfg: Dictionary = partial.duplicate(true)
+	var raw_type: String = str(cfg.get("type", ""))
+	var shape_type: String = str(cfg.get("shape_type", "")).strip_edges()
 	var resolved_type: String = shape_type if shape_type != "" else raw_type
-	var stage_id: String = str(source.get("stage_id", "")).strip_edges()
+	var stage_id: String = str(cfg.get("stage_id", "")).strip_edges()
 	if stage_id.is_empty():
 		stage_id = raw_type
-	var merge_in: Dictionary = {}
-	for k in source:
-		if k == "shape_type":
-			continue
-		if k == "type" and shape_type != "":
-			continue
-		merge_in[k] = source[k]
-	merge_in["type"] = resolved_type
-	var cfg: Dictionary = merge_config(merge_in)
+	cfg["type"] = resolved_type
 	cfg["shape_type"] = resolved_type
 	cfg["stage_id"] = stage_id
 	if not shape.is_empty():
