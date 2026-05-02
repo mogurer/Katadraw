@@ -61,6 +61,11 @@ var current_circularity: float = 0.0
 var current_smoothness_error: float = 100.0
 var current_smoothness: float = 0.0
 
+# --- Progress Dwell Sampling ---
+var _dwell_times: Array[float] = []
+var _dwell_counts: Array[int] = []
+var _dwell_prev_bucket: int = -1
+
 # --- Star ---
 var star_rotation: float = 0.0
 var star_outer_r: float = 0.0
@@ -948,6 +953,7 @@ func _sync_stage_vars() -> void:
 	ideal_display_radius = stage_manager.ideal_display_radius
 	guide_follows_player_radius = stage_manager.guide_follows_player_radius
 	stage_effective_cfg = stage_manager.effective_config.duplicate(true)
+	BGMManager.update_ingame_progress(current_circularity)
 
 
 ## HUD 図形中心の縦位置（hud_playfield_shape_center）は play_stage_slot==0 のときだけ Y を +100 する。
@@ -1040,6 +1046,28 @@ func _check_clear() -> void:
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
 		BGMManager.set_match_rate(1.0)  # BGMSequencer 再実装: クリアは match_rate 1.0 で表現
+		_save_dwell_log()
+
+
+func _save_dwell_log() -> void:
+	DirAccess.make_dir_recursive_absolute("user://KATA-DRAW-log")
+	var file := FileAccess.open("user://KATA-DRAW-log/progress_dwell_log.txt", FileAccess.READ_WRITE)
+	if file == null:
+		file = FileAccess.open("user://KATA-DRAW-log/progress_dwell_log.txt", FileAccess.WRITE)
+	if file == null:
+		return
+	file.seek_end()
+	var dt := Time.get_datetime_dict_from_system()
+	var ts: String = "%04d-%02d-%02d %02d:%02d:%02d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second]
+	file.store_line("---")
+	file.store_line("[%s] Stage %d Clear" % [ts, current_stage + 1])
+	var total: float = 0.0
+	for i in range(10):
+		total += _dwell_times[i]
+		file.store_line("%3d-%3d%%: %6.2f s  (%d回)" % [i * 10, (i + 1) * 10, _dwell_times[i], _dwell_counts[i]])
+	file.store_line("Total: %.2f s" % total)
+	file.store_line("---")
+	file.close()
 
 
 func _force_clear_for_debug() -> void:
@@ -4010,6 +4038,10 @@ func _process(delta: float) -> void:
 			_play_sfx(sfx_count)
 		if elapsed >= 3.0:
 			game_state = "playing"
+			_dwell_times  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+			_dwell_counts = [0,   0,   0,   0,   0,   0,   0,   0,   0,   0  ]
+			_dwell_prev_bucket = clampi(int(current_circularity / 10.0), 0, 9)
+			_dwell_counts[_dwell_prev_bucket] = 1
 			if pause_retry_elapsed >= 0.0:
 				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION - pause_retry_elapsed
 				pause_retry_elapsed = -1.0
@@ -4019,6 +4051,15 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "playing":
+		var _db: int = clampi(int(current_circularity / 10.0), 0, 9)
+		_dwell_times[_db] += delta
+		if _db != _dwell_prev_bucket:
+			var _step: int = 1 if _db > _dwell_prev_bucket else -1
+			var _b: int = _dwell_prev_bucket + _step
+			while _b != _db + _step:
+				_dwell_counts[_b] += 1
+				_b += _step
+			_dwell_prev_bucket = _db
 		var now: float = Time.get_ticks_msec() / 1000.0
 		var elapsed: float = maxf(0.0, now - start_time)
 		hint_alpha = 0.0
