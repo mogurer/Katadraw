@@ -210,6 +210,9 @@ func draw_hint_shape(alpha: float) -> void:
 
 
 func get_type_description() -> String:
+	var lk: String = str(_game.stage_effective_cfg.get("locale_key", "")).strip_edges()
+	if lk != "":
+		return _game.tr(lk)
 	var gtl: String = str(_game.stage_effective_cfg.get("guide_type_label", "")).strip_edges()
 	if gtl != "":
 		return gtl

@@ -13,7 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "オカリナ"
+		"stage_name": "オカリナ",
+		"locale_key": "STAGE_OCARINA"
 	},
 	"schema_version": 1.0,
 	"shape": {

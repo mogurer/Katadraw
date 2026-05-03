@@ -13,7 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "家"
+		"stage_name": "家",
+		"locale_key": "STAGE_HOME"
 	},
 	"schema_version": 1.0,
 	"shape": {

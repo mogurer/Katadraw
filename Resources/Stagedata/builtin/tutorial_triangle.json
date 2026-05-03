@@ -3,7 +3,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
-		"stage_name": "チュートリアル（三角形）"
+		"stage_name": "三角形",
+		"locale_key": "STAGE_TRIANGLE"
 	},
 	"config": {
 		"type": "tutorial_triangle",

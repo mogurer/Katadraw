@@ -132,3 +132,13 @@ PAUSE_CONFIRM_YES,はい,Yes,是,是
 PAUSE_CONFIRM_NO,いいえ,No,否,否
 MENU_QUIT,ゲームを終了する,Quit Game,退出游戏,退出遊戲
 MENU_QUIT_CONFIRM,ゲームを終了していいですか？,Quit the game?,确定要退出游戏吗？,確定要退出遊戲嗎？
+STAGE_TRIANGLE,正三角形,Equilateral Triangle,等边三角形,等邊三角形
+STAGE_SQUARE,正方形,Square,正方形,正方形
+STAGE_HEXAGON,正六角形,Regular Hexagon,正六边形,正六邊形
+STAGE_CIRCLE,正円,Circle,正圆,正圓
+STAGE_STAR,星,Star,星形,星形
+STAGE_CAT_FACE,ねこの顔,Cat Face,猫脸,貓臉
+STAGE_RUGBY_BALL,ラグビーボール,Rugby Ball,橄榄球,欖球
+STAGE_HOME,家,House,房子,房子
+STAGE_OCARINA,オカリナ,Ocarina,陶笛,陶笛
+STAGE_MUG,マグカップ,Mug,马克杯,馬克杯

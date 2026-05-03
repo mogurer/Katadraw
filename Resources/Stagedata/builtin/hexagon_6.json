@@ -3,7 +3,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
-		"stage_name": "正六角形"
+		"stage_name": "正六角形",
+		"locale_key": "STAGE_HEXAGON"
 	},
 	"config": {
 		"type": "hexagon_6",

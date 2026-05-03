@@ -13,7 +13,8 @@
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
-		"stage_name": "ラグビーボール"
+		"stage_name": "ラグビーボール",
+		"locale_key": "STAGE_RUGBY_BALL"
 	},
 	"schema_version": 1.0,
 	"shape": {

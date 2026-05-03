@@ -646,6 +646,9 @@ var _cursor_os_focused_for_confine: bool = true
 ## フォーカス復帰直後: MOUSE_MODE_CONFINED / HIDDEN を避け、VISIBLE のみ（WM がウィンドウをずらすのを抑制。Godot #78460 類似）。実機では 30 フレーム前後まで増やすと再現しない例あり。
 var _cursor_wm_focus_policy_holdoff_frames: int = 0
 const CURSOR_WM_FOCUS_POLICY_HOLDOFF_FRAMES := 30
+## リサイズ直後: OS が生成する合成 MouseMotion でメニューフォーカスが飛ぶのを抑制
+var _menu_hover_holdoff_frames: int = 0
+const MENU_HOVER_HOLDOFF_FRAMES := 6
 ## ウィンドウドラッグ検出: 前フレームのウィンドウ位置
 var _last_window_pos: Vector2i = Vector2i.ZERO
 ## ウィンドウが移動中（またはその直後）は CONFINED を適用しない
@@ -691,6 +694,17 @@ func _apply_cursor_policy() -> void:
 	if not _cursor_os_focused_for_confine:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
+	# コントローラ操作中はホールドオフより優先して非表示にする。
+	# HIDDEN 時は ClipCursor が適用されないため WM ずれ問題も生じない。
+	if _cursor_pad_override_hidden:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		return
+	# マウス操作中はホールドオフ中も即座に可視化する。
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var mouse_is_active: bool = (now - _cursor_last_mouse_activity_sec) <= CURSOR_IDLE_HIDE_SECONDS
+	if mouse_is_active:
+		Input.mouse_mode = _cursor_visible_mode()
+		return
 	if _cursor_wm_focus_policy_holdoff_frames > 0:
 		_cursor_wm_focus_policy_holdoff_frames -= 1
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -698,14 +712,7 @@ func _apply_cursor_policy() -> void:
 	if pause_active:
 		Input.mouse_mode = _cursor_visible_mode()
 		return
-	var now: float = Time.get_ticks_msec() / 1000.0
-	if _cursor_pad_override_hidden:
-		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
-		return
-	if (now - _cursor_last_mouse_activity_sec) > CURSOR_IDLE_HIDE_SECONDS:
-		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
-	else:
-		Input.mouse_mode = _cursor_visible_mode()
+	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 
 func _notification(what: int) -> void:
@@ -1587,7 +1594,7 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			queue_redraw()
 			return
 	# Mouse hover detection
-	if event is InputEventMouseMotion:
+	if event is InputEventMouseMotion and _menu_hover_holdoff_frames <= 0:
 		var vp: Vector2 = get_viewport_rect().size
 		var mouse_y: float = event.position.y
 		for i in range(menu_count):
@@ -1720,7 +1727,7 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 				_config_apply_main_horizontal(1)
 				moved = true
 
-	if event is InputEventMouseMotion:
+	if event is InputEventMouseMotion and _menu_hover_holdoff_frames <= 0:
 		var vp: Vector2 = get_viewport_rect().size
 		var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
 		var spacing: float = CONFIG_MENU_SPACING
@@ -1825,12 +1832,15 @@ func _apply_video_mode_from_display_mode() -> void:
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
 		_:
 			is_fullscreen = false
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+			# sz を window_set_mode より先に確定する。
+			# window_set_mode が size_changed を同期発火し _sync_window_display_from_os が
+			# display_mode を書き換えることがあるため（EXE の排他フルスクリーン終了時）。
 			var sz: Vector2i = (
 				WINDOW_CLIENT_SIZE_1080
 				if display_mode == DISPLAY_MODE_WINDOW_1080
 				else WINDOW_CLIENT_SIZE_720
 			)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 			call_deferred("_apply_window_pixel_size_impl", sz)
 	_apply_cursor_policy()
 
@@ -1897,6 +1907,7 @@ func _apply_window_pixel_size_impl(new_size: Vector2i, fs_retries: int = 18) -> 
 	win.size = new_size
 	is_fullscreen = false
 	display_mode = DISPLAY_MODE_WINDOW_1080 if new_size == WINDOW_CLIENT_SIZE_1080 else DISPLAY_MODE_WINDOW_720
+	_menu_hover_holdoff_frames = MENU_HOVER_HOLDOFF_FRAMES
 	call_deferred("_center_window")
 
 
@@ -3959,6 +3970,8 @@ func _process(delta: float) -> void:
 		if _window_drag_settle_frames == 0:
 			_window_is_being_dragged = false
 	_last_window_pos = cur_pos
+	if _menu_hover_holdoff_frames > 0:
+		_menu_hover_holdoff_frames -= 1
 	ui_renderer.update_animations(delta)
 	_apply_cursor_policy()
 	# ボタン押下アニメ待ちで _process_ui_menu_stick_navigation が return してもログが出るように先に実行

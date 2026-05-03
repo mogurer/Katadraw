@@ -3,7 +3,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
-		"stage_name": "テスト（正方形）"
+		"stage_name": "正方形",
+		"locale_key": "STAGE_SQUARE"
 	},
 	"config": {
 		"type": "test_square",

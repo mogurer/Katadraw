@@ -13,7 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "マグカップ"
+		"stage_name": "マグカップ",
+		"locale_key": "STAGE_MUG"
 	},
 	"schema_version": 1,
 	"shape": {

@@ -114,7 +114,7 @@ const RULES_CTRL_IMAGES_SIZE_FRAC := 2.0 / 5.0
 const RULES_CTRL_IMAGES_CENTER_Y_FRAC := 0.15  # 上半分の中央付近（+ _draw_rules の shift_down）
 # playing: 左下角付近。長辺 = min(画面) * この値
 const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 2.0
-const STAGE_CTRL_HINT_BL_MARGIN_LEFT_PX := 16.0   # 左端からのマージン（px）
+const STAGE_CTRL_HINT_BL_MARGIN_LEFT_PX := 32.0   # 左端からのマージン（px）
 const STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX := 32.0  # 下端からのマージン（px）
 # square（ピンク）／ hex（水色）のコーナー説明ループ用。0.5s 非表示→2.5s 拡大・位置共通
 const PLAYING_BTN_DEMO_PAUSE_SEC := 0.5

@@ -62,6 +62,9 @@ static func get_stages() -> Array:
 			var sn: String = str(meta.get("stage_name", "")).strip_edges()
 			if not sn.is_empty():
 				cfg["guide_type_label"] = sn
+			var lk: String = str(meta.get("locale_key", "")).strip_edges()
+			if not lk.is_empty():
+				cfg["locale_key"] = lk
 		cfg["stage_index"] = stage_index
 		stage_index += 1
 		result.append(cfg)

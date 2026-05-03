@@ -3,7 +3,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
-		"stage_name": "ねこの顔（18点）"
+		"stage_name": "ねこの顔",
+		"locale_key": "STAGE_CAT_FACE"
 	},
 	"config": {
 		"type": "cat_face_18",

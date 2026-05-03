@@ -3,7 +3,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
-		"stage_name": "円（14点）"
+		"stage_name": "円",
+		"locale_key": "STAGE_CIRCLE"
 	},
 	"config": {
 		"type": "circle_14",
