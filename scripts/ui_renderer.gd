@@ -114,10 +114,8 @@ const RULES_CTRL_IMAGES_SIZE_FRAC := 2.0 / 5.0
 const RULES_CTRL_IMAGES_CENTER_Y_FRAC := 0.15  # 上半分の中央付近（+ _draw_rules の shift_down）
 # playing: 左下角付近。長辺 = min(画面) * この値
 const STAGE_CTRL_HINT_SIZE_FRAC := 1.0 / 2.0
-const STAGE_CTRL_HINT_BL_CENTER_X_FRAC := 0.22
-const STAGE_CTRL_HINT_BL_CENTER_Y_FRAC := 0.82
-const STAGE_CTRL_HINT_BL_NUDGE_X := -0.08  # 左寄り（vp.x 比）
-const STAGE_CTRL_HINT_BL_NUDGE_Y := -0.06  # わずかに上（vp.y 比）
+const STAGE_CTRL_HINT_BL_MARGIN_LEFT_PX := 16.0   # 左端からのマージン（px）
+const STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX := 32.0  # 下端からのマージン（px）
 # square（ピンク）／ hex（水色）のコーナー説明ループ用。0.5s 非表示→2.5s 拡大・位置共通
 const PLAYING_BTN_DEMO_PAUSE_SEC := 0.5
 const PLAYING_BTN_DEMO_EXPAND_SEC := 2.5
@@ -1327,11 +1325,11 @@ func _draw_stage_playing_controller_hint(vp: Vector2) -> void:
 		return
 	var vmin: float = minf(vp.x, vp.y)
 	var max_side: float = vmin * STAGE_CTRL_HINT_SIZE_FRAC
-	var qcx: float = vp.x * STAGE_CTRL_HINT_BL_CENTER_X_FRAC
-	var qcy: float = vp.y * STAGE_CTRL_HINT_BL_CENTER_Y_FRAC
+	var sz: Vector2 = tex.get_size()
+	var scale: float = max_side / maxf(sz.x, sz.y)
 	var center: Vector2 = Vector2(
-		qcx + vp.x * STAGE_CTRL_HINT_BL_NUDGE_X,
-		qcy + vp.y * STAGE_CTRL_HINT_BL_NUDGE_Y
+		STAGE_CTRL_HINT_BL_MARGIN_LEFT_PX + sz.x * scale * 0.5,
+		vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - sz.y * scale * 0.5
 	)
 	_draw_ui_texture_centered(tex, center, max_side)
 
@@ -1347,7 +1345,7 @@ func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
 	var u: float = (t - PLAYING_BTN_DEMO_PAUSE_SEC) / PLAYING_BTN_DEMO_EXPAND_SEC
 	var ease: float = u * u * (3.0 - 2.0 * u)
 	var vmin: float = minf(vp.x, vp.y)
-	var ctrl_y: float = vp.y * STAGE_CTRL_HINT_BL_CENTER_Y_FRAC + vp.y * STAGE_CTRL_HINT_BL_NUDGE_Y
+	var ctrl_y: float = vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - vmin * STAGE_CTRL_HINT_SIZE_FRAC * 0.5
 	var center := Vector2(
 		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
 		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
@@ -1377,7 +1375,7 @@ func _draw_hexagon_stage_attract_demo(vp: Vector2) -> void:
 	var u: float = (tt - PLAYING_BTN_DEMO_PAUSE_SEC) / PLAYING_BTN_DEMO_EXPAND_SEC
 	var ease: float = u * u * (3.0 - 2.0 * u)
 	var vmin: float = minf(vp.x, vp.y)
-	var ctrl_y: float = vp.y * STAGE_CTRL_HINT_BL_CENTER_Y_FRAC + vp.y * STAGE_CTRL_HINT_BL_NUDGE_Y
+	var ctrl_y: float = vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - vmin * STAGE_CTRL_HINT_SIZE_FRAC * 0.5
 	var center := Vector2(
 		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
 		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
