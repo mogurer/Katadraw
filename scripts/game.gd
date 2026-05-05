@@ -1008,7 +1008,7 @@ func _start_stage(idx: int) -> void:
 	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
 	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
 	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp, idx))
-	BGMManager.begin_countdown()  # ⑤-0: ガイド表示前にイントロへ切り替え
+	BGMManager.begin_pre_countdown()  # ☆: ガイド表示前にプリカウントダウン状態へ
 
 
 func _calculate_metrics() -> void:
@@ -1417,6 +1417,7 @@ func _input(event: InputEvent) -> void:
 			game_state = "guide_countdown"
 			guide_start_time = Time.get_ticks_msec() / 1000.0
 			guide_count_played = 0
+			BGMManager.begin_countdown()  # ★: カウントダウン開始・音量低下
 			queue_redraw()
 		return
 
@@ -2367,8 +2368,7 @@ func _resume_from_pause() -> void:
 func _start_game() -> void:
 	stage_session.clear_debug_test()
 	input_recorder = null
-	BGMManager.stop()
-	BGMManager.play_ingame()
+	BGMManager.start_first_stage()  # ①: 無音でカウントダウン待機
 	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(0)

@@ -46,6 +46,10 @@ const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MIN := 0.12 * PI
 const HUD_SPAWN_CIRCLE_LOWER_ANGLE_MAX := 0.88 * PI
 ## HUD 正六角形: ガイド頂点（重心からの距離）に対する KATA 初期頂点の倍率（>1 でガイドより外側）
 const HUD_SPAWN_HEX_OUTWARD_MUL := 1.50
+## 初期スポーン制約: 画面端から内側この距離以内に入れる（中央に飛び散り防止）
+const SPAWN_EDGE_BAND_PX: float = 200.0
+## 初期スポーン制約: ガイド輪郭からこの距離以上離れる
+const SPAWN_GUIDE_MIN_DIST_PX: float = 100.0
 
 # --- Stage state ---
 ## 本編進行 index。custom test / rules demo など main 以外は -1。
@@ -364,6 +368,55 @@ func _keep_points_inside_playfield(pts: Array[Vector2], viewport_size: Vector2) 
 		pts[i] = p
 
 
+## 初期スポーン制約: 各点を
+##   ① 画面端から SPAWN_EDGE_BAND_PX 以内（端バンドへ最小移動）
+##   ② ガイド輪郭から SPAWN_GUIDE_MIN_DIST_PX 以上離れる
+## の条件を満たすよう補正し、最後に playfield 内クランプを掛ける。
+func _constrain_spawn_to_edge_band(pts: Array[Vector2], viewport_size: Vector2) -> void:
+	if pts.is_empty():
+		return
+	var vp := viewport_size
+	var has_outline: bool = hud_guide_outline_world.size() >= 2
+	for i in range(pts.size()):
+		var p: Vector2 = pts[i]
+
+		# ① 画面端から SPAWN_EDGE_BAND_PX 以内
+		var d_l: float = p.x
+		var d_r: float = vp.x - p.x
+		var d_t: float = p.y
+		var d_b: float = vp.y - p.y
+		if minf(minf(d_l, d_r), minf(d_t, d_b)) > SPAWN_EDGE_BAND_PX:
+			# 中央にいる → 最小移動量で端バンドへ
+			var candidates := [
+				Vector2(SPAWN_EDGE_BAND_PX, p.y),
+				Vector2(vp.x - SPAWN_EDGE_BAND_PX, p.y),
+				Vector2(p.x, SPAWN_EDGE_BAND_PX),
+				Vector2(p.x, vp.y - SPAWN_EDGE_BAND_PX),
+			]
+			var best: Vector2 = candidates[0]
+			var best_d: float = p.distance_to(best)
+			for c in candidates:
+				var cd: float = p.distance_to(c)
+				if cd < best_d:
+					best_d = cd
+					best = c
+			p = best
+
+		# ② ガイド輪郭から SPAWN_GUIDE_MIN_DIST_PX 以上離れる
+		if has_outline:
+			var dist_g: float = _distance_to_polyline(p, hud_guide_outline_world)
+			if dist_g < SPAWN_GUIDE_MIN_DIST_PX:
+				var away: Vector2 = p - hud_guide_spawn_centroid
+				if away.length_squared() < 1e-4:
+					away = Vector2.RIGHT
+				p += away.normalized() * (SPAWN_GUIDE_MIN_DIST_PX - dist_g)
+
+		pts[i] = p
+
+	# 最終スクリーン内クランプ（既存ロジック流用）
+	_keep_points_inside_playfield(pts, viewport_size)
+
+
 ## 円ガイド: 各点をガイド重心からの半径 hud_guide_ref_px（輪郭との整合）の円周上へ投影
 func _snap_point_positions_to_hud_circle_ring(point_positions: Array[Vector2]) -> void:
 	var c: Vector2 = hud_guide_spawn_centroid
@@ -629,6 +682,8 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		recompute_hud_guide_layout(shape_center, viewport_size)
 	if not skip_hud_initial_layout:
 		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
+	if current_stage >= 0 and stage_type not in ["triangle", "square", "hexagon", "circle"]:
+		_constrain_spawn_to_edge_band(point_positions, viewport_size)
 	# ステージ切り替え時は前ステージのキャッシュを破棄し、必ずフル計算を行う
 	_hausdorff_call_counter = 0
 	_hausdorff_cached_err = 100.0
