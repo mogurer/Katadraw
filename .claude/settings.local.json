@@ -8,7 +8,13 @@
       "PowerShell(winget --version)",
       "PowerShell(winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements)",
       "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Katadraw\\\\scripts\\\\\" -Filter \"*.gd\" | Select-Object Name)",
-      "PowerShell(Get-ChildItem -Path \"c:\\\\GitHub\\\\Katadraw\" -Recurse -Name | Where-Object { $_ -match '\\\\.\\(png|jpg|jpeg|jpg|tscn|tres\\)$' } | Select-Object -First 30)"
+      "PowerShell(Get-ChildItem -Path \"c:\\\\GitHub\\\\Katadraw\" -Recurse -Name | Where-Object { $_ -match '\\\\.\\(png|jpg|jpeg|jpg|tscn|tres\\)$' } | Select-Object -First 30)",
+      "PowerShell($env:PATH = $env:PATH + \";C:\\\\Program Files\\\\Git\\\\cmd\"; Set-Location c:\\\\GitHub\\\\Katadraw; git branch -a)",
+      "Read(//c/Users/**)",
+      "Read(//c//**)",
+      "Read(//c/TOOLS/**)",
+      "PowerShell(ls \"C:\\\\Users\\\\krtek\\\\AppData\\\\Local\" | Where-Object { $_.Name -match \"git|GitHub\" })",
+      "Read(//c/GitHub/Katadraw/**)"
     ]
   }
 }
