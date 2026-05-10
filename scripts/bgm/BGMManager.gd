@@ -275,6 +275,14 @@ func play_clear() -> void:
 	_sync_volume()
 
 
+## ステージクリア後ステージセレクトへ戻る際の状態リセット。BGM再生は継続する。
+func resume_stage_select() -> void:
+	_clear_boost_active = false
+	_in_pre_countdown = false
+	_countdown_active = false
+	_sync_volume()
+
+
 ## 全停止・状態リセット。
 func stop() -> void:
 	_stop_all()

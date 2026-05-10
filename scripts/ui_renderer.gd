@@ -444,6 +444,9 @@ func draw(state: String, vp: Vector2) -> void:
 	if _game.stage_session.debug_test_mode and state == "playing":
 		_draw_debug_log_button(vp)
 
+	if not _game.pause_active:
+		_draw_player_avatar()
+
 
 func draw_pause_overlay(vp: Vector2) -> void:
 	_draw_pause_overlay(vp)
@@ -1179,6 +1182,7 @@ func _draw_config(vp: Vector2) -> void:
 		tr("CONFIG_LANGUAGE"),
 		tr("CONFIG_BGM_VOLUME"),
 		tr("CONFIG_SE_VOLUME"),
+		tr("CONFIG_PRACTICE"),
 		tr("CONFIG_BACK"),
 	]
 	var item_values: Array[String] = [
@@ -1188,16 +1192,17 @@ func _draw_config(vp: Vector2) -> void:
 		str(_game.bgm_volume),
 		str(_game.se_volume),
 		"",
+		"",
 	]
 
 	var arrow_fs: int = 28
 
-	for i in range(6):
+	for i in range(7):
 		var item_y: float = base_y + i * spacing
 		var is_sel: bool = (i == _game.config_index)
-		if i == 5:
-			# 「タイトルに戻る」— タイトルメニューと同じく is_off=非選択（薄ベージュ＋濃字）、選択時は赤
-			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.15 - 35.0)
+		if i >= 5:
+			# 「練習」「戻る」— ボタン行
+			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.07)
 			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, box_w)
 			continue
 		# 0〜3: 値行は同一レイアウト（◀ ボックス ▶）。選択行はタイトルメニューと同様のホバー拡大＋シャドウ。
@@ -1243,6 +1248,35 @@ func _draw_config(vp: Vector2) -> void:
 		var up_x: float = Rp.x - aw * 0.5
 		var up_c: Color = (sel_c if is_sel else text_c) if right_enabled else Color(0.26, 0.21, 0.28, 0.25)
 		_game.draw_string(_game.font_bold, Vector2(up_x, down_baseline), "▶", HORIZONTAL_ALIGNMENT_CENTER, aw, arrow_fs, up_c)
+
+	# --- RESET ボタン（右下固定） ---
+	var reset_rect: Rect2 = _game.get_config_reset_button_rect(vp)
+	var reset_center := Vector2(reset_rect.position.x + reset_rect.size.x * 0.5,
+	                            reset_rect.position.y + reset_rect.size.y * 0.5)
+	var is_reset_off: bool = not _game.config_reset_hovered
+	_draw_auto_button_with_shadow(reset_center, "RESET", _game.CONFIG_RESET_BTN_FS, 1.0, is_reset_off, _game.CONFIG_RESET_BTN_W)
+
+	# --- RESET 確認ダイアログ ---
+	if _game.config_reset_confirm:
+		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.40))
+		var cx: float = vp.x / 2.0
+		var cy: float = vp.y / 2.0
+		var dlg_w: float = 640.0
+		var dlg_h: float = 260.0
+		var dlg_rect := Rect2(cx - dlg_w * 0.5, cy - dlg_h * 0.5, dlg_w, dlg_h)
+		_game.draw_rect(dlg_rect.grow(4.0), Color(0.95, 0.19, 0.32))
+		_game.draw_rect(dlg_rect, Color(1.0, 0.98, 0.96))
+		var msg_y: float = cy - dlg_h * 0.12
+		_game.draw_string(_game.font, Vector2(cx - dlg_w * 0.5, msg_y),
+			"プレイ履歴をすべて初期化しますか？",
+			HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 28, Color(0.26, 0.21, 0.28))
+		var cbtn_gap: float = vp.x * 0.10
+		var cbtn_cy: float = cy + dlg_h * 0.22
+		var cbtn_w: float = vp.x * 0.16
+		var yes_off: bool = _game.config_reset_confirm_index != 0
+		var no_off: bool  = _game.config_reset_confirm_index != 1
+		_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
+		_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off,  cbtn_w)
 
 
 func _config_fit_label_text(font: Font, text: String, max_w: float, fs: int) -> String:
@@ -1708,7 +1742,6 @@ func _draw_rules_demo_player_layer(vp: Vector2) -> void:
 	"""自キャラ・エフェクト（[つぎへ] より手前）"""
 	if _game.point_positions.is_empty():
 		return
-	_draw_player_avatar()
 	_draw_laser_effect()
 	_draw_spore_particles()
 	# 本編同様: 実現率（掴み中 or 一致度が動いた直後）
@@ -1796,7 +1829,6 @@ func _draw_game(vp: Vector2) -> void:
 		if i == focus_idx and _game.input_handler.grab_input_active:
 			_draw_point_position_effect(pos, r_guide)
 
-	_draw_player_avatar()
 	_draw_spore_particles()
 
 	# 3. 実現率（最上層）: 掴み中は常に / 掴まないでも一致度が動いた直後。自キャラのやや右上
@@ -1817,8 +1849,7 @@ func _draw_game(vp: Vector2) -> void:
 		_game.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
-		var hud_a: float = clampf(0.55 + 0.38 * _game.hint_alpha, 0.5, 1.0)
-		_stage_renderer.draw_hud_overlay_guide(hud_a)
+		_stage_renderer.draw_guide_proximity_reveal()
 
 	# square: A 斥力（ピンク）／hex: X 引力（水色）。左・コントロよりやや上
 	_draw_square_stage_repulse_demo(vp)
@@ -3356,6 +3387,7 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 		var guide_box_w: float = minf(shape_available_w, 384.0)
 		var guide_box_h: float = minf(shape_available_h, 216.0)
 		_stage_renderer.draw_guide_shape_fit_max(Vector2(play_cx, shape_cy), guide_box_w, guide_box_h, 1.0, 2.5)
+	_draw_player_avatar()
 
 
 func _draw_particles() -> void:

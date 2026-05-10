@@ -9,6 +9,10 @@ class_name GameConfig
 # true: 体験版（3ステージ）、false: 製品版（全ステージ）
 const EXPERIENCE_VERSION := false
 
+# --- デモ / 製品 ---
+# true: デモ版（タイトルから直接ゲーム開始）、false: 製品版（ステージセレクト経由）
+const IS_DEMO := false
+
 ## 本編を「1 面だけ」繰り返しプレイするときのマスタ行インデックス（manifest / StageData.get_stages() の 0 始まり）。
 ## -1 で無効（通常は全ステージを順にプレイ）。例: 星 10 点のみ試すなら 3（star_10.json の並び）
 ## 有効時は get_play_stage_rows() が stage_index を 0 に固定するため、進行スロットだけでは HUD 基準点（Y オフセット）が本番と一致しない。

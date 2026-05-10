@@ -215,6 +215,9 @@ var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
 var menu_confirm_quit: bool = false
 var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
 var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像度,2=カーソル…,6=戻る
+var config_reset_hovered: bool = false
+var config_reset_confirm: bool = false
+var config_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
 ## コンフィグ画面レイアウト（ui_renderer._draw_config とヒット判定で共通）
 const CONFIG_MENU_BASE_Y_RATIO := 0.28
 const CONFIG_MENU_SPACING := 103.5
@@ -225,6 +228,10 @@ const CONFIG_MENU_ARROW_W := 36.0
 const CONFIG_MENU_ARROW_PAD := 4.0
 ## 項目名の右端と ◀ 左端の間の余白（英語ラベル長でも見切れしにくいよう vx を寄せている）
 const CONFIG_MENU_LABEL_GAP_TO_ARROW := 20.0
+## RESETボタンのフォントサイズと幅（右下に単独配置）
+const CONFIG_RESET_BTN_FS := 28
+const CONFIG_RESET_BTN_W  := 130.0
+const CONFIG_RESET_BTN_MARGIN := 36.0
 ## コンフィグ 0〜3 行のホバー拡大（set_btn_hover / get_btn_scale と同一 ID）
 const CONFIG_ROW_BTN_IDS: Array[String] = [
 	"cfg_row_display_mode",
@@ -538,8 +545,11 @@ func _ready() -> void:
 	_sync_window_display_from_os()
 	if not is_fullscreen:
 		call_deferred("_apply_window_pixel_size_impl", _window_client_size_for_display_mode())
-	game_state = "logo"
-	logo_start_time = Time.get_ticks_msec() / 1000.0
+	if not GameConfig.IS_DEMO and StageSelectManager.pending_stage_id >= 0:
+		_start_game_from_stage_select()
+	else:
+		game_state = "logo"
+		logo_start_time = Time.get_ticks_msec() / 1000.0
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 
@@ -694,25 +704,91 @@ func _apply_cursor_policy() -> void:
 	if not _cursor_os_focused_for_confine:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
-	# コントローラ操作中はホールドオフより優先して非表示にする。
-	# HIDDEN 時は ClipCursor が適用されないため WM ずれ問題も生じない。
-	if _cursor_pad_override_hidden:
-		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
-		return
-	# マウス操作中はホールドオフ中も即座に可視化する。
-	var now: float = Time.get_ticks_msec() / 1000.0
-	var mouse_is_active: bool = (now - _cursor_last_mouse_activity_sec) <= CURSOR_IDLE_HIDE_SECONDS
-	if mouse_is_active:
-		Input.mouse_mode = _cursor_visible_mode()
-		return
 	if _cursor_wm_focus_policy_holdoff_frames > 0:
 		_cursor_wm_focus_policy_holdoff_frames -= 1
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
-	if pause_active:
-		Input.mouse_mode = _cursor_visible_mode()
+	if not is_fullscreen and mouse_confine_to_window:
+		Input.mouse_mode = Input.MOUSE_MODE_CONFINED_HIDDEN
 		return
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+
+
+func _update_player_hover() -> void:
+	if ui_renderer._btn_press_pending:
+		return
+	if not input_handler.player_position_initialized:
+		return
+	var pos: Vector2 = input_handler.player_position
+	var vp: Vector2 = get_viewport_rect().size
+
+	if game_state == "menu":
+		if _menu_hover_holdoff_frames <= 0:
+			if menu_confirm_quit:
+				var cx: float = vp.x / 2.0
+				var cbtn_w: float = 220.0
+				var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+				var cbtn_cy: float = vp.y / 2.0 + 50.0
+				if pos.y >= cbtn_cy - 35.0 and pos.y <= cbtn_cy + 35.0:
+					if pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
+						menu_confirm_index = 0
+					elif pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
+						menu_confirm_index = 1
+			else:
+				var menu_count: int = 3
+				for i in range(menu_count):
+					var btn_cy: float = ui_renderer.get_menu_btn_cy(vp, i, menu_count)
+					if pos.y >= btn_cy - 35.0 and pos.y <= btn_cy + 35.0:
+						menu_index = i
+		return
+
+	if game_state == "config":
+		if _menu_hover_holdoff_frames <= 0:
+			if config_reset_confirm:
+				if pos.x < vp.x / 2.0:
+					config_reset_confirm_index = 0
+				else:
+					config_reset_confirm_index = 1
+			else:
+				var items_count: int = 7
+				var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
+				var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
+				for i in range(items_count):
+					if i < 5:
+						var geom: Dictionary = config_row_scaled_layout(vp, i)
+						var bh: float = geom["bh"]
+						var top: float = geom["Lp"].y - bh * 0.5
+						var bottom: float = top + bh
+						if pos.y >= top - 5.0 and pos.y <= bottom + 5.0:
+							config_index = i
+					else:
+						var extra_y: float = vp.y * 0.07
+						var item_y: float = base_y + i * CONFIG_MENU_SPACING
+						if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y:
+							config_index = i
+				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
+		return
+
+	if game_state == "playing" and pause_active:
+		if pause_confirm_title:
+			var play_cx: float = vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) / 2.0
+			var cbtn_cy: float = vp.y / 2.0 + 50.0
+			var cbtn_w: float = 220.0
+			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+			var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+			if pos.y >= cbtn_cy - btn_h / 2.0 and pos.y <= cbtn_cy + btn_h / 2.0:
+				if pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
+					pause_confirm_index = 0
+				elif pos.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
+					pause_confirm_index = 1
+		else:
+			var hit: int = _hit_pause_button(pos, vp)
+			if hit >= 0:
+				pause_index = hit
+		return
+
+	if game_state == "results":
+		ui_renderer.update_result_mouse_pos(pos)
 
 
 func _notification(what: int) -> void:
@@ -1050,6 +1126,8 @@ func _check_clear() -> void:
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
 		BGMManager.play_clear()
+		if not GameConfig.IS_DEMO:
+			StageSelectManager.mark_cleared(current_stage)
 		_save_dwell_log()
 
 
@@ -1248,7 +1326,7 @@ func _ui_menu_stick_nav_horizontal_first(delta: float) -> Vector2i:
 
 func _process_config_stick_navigation(delta: float) -> void:
 	# 上下＝行移動、左右＝値変更（全項目で同じ優先: 縦を先に処理）
-	var items_count: int = 6
+	var items_count: int = 7
 	var ly: float = _ui_stick_ly
 	var lx: float = _ui_stick_lx
 	var vy: int = _ui_menu_stick_vertical_step(delta, ly)
@@ -1356,6 +1434,7 @@ func _input(event: InputEvent) -> void:
 		var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
 		if _cursor_mouse_motion_accum.length_squared() >= thr_sq:
 			_cursor_register_mouse_activity()
+		input_handler.handle_mouse_motion(mm.position, mm.relative)
 	elif _cursor_event_should_hide_for_pad(event):
 		_cursor_register_pad_activity()
 
@@ -1426,9 +1505,6 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "results":
 		var vp_res: Vector2 = get_viewport_rect().size
-		if event is InputEventMouseMotion:
-			ui_renderer.update_result_mouse_pos(event.position)
-			queue_redraw()
 		if event is InputEventKey and event.pressed and not event.echo:
 			if event.keycode == KEY_LEFT:
 				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index - 1 + 3) % 3
@@ -1443,15 +1519,16 @@ func _input(event: InputEvent) -> void:
 		)
 		# マウスで明示クリックしたボタンを優先
 		if is_confirm_click:
-			if _hit_results_camera_button(event.position):
+			var pp: Vector2 = input_handler.player_position
+			if _hit_results_camera_button(pp):
 				_take_screenshot()
 				queue_redraw()
 				return
-			if _hit_results_twitter_button(event.position):
+			if _hit_results_twitter_button(pp):
 				_open_twitter_post()
 				queue_redraw()
 				return
-			if _hit_results_button(event.position):
+			if _hit_results_button(pp):
 				ui_renderer.set_btn_press_with_callback(tr("RESULT_BTN_NEXT"), func():
 					BGMManager.stop()  # BGMManager に移行
 					_return_to_title_or_stage_debug_from_test()
@@ -1484,7 +1561,7 @@ func _input(event: InputEvent) -> void:
 					queue_redraw()
 				, false)
 				queue_redraw()
-			elif is_confirm_click and _hit_cleared_button(event.position):
+			elif is_confirm_click and _hit_cleared_button(input_handler.player_position):
 				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
 					BGMManager.stop()  # BGMManager に移行
 					_return_to_title_or_stage_debug_from_test()
@@ -1497,7 +1574,7 @@ func _input(event: InputEvent) -> void:
 				_advance_stage()
 			, false)
 			queue_redraw()
-		elif is_confirm_click and _hit_cleared_button(event.position):
+		elif is_confirm_click and _hit_cleared_button(input_handler.player_position):
 			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
 				_advance_stage()
 			, false)
@@ -1544,13 +1621,9 @@ func _input(event: InputEvent) -> void:
 	if not ui_renderer.is_stage_intro_done():
 		return
 	if stage_session.debug_test_mode and input_recorder and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		if _hit_debug_log_button(event.position):
+		if _hit_debug_log_button(input_handler.player_position):
 			_flush_debug_input_log()
 			return
-	if event is InputEventMouseMotion:
-		var mm: InputEventMouseMotion = event as InputEventMouseMotion
-		if input_handler.is_bb_dragging() or playing_mouse_steers_player:
-			input_handler.handle_mouse_motion(mm.position, mm.relative)
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
 			playing_mouse_steers_player = true
@@ -1594,20 +1667,12 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			title_start_time = Time.get_ticks_msec() / 1000.0
 			queue_redraw()
 			return
-	# Mouse hover detection
-	if event is InputEventMouseMotion and _menu_hover_holdoff_frames <= 0:
-		var vp: Vector2 = get_viewport_rect().size
-		var mouse_y: float = event.position.y
-		for i in range(menu_count):
-			var btn_cy: float = ui_renderer.get_menu_btn_cy(vp, i, menu_count)
-			if mouse_y >= btn_cy - 35.0 and mouse_y <= btn_cy + 35.0:
-				menu_index = i
 	# Confirm: キー/パッドは選択項目を実行。マウスは項目上クリックのみ有効
 	var do_confirm: bool = false
 	if is_confirm_key or is_confirm_pad:
 		do_confirm = true
 	elif is_confirm_click:
-		var clicked_item: int = _hit_menu_item(event.position)
+		var clicked_item: int = _hit_menu_item(input_handler.player_position)
 		if clicked_item >= 0:
 			menu_index = clicked_item
 			do_confirm = true
@@ -1616,7 +1681,7 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 		var idx: int = menu_index
 		ui_renderer.set_btn_press_with_callback(menu_labels[idx], func():
 			if idx == 0:
-				_enter_rules()
+				_start_game()
 			elif idx == 1:
 				_sync_window_display_from_os()
 				game_state = "config"
@@ -1651,20 +1716,6 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 			menu_confirm_index = (menu_confirm_index + 1) % 2
 			queue_redraw()
 	# 十字の左右は _process_ui_menu_stick_navigation（左スティックと同一経路）
-	# マウスホバー
-	if event is InputEventMouseMotion:
-		var vp: Vector2 = get_viewport_rect().size
-		var cx: float = vp.x / 2.0
-		var dlg_w: float = 640.0
-		var cbtn_w: float = 220.0
-		var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-		var cbtn_cy: float = vp.y / 2.0 + 50.0
-		var mouse: Vector2 = event.position
-		if mouse.y >= cbtn_cy - 35.0 and mouse.y <= cbtn_cy + 35.0:
-			if mouse.x >= cx - cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx - cbtn_gap + cbtn_w / 2.0:
-				menu_confirm_index = 0
-			elif mouse.x >= cx + cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx + cbtn_gap + cbtn_w / 2.0:
-				menu_confirm_index = 1
 	# 決定
 	if is_confirm or is_confirm_click:
 		var do_action: bool = false
@@ -1676,7 +1727,7 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 			var cbtn_w: float = 220.0
 			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
 			var cbtn_cy: float = vp.y / 2.0 + 50.0
-			var mouse: Vector2 = event.position
+			var mouse: Vector2 = input_handler.player_position
 			if mouse.y >= cbtn_cy - 35.0 and mouse.y <= cbtn_cy + 35.0:
 				if mouse.x >= cx - cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx - cbtn_gap + cbtn_w / 2.0:
 					menu_confirm_index = 0
@@ -1698,8 +1749,48 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 
 
 func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
-	var items_count: int = 6
+	var items_count: int = 7
 	var moved: bool = false
+
+	# ---------- RESET 確認ダイアログ ----------
+	if config_reset_confirm:
+		var vp2: Vector2 = get_viewport_rect().size
+		var cbtn_gap: float = vp2.x * 0.10
+		var cbtn_cy: float = vp2.y * 0.60
+		var cbtn_w: float = vp2.x * 0.16
+
+		var is_back2: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
+		)
+		if is_back2:
+			config_reset_confirm = false
+			queue_redraw()
+			return
+
+		var do_confirm2: bool = is_confirm_key or is_confirm_pad
+		if is_confirm_click:
+			var cx: float = vp2.x / 2.0
+			var bh: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+			var click_pos: Vector2 = input_handler.player_position
+			if click_pos.y >= cbtn_cy - bh / 2.0 and click_pos.y <= cbtn_cy + bh / 2.0:
+				if click_pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
+					config_reset_confirm_index = 0
+					do_confirm2 = true
+				elif click_pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
+					config_reset_confirm_index = 1
+					do_confirm2 = true
+		if do_confirm2:
+			if config_reset_confirm_index == 0:
+				StageSelectManager.reset_all()
+				_play_sfx(sfx_window_close)
+			else:
+				_play_sfx(sfx_window_close)
+			config_reset_confirm = false
+			queue_redraw()
+		return
+
+	# ---------- 通常コンフィグ入力 ----------
 
 	# ESC / B: メニューへ戻る
 	var is_back: bool = (
@@ -1707,6 +1798,8 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
 	)
 	if is_back:
+		config_reset_hovered = false
+		config_reset_confirm = false
 		game_state = "menu"
 		_reset_ui_menu_stick_navigation()
 		queue_redraw()
@@ -1728,28 +1821,17 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 				_config_apply_main_horizontal(1)
 				moved = true
 
-	if event is InputEventMouseMotion and _menu_hover_holdoff_frames <= 0:
-		var vp: Vector2 = get_viewport_rect().size
-		var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
-		var spacing: float = CONFIG_MENU_SPACING
-		var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-		var mouse_pos: Vector2 = event.position
-		for i in range(items_count):
-			if i < 5:
-				var geom: Dictionary = config_row_scaled_layout(vp, i)
-				var bh: float = geom["bh"]
-				var top: float = geom["Lp"].y - bh * 0.5
-				var bottom: float = top + bh
-				if mouse_pos.y >= top - 5.0 and mouse_pos.y <= bottom + 5.0:
-					config_index = i
-			else:
-				var item_y: float = base_y + i * spacing
-				var extra_y: float = vp.y * 0.15 - 35.0
-				if mouse_pos.y >= item_y - 20.0 + extra_y and mouse_pos.y <= item_y - 16.0 + box_h + extra_y:
-					config_index = i
-
 	if is_confirm_click:
-		var adj: Dictionary = _hit_config_value_arrows(event.position)
+		# RESET ボタンクリック（メインリストより先に判定）
+		var vp_r: Vector2 = get_viewport_rect().size
+		var click_pos: Vector2 = input_handler.player_position
+		if get_config_reset_button_rect(vp_r).has_point(click_pos):
+			config_reset_confirm = true
+			config_reset_confirm_index = 1
+			_play_sfx(sfx_window_open)
+			queue_redraw()
+			return
+		var adj: Dictionary = _hit_config_value_arrows(click_pos)
 		if adj.get("ok", false):
 			config_index = int(adj["item"])
 			_config_apply_main_horizontal(int(adj["delta"]))
@@ -1760,12 +1842,21 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	if is_confirm_key or is_confirm_pad:
 		do_confirm = true
 	elif is_confirm_click:
-		var hit: Dictionary = _hit_config_item(event.position)
+		var hit: Dictionary = _hit_config_item(input_handler.player_position)
 		if hit.get("ok", false):
 			config_index = int(hit["main"])
 			do_confirm = true
 	if do_confirm and config_index == 5:
+		ui_renderer.set_btn_press_with_callback(tr("CONFIG_PRACTICE"), func():
+			StageSelectManager.tutorial_return_to = "config"
+			_enter_rules()
+			queue_redraw()
+		)
+		queue_redraw()
+	if do_confirm and config_index == 6:
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
+			config_reset_hovered = false
+			config_reset_confirm = false
 			game_state = "menu"
 			_reset_ui_menu_stick_navigation()
 			queue_redraw()
@@ -1981,40 +2072,39 @@ func _input_rules(event: InputEvent, _is_confirm_key: bool, _is_confirm_pad: boo
 		and event.button_index == JOY_BUTTON_START
 	)
 
-	# ESC / パッドBボタンでメニューへ戻る
+	# ESC / パッドBボタンで戻る（戻り先は tutorial_return_to で決定）
 	var is_back: bool = (
 		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
 		or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
 	)
 	if is_back:
-		game_state = "menu"
-		_reset_ui_menu_stick_navigation()
-		queue_redraw()
+		_rules_exit_to_caller()
 		return
 
-	# Start → ゲーム開始（つぎへと同等）
+	# Start → つぎへ（戻り先は tutorial_return_to で決定）
 	if is_start:
-		ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _start_game())
+		ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _rules_proceed())
 		queue_redraw()
 		return
 
-	# [つぎへ] 上に自キャラを重ねた状態で A → ゲーム開始
+	# [つぎへ] 上に自キャラを重ねた状態で A → つぎへ
 	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A:
 		if _player_on_rules_next_button():
-			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _start_game())
+			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _rules_proceed())
+			queue_redraw()
+			return
+
+	# クリックで「つぎへ」
+	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
+		if event.pressed and _hit_rules_button(input_handler.player_position):
+			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _rules_proceed())
 			queue_redraw()
 			return
 
 	# デモ操作: マウス/コントローラを input_handler へ
-	if event is InputEventMouseMotion:
-		var mm_rules: InputEventMouseMotion = event as InputEventMouseMotion
-		input_handler.handle_mouse_motion(mm_rules.position, mm_rules.relative)
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
-			if _hit_rules_button(event.position):
-				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _start_game())
-				queue_redraw()
-				return
+			# _hit_rules_button のクリックは上の早期リターンで処理済み
 			var prev_dragging: bool = is_dragging
 			input_handler.handle_mouse_press(event.position, event.button_index)
 			if not prev_dragging and is_dragging:
@@ -2038,6 +2128,38 @@ func get_rules_next_button_rect() -> Rect2:
 
 func _player_on_rules_next_button() -> bool:
 	return get_rules_next_button_rect().has_point(input_handler.get_player_position())
+
+
+## チュートリアル「つぎへ」: tutorial_return_to によって遷移先を切り替える。
+func _rules_proceed() -> void:
+	if StageSelectManager.tutorial_return_to == "config":
+		StageSelectManager.tutorial_return_to = ""
+		game_state = "config"
+		config_index = 0
+		_reset_ui_menu_stick_navigation()
+		queue_redraw()
+	else:
+		StageSelectManager.tutorial_return_to = ""
+		# A-1: チュートリアル完了 → ステージ1 開始（初回のみ無音カウントダウン待機）
+		BGMManager.start_first_stage()
+		stage_session.clear_results()
+		pause_retry_elapsed = -1.0
+		_start_stage(0)
+
+
+## チュートリアルの ESC/Bボタン: tutorial_return_to が "config" ならコンフィグへ、それ以外はメニューへ。
+func _rules_exit_to_caller() -> void:
+	var return_to: String = StageSelectManager.tutorial_return_to
+	StageSelectManager.tutorial_return_to = ""
+	if game_state != "rules":
+		return
+	if return_to == "config":
+		game_state = "config"
+		config_index = 0
+	else:
+		game_state = "menu"
+	_reset_ui_menu_stick_navigation()
+	queue_redraw()
 
 
 # --- ボタン/メニュー項目のヒット判定（意図しない遷移防止） ---
@@ -2128,20 +2250,31 @@ func _hit_menu_item(pos: Vector2) -> int:
 
 
 func _hit_config_item(pos: Vector2) -> Dictionary:
-	# 「タイトルに戻る」ボタン（最終行）の決定用。値行は ◀▶ は _hit_config_value_arrows。
+	# 「練習」「戻る」ボタン行（index 5, 6）のクリック判定。値行の ◀▶ は _hit_config_value_arrows。
 	var vp: Vector2 = get_viewport_rect().size
 	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
 	var spacing: float = CONFIG_MENU_SPACING
 	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO
 	var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-	var i: int = 5
-	var item_y: float = base_y + i * spacing
-	var extra_y: float = vp.y * 0.15 - 35.0
+	var extra_y: float = vp.y * 0.07
 	var btn_half_w: float = box_w / 2.0
 	var btn_cx: float = vp.x / 2.0
-	if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
-		return { "ok": true, "main": i }
+	for i in [5, 6]:
+		var item_y: float = base_y + i * spacing
+		if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
+			return { "ok": true, "main": i }
 	return {}
+
+
+## コンフィグ右下の RESET ボタン領域を返す（描画・ヒット判定で共通）。
+func get_config_reset_button_rect(vp: Vector2) -> Rect2:
+	var btn_h: float = (font.get_ascent(CONFIG_RESET_BTN_FS) + font.get_descent(CONFIG_RESET_BTN_FS)) * 1.5
+	return Rect2(
+		vp.x - CONFIG_RESET_BTN_W - CONFIG_RESET_BTN_MARGIN,
+		vp.y - btn_h - CONFIG_RESET_BTN_MARGIN,
+		CONFIG_RESET_BTN_W,
+		btn_h
+	)
 
 
 ## 画面モード・カーソル制限・言語・BGM/SE の ◀▶ クリック。戻り値: ok, item(0〜4), delta(±1)
@@ -2225,16 +2358,10 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 			moved = true
 	# 十字の上下左右は _process_ui_menu_stick_navigation（左スティック＋D-pad をアナログ合成と同一経路）。ここで JoypadButton を重ねると _input→_process の順で二重に進む／左右が逆に感じる原因になる。
 
-	# Mouse hover (button hit test is in ui_renderer)
-	if event is InputEventMouseMotion:
-		var vp: Vector2 = get_viewport_rect().size
-		var hit: int = _hit_pause_button(event.position, vp)
-		if hit >= 0:
-			pause_index = hit
-
 	# Confirm
 	if is_confirm:
-		var pause_labels: Array[String] = [tr("PAUSE_CLOSE"), tr("PAUSE_RETRY"), tr("PAUSE_TITLE")]
+		var _pause_back_label: String = tr("PAUSE_TITLE") if GameConfig.IS_DEMO else "セレクト画面へ"
+		var pause_labels: Array[String] = [tr("PAUSE_CLOSE"), tr("PAUSE_RETRY"), _pause_back_label]
 		var pidx: int = pause_index
 		ui_renderer.set_btn_press_with_callback(pause_labels[pidx], func():
 			match pidx:
@@ -2312,26 +2439,19 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 			moved = true
 	# 十字は _process_ui_menu_stick_navigation のみ（メインのポーズメニューと同じく二重処理しない）
 
-	# Mouse hover / click position（インゲーム領域の中央基準）
-	var vp: Vector2 = get_viewport_rect().size
-	var play_cx: float = vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) / 2.0
-	var cbtn_cy: float = vp.y / 2.0 + 50.0
-	var cbtn_w: float = 220.0
-	var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
-	if event is InputEventMouseMotion:
-		if event.position.y >= cbtn_cy - btn_h / 2.0 and event.position.y <= cbtn_cy + btn_h / 2.0:
-			if event.position.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and event.position.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
+	# click position（インゲーム領域の中央基準）
+	if is_confirm and event is InputEventMouseButton:
+		var vp: Vector2 = get_viewport_rect().size
+		var play_cx: float = vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) / 2.0
+		var cbtn_cy: float = vp.y / 2.0 + 50.0
+		var cbtn_w: float = 220.0
+		var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+		var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+		var click_pos: Vector2 = input_handler.player_position
+		if click_pos.y >= cbtn_cy - btn_h / 2.0 and click_pos.y <= cbtn_cy + btn_h / 2.0:
+			if click_pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
 				pause_confirm_index = 0
-				moved = true
-			elif event.position.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and event.position.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
-				pause_confirm_index = 1
-				moved = true
-	elif is_confirm and event is InputEventMouseButton:
-		if event.position.y >= cbtn_cy - btn_h / 2.0 and event.position.y <= cbtn_cy + btn_h / 2.0:
-			if event.position.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and event.position.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
-				pause_confirm_index = 0
-			elif event.position.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and event.position.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
+			elif click_pos.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
 				pause_confirm_index = 1
 
 	if is_confirm:
@@ -2368,13 +2488,43 @@ func _resume_from_pause() -> void:
 func _start_game() -> void:
 	stage_session.clear_debug_test()
 	input_recorder = null
+
+	if not GameConfig.IS_DEMO:
+		if not StageSelectManager.tutorial_shown:
+			# A-1: 初回 → チュートリアル → ステージ1
+			StageSelectManager.tutorial_shown = true
+			StageSelectManager.tutorial_return_to = "stage1"
+			StageSelectManager._save_states()
+			_enter_rules()
+			return
+		# B: 2回目以降 → インゲームBGM開始してステージセレクトへ
+		BGMManager.play_ingame()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		return
+
+	# IS_DEMO=true: 従来どおり
 	BGMManager.start_first_stage()  # ①: 無音でカウントダウン待機
 	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(0)
 
 
+func _start_game_from_stage_select() -> void:
+	var sid: int = StageSelectManager.pending_stage_id
+	StageSelectManager.pending_stage_id = -1
+	stage_session.clear_debug_test()
+	input_recorder = null
+	stage_session.clear_results()
+	pause_retry_elapsed = -1.0
+	_start_stage(sid)
+
+
 func _advance_stage() -> void:
+	if not GameConfig.IS_DEMO:
+		# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
+		BGMManager.resume_stage_select()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		return
 	if current_stage < GameConfig.get_max_stage_index():
 		_start_stage(current_stage + 1)
 	else:
@@ -2415,13 +2565,15 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		game_state = "stage_debug"
 		_sync_stage_debug_field_buffers()
 		stage_debug_state.last_error = ""
+		title_start_time = Time.get_ticks_msec() / 1000.0
+		BGMManager.stop()  # BGMManager に移行
+	elif not GameConfig.IS_DEMO:
+		BGMManager.stop()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
 	else:
 		debug_mode = false
 		game_state = "title"
-	title_start_time = Time.get_ticks_msec() / 1000.0
-	if back_to_stage_debug:
-		BGMManager.stop()  # BGMManager に移行
-	else:
+		title_start_time = Time.get_ticks_msec() / 1000.0
 		_apply_title_bgm_for_debug_mode()
 
 
@@ -3978,6 +4130,8 @@ func _process(delta: float) -> void:
 	if DEBUG_UI_STICK_NAV and game_state == "config":
 		_debug_ui_stick_nav_poll_config(delta)
 	_process_ui_menu_stick_navigation(delta)
+	input_handler.process_mouse_lerp(delta)
+	_update_player_hover()
 	if pause_active:
 		queue_redraw()
 		return

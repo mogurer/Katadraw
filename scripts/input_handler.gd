@@ -132,6 +132,8 @@ const PLAYER_FORCE_CHARGE_MOUSE_MOVE_PX_EPS := 2.0
 ## 静止中、A/X 長押しで影響半径を幾何級数的に拡張（移動中は成長停止し、既に拡がった分は維持）
 const EMPTY_FORCE_RADIUS_TICK_MS := 200
 const EMPTY_FORCE_RADIUS_TICK_CAP := 22
+## マウス追従 lerp 係数。ステージセレクトの _CHAR_LERP と同じ値。
+const PLAYER_MOUSE_LERP := 10.0
 ## 自キャラ〜頂点がこの距離以内かつガイド上のとき、引力・斥力でガイド吸着を無視（edge_dist が EDGE 以下＝ガイド上）
 const GUIDE_ATTRACT_FREE_PROXIMITY_PX := 64.0
 const GUIDE_ATTRACT_FREE_EDGE_DIST_PX := 10.0
@@ -203,6 +205,8 @@ var mouse_force_pressed: bool = false
 
 ## パッド移動の速度（マウス操作時は毎フレームゼロに戻す）
 var player_velocity: Vector2 = Vector2.ZERO
+## マウス入力の仮想ターゲット位置。player_position は毎フレーム lerp で追従する
+var _mouse_target: Vector2 = Vector2.ZERO
 ## 同一フレーム内の InputEventMouseMotion.relative ノルム累積（チャージ静止判定用）
 var _mouse_rel_motion_for_charge: float = 0.0
 ## 左スティック／十字の移動入力が続いている累積時間（ms）。ニュートラルでリセット
@@ -324,6 +328,7 @@ func reset_for_stage() -> void:
 
 func _reset_player_position() -> void:
 	player_position = _default_player_position()
+	_mouse_target = player_position
 	player_position_initialized = true
 
 
@@ -353,8 +358,10 @@ func handle_mouse_motion(mouse: Vector2, motion_relative: Vector2 = Vector2.ZERO
 		_handle_bb_motion(mouse)
 		return
 	_mouse_rel_motion_for_charge += motion_relative.length()
-	player_position = mouse
-	player_position_initialized = true
+	_mouse_target = mouse
+	if not player_position_initialized:
+		player_position = mouse
+		player_position_initialized = true
 	player_velocity = Vector2.ZERO
 	player_has_motion_input = false
 	_last_input_method = "mouse"
@@ -364,8 +371,10 @@ func handle_mouse_motion(mouse: Vector2, motion_relative: Vector2 = Vector2.ZERO
 
 func handle_mouse_press(mouse: Vector2, button: int = MOUSE_BUTTON_LEFT) -> void:
 	_last_input_method = "mouse"
-	player_position = mouse
-	player_position_initialized = true
+	_mouse_target = mouse
+	if not player_position_initialized:
+		player_position = mouse
+		player_position_initialized = true
 	player_velocity = Vector2.ZERO
 	if button == MOUSE_BUTTON_LEFT:
 		player_force_repelling = true
@@ -922,6 +931,19 @@ func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> boo
 		_log_pad_ray_lr("select_line -> idx=" + str(best))
 	_right_stick_ray_bundle = _finalize_shoulder_ray_bundle(origin, dir_n)
 	return true
+
+
+## マウス入力時の自キャラ lerp 追従。毎フレーム _process から呼ぶ。
+## 最後の入力がマウスの場合のみ player_position を _mouse_target へ近づける。
+func process_mouse_lerp(delta: float) -> void:
+	if _last_input_method != "mouse":
+		return
+	if not player_position_initialized:
+		return
+	player_position = player_position.lerp(_mouse_target, PLAYER_MOUSE_LERP * delta)
+	_clamp_player_to_viewport()
+	_refresh_hovered_point()
+	_game.queue_redraw()
 
 
 func process_pad(delta: float) -> void:

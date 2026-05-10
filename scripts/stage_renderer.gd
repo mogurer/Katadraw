@@ -148,6 +148,156 @@ func draw_hud_overlay_guide(alpha: float) -> void:
 	_draw_hud_polyline_world(sm.hud_guide_outline_world, col_g, width)
 
 
+# ---------- 近接ガイド表示（プレイ中） ----------
+
+const _REVEAL_RADIUS        := 150.0   # 近接表示半径（px）
+const _ON_GUIDE_DIST        := 12.0    # ガイド上判定距離（px）
+const _VERTEX_REVEAL_DIST   := 20.0    # 頂点上判定距離（px）
+const _REVEAL_SAMPLE_STEP   := 8.0     # サンプリング間隔（px）
+const _FULL_REVEAL_FADE_PX  := 50.0    # 完全表示セグメント端フェード距離（px）
+
+
+## プレイ中のガイド近接表示。draw_hud_overlay_guide の代替。
+## ガイド全体を非表示にした上で、自キャラ・ポイント周辺のみ浮かび上がらせる。
+func draw_guide_proximity_reveal() -> void:
+	if not GameConfig.USE_SCREEN_HUD_GUIDE:
+		return
+	var loop: Array = _game.stage_manager.hud_guide_outline_world
+	var n: int = loop.size()
+	if n < 2:
+		return
+
+	# プローブ: 自キャラ + 全ポイント
+	var probes: Array[Vector2] = []
+	if _game.input_handler.has_player_avatar():
+		probes.append(_game.input_handler.player_position)
+	for p: Vector2 in _game.point_positions:
+		probes.append(p)
+	if probes.is_empty():
+		return
+
+	var col: Color = _game.GUIDE_COLOR
+	var width: float = HUD_GUIDE_LINE_WIDTH_PX
+
+	# 完全表示セグメント判定（ポイントがガイド上 or 頂点上）
+	var fully_revealed: Array[bool] = []
+	fully_revealed.resize(n)
+	fully_revealed.fill(false)
+	for si in range(n):
+		var va: Vector2 = loop[si] as Vector2
+		var vb: Vector2 = loop[(si + 1) % n] as Vector2
+		for p: Vector2 in probes:
+			# 端点が頂点スナップ内: この辺を完全表示
+			# （端点は隣接辺と共有なので、両方の辺が自動的にカバーされる）
+			if p.distance_to(va) < _VERTEX_REVEAL_DIST or p.distance_to(vb) < _VERTEX_REVEAL_DIST:
+				fully_revealed[si] = true
+				break
+			if _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
+				fully_revealed[si] = true
+				break
+
+	# 両端頂点にゲームポイントがある場合: その辺を完全表示
+	var game_pts: Array = _game.point_positions
+	if game_pts.size() >= 2:
+		for si in range(n):
+			if fully_revealed[si]:
+				continue
+			var va: Vector2 = loop[si] as Vector2
+			var vb: Vector2 = loop[(si + 1) % n] as Vector2
+			var va_has_pt: bool = false
+			var vb_has_pt: bool = false
+			for gp: Vector2 in game_pts:
+				if gp.distance_to(va) < _REVEAL_RADIUS:
+					va_has_pt = true
+				if gp.distance_to(vb) < _REVEAL_RADIUS:
+					vb_has_pt = true
+				if va_has_pt and vb_has_pt:
+					break
+			if va_has_pt and vb_has_pt:
+				fully_revealed[si] = true
+
+	# セグメント描画
+	for si in range(n):
+		var va: Vector2 = loop[si] as Vector2
+		var vb: Vector2 = loop[(si + 1) % n] as Vector2
+		if fully_revealed[si]:
+			# 隣接辺が非表示のとき、その端でフェードアウト
+			# ただし端点にプローブが近接している場合はフェードしない（近接モード側が全不透明なので合わせる）
+			var fade_a: bool = not fully_revealed[(si - 1 + n) % n]
+			var fade_b: bool = not fully_revealed[(si + 1) % n]
+			if fade_a:
+				for p: Vector2 in probes:
+					if p.distance_to(va) < _REVEAL_RADIUS:
+						fade_a = false
+						break
+			if fade_b:
+				for p: Vector2 in probes:
+					if p.distance_to(vb) < _REVEAL_RADIUS:
+						fade_b = false
+						break
+			_draw_guide_seg_full(va, vb, col, width, fade_a, fade_b)
+		else:
+			_draw_guide_seg_proximity(va, vb, probes, col, width)
+
+
+func _draw_guide_seg_full(va: Vector2, vb: Vector2, col: Color, width: float,
+		fade_a: bool, fade_b: bool) -> void:
+	var seg_len: float = va.distance_to(vb)
+	if seg_len < 0.5:
+		return
+	var n_pts: int = maxi(2, int(seg_len / _REVEAL_SAMPLE_STEP) + 1)
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var ft: float = minf(_FULL_REVEAL_FADE_PX / seg_len, 0.4)
+	for i in range(n_pts):
+		var t: float = float(i) / float(n_pts - 1)
+		var alpha: float = col.a
+		if fade_a and t < ft:
+			alpha *= smoothstep(0.0, ft, t)
+		if fade_b and t > 1.0 - ft:
+			alpha *= smoothstep(0.0, ft, 1.0 - t)
+		pts.append(va.lerp(vb, t))
+		cols.append(Color(col.r, col.g, col.b, alpha))
+	_game.draw_polyline_colors(pts, cols, width, true)
+
+
+func _draw_guide_seg_proximity(va: Vector2, vb: Vector2,
+		probes: Array[Vector2], col: Color, width: float) -> void:
+	var seg_len: float = va.distance_to(vb)
+	if seg_len < 0.5:
+		return
+	var has_influence: bool = false
+	for p: Vector2 in probes:
+		if _dist_to_seg(p, va, vb) < _REVEAL_RADIUS:
+			has_influence = true
+			break
+	if not has_influence:
+		return
+
+	var n_pts: int = maxi(2, int(seg_len / _REVEAL_SAMPLE_STEP) + 1)
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	for i in range(n_pts):
+		var t: float = float(i) / float(n_pts - 1)
+		var pt: Vector2 = va.lerp(vb, t)
+		var in_range: bool = false
+		for p: Vector2 in probes:
+			if pt.distance_to(p) < _REVEAL_RADIUS:
+				in_range = true
+				break
+		pts.append(pt)
+		cols.append(Color(col.r, col.g, col.b, col.a if in_range else 0.0))
+	_game.draw_polyline_colors(pts, cols, width, true)
+
+
+func _dist_to_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab: Vector2 = b - a
+	var len_sq: float = ab.dot(ab)
+	if len_sq < 0.0001:
+		return p.distance_to(a)
+	return p.distance_to(a + ab * clampf((p - a).dot(ab) / len_sq, 0.0, 1.0))
+
+
 ## HUD 固定ガイド: 法線方向に外側へ薄くなるグラデーション → 最後に均一の芯線（図形間で色の差は出さない）
 func _draw_hud_polyline_world(verts: Array, color: Color, width: float) -> void:
 	if verts.size() < 2:

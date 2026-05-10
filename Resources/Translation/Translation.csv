@@ -107,6 +107,7 @@ CONFIG_DISPLAY_MODE,画面モード,Display mode,画面模式,畫面模式
 CONFIG_LANGUAGE,言語選択,Language,语言选择,語言選擇
 CONFIG_BGM_VOLUME,BGM音量,BGM Volume,BGM音量,BGM音量
 CONFIG_SE_VOLUME,SE音量,SE Volume,SE音量,SE音量
+CONFIG_PRACTICE,練習,Practice,练习,練習
 CONFIG_BACK,タイトルに戻る,Back to Title,返回标题,返回標題
 CONFIG_FULLSCREEN,フルスクリーン,Fullscreen,全屏,全螢幕
 CONFIG_WINDOW_1280_720,ウィンドウ（1280×720）,Window (1280×720),窗口（1280×720）,視窗（1280×720）
