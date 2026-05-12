@@ -179,28 +179,36 @@ func draw_guide_proximity_reveal() -> void:
 	var col: Color = _game.GUIDE_COLOR
 	var width: float = HUD_GUIDE_LINE_WIDTH_PX
 
-	# 完全表示セグメント判定（ポイントがガイド上 or 頂点上）
-	var fully_revealed: Array[bool] = []
-	fully_revealed.resize(n)
-	fully_revealed.fill(false)
+	# 各辺の端点ごとの開示フラグ
+	# reveal_from_a[si]: loop[si]（va）側の半辺を開示
+	# reveal_from_b[si]: loop[(si+1)%n]（vb）側の半辺を開示
+	# 両方 true → 辺全体を開示
+	var reveal_from_a: Array[bool] = []
+	var reveal_from_b: Array[bool] = []
+	reveal_from_a.resize(n)
+	reveal_from_b.resize(n)
+	reveal_from_a.fill(false)
+	reveal_from_b.fill(false)
 	for si in range(n):
 		var va: Vector2 = loop[si] as Vector2
 		var vb: Vector2 = loop[(si + 1) % n] as Vector2
 		for p: Vector2 in probes:
-			# 端点が頂点スナップ内: この辺を完全表示
-			# （端点は隣接辺と共有なので、両方の辺が自動的にカバーされる）
-			if p.distance_to(va) < _VERTEX_REVEAL_DIST or p.distance_to(vb) < _VERTEX_REVEAL_DIST:
-				fully_revealed[si] = true
-				break
-			if _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
-				fully_revealed[si] = true
-				break
+			# 頂点スナップ: その頂点側の半辺のみ開示
+			if p.distance_to(va) < _VERTEX_REVEAL_DIST:
+				reveal_from_a[si] = true
+			elif p.distance_to(vb) < _VERTEX_REVEAL_DIST:
+				reveal_from_b[si] = true
+			else:
+				# 辺の中間付近（頂点スナップなし）→ 辺全体を開示
+				if _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
+					reveal_from_a[si] = true
+					reveal_from_b[si] = true
 
 	# 両端頂点にゲームポイントがある場合: その辺を完全表示
 	var game_pts: Array = _game.point_positions
 	if game_pts.size() >= 2:
 		for si in range(n):
-			if fully_revealed[si]:
+			if reveal_from_a[si] and reveal_from_b[si]:
 				continue
 			var va: Vector2 = loop[si] as Vector2
 			var vb: Vector2 = loop[(si + 1) % n] as Vector2
@@ -214,17 +222,19 @@ func draw_guide_proximity_reveal() -> void:
 				if va_has_pt and vb_has_pt:
 					break
 			if va_has_pt and vb_has_pt:
-				fully_revealed[si] = true
+				reveal_from_a[si] = true
+				reveal_from_b[si] = true
 
 	# セグメント描画
 	for si in range(n):
 		var va: Vector2 = loop[si] as Vector2
 		var vb: Vector2 = loop[(si + 1) % n] as Vector2
-		if fully_revealed[si]:
-			# 隣接辺が非表示のとき、その端でフェードアウト
-			# ただし端点にプローブが近接している場合はフェードしない（近接モード側が全不透明なので合わせる）
-			var fade_a: bool = not fully_revealed[(si - 1 + n) % n]
-			var fade_b: bool = not fully_revealed[(si + 1) % n]
+		var from_a: bool = reveal_from_a[si]
+		var from_b: bool = reveal_from_b[si]
+		if from_a and from_b:
+			# 辺全体を表示。隣接辺の vb/va 側が未開示のときのみ端をフェード
+			var fade_a: bool = not reveal_from_b[(si - 1 + n) % n]
+			var fade_b: bool = not reveal_from_a[(si + 1) % n]
 			if fade_a:
 				for p: Vector2 in probes:
 					if p.distance_to(va) < _REVEAL_RADIUS:
@@ -236,27 +246,48 @@ func draw_guide_proximity_reveal() -> void:
 						fade_b = false
 						break
 			_draw_guide_seg_full(va, vb, col, width, fade_a, fade_b)
+		elif from_a:
+			# va 側の半辺のみ（va→中点）。中点側は常にフェード
+			var fade_at_va: bool = not reveal_from_b[(si - 1 + n) % n]
+			if fade_at_va:
+				for p: Vector2 in probes:
+					if p.distance_to(va) < _REVEAL_RADIUS:
+						fade_at_va = false
+						break
+			_draw_guide_seg_full(va, vb, col, width, fade_at_va, true, 0.0, 0.5)
+		elif from_b:
+			# vb 側の半辺のみ（中点→vb）。中点側は常にフェード
+			var fade_at_vb: bool = not reveal_from_a[(si + 1) % n]
+			if fade_at_vb:
+				for p: Vector2 in probes:
+					if p.distance_to(vb) < _REVEAL_RADIUS:
+						fade_at_vb = false
+						break
+			_draw_guide_seg_full(va, vb, col, width, true, fade_at_vb, 0.5, 1.0)
 		else:
 			_draw_guide_seg_proximity(va, vb, probes, col, width)
 
 
 func _draw_guide_seg_full(va: Vector2, vb: Vector2, col: Color, width: float,
-		fade_a: bool, fade_b: bool) -> void:
-	var seg_len: float = va.distance_to(vb)
-	if seg_len < 0.5:
+		fade_a: bool, fade_b: bool, t_start: float = 0.0, t_end: float = 1.0) -> void:
+	var full_len: float = va.distance_to(vb)
+	if full_len < 0.5:
 		return
-	var n_pts: int = maxi(2, int(seg_len / _REVEAL_SAMPLE_STEP) + 1)
+	var draw_len: float = full_len * (t_end - t_start)
+	if draw_len < 0.5:
+		return
+	var n_pts: int = maxi(2, int(draw_len / _REVEAL_SAMPLE_STEP) + 1)
 	var pts := PackedVector2Array()
 	var cols := PackedColorArray()
-	var ft: float = minf(_FULL_REVEAL_FADE_PX / seg_len, 0.4)
+	var ft: float = minf(_FULL_REVEAL_FADE_PX / draw_len, 0.4)
 	for i in range(n_pts):
-		var t: float = float(i) / float(n_pts - 1)
+		var local_t: float = float(i) / float(n_pts - 1)
 		var alpha: float = col.a
-		if fade_a and t < ft:
-			alpha *= smoothstep(0.0, ft, t)
-		if fade_b and t > 1.0 - ft:
-			alpha *= smoothstep(0.0, ft, 1.0 - t)
-		pts.append(va.lerp(vb, t))
+		if fade_a and local_t < ft:
+			alpha *= smoothstep(0.0, ft, local_t)
+		if fade_b and local_t > 1.0 - ft:
+			alpha *= smoothstep(0.0, ft, 1.0 - local_t)
+		pts.append(va.lerp(vb, t_start + local_t * (t_end - t_start)))
 		cols.append(Color(col.r, col.g, col.b, alpha))
 	_game.draw_polyline_colors(pts, cols, width, true)
 
