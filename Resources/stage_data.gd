@@ -11,6 +11,9 @@ class_name StageData
 const BUILTIN_STAGEDATA_DIR := "res://Resources/Stagedata/builtin/"
 const BUILTIN_MANIFEST_PATH := BUILTIN_STAGEDATA_DIR + "manifest.json"
 
+static var _stages_cache: Array = []
+static var _stages_cache_ready: bool = false
+
 
 static func _load_json_object_from_path(path: String) -> Dictionary:
 	if not FileAccess.file_exists(path):
@@ -32,6 +35,8 @@ static func _load_json_object_from_path(path: String) -> Dictionary:
 
 
 static func get_stages() -> Array:
+	if _stages_cache_ready:
+		return _stages_cache
 	var mf: Dictionary = _load_json_object_from_path(BUILTIN_MANIFEST_PATH)
 	if mf.is_empty():
 		return []
@@ -68,4 +73,6 @@ static func get_stages() -> Array:
 		cfg["stage_index"] = stage_index
 		stage_index += 1
 		result.append(cfg)
-	return result
+	_stages_cache = result
+	_stages_cache_ready = true
+	return _stages_cache

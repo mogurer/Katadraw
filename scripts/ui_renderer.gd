@@ -837,18 +837,16 @@ func _draw_stage_debug(vp: Vector2) -> void:
 			continue
 		var cfg: Dictionary = {}
 		var tname: String = "?"
-		var raw_custom: Dictionary = {}
+		var derived_custom: Dictionary = {}
 		var label_max_w: float = list_w - icon_r * 2.0 - 20.0
 		if i < master_n:
 			cfg = StageDebugOverrides.build_config_for_index(i, _game.stage_debug_state.pending.get(i, {}))
 			tname = str(cfg.get("type", "?"))
 		else:
-			raw_custom = _game._stage_debug_custom_raw_merged(_game._stage_debug_custom_path_at(i))
+			derived_custom = _game.stage_debug_state.custom_derived(_game._stage_debug_custom_path_at(i))
 			label_max_w = list_w - prev_sz - 22.0
-			if not raw_custom.is_empty():
-				var cfg_part: Dictionary = raw_custom["config"] as Dictionary
-				tname = str(cfg_part.get("shape_type", cfg_part.get("type", "?")))
-				cfg = CustomStageFile.effective_config_with_shape(raw_custom)
+			cfg = derived_custom["cfg"] as Dictionary
+			tname = derived_custom["tname"] as String
 		var sel: bool = i == _game.stage_debug_state.selected
 		var row_rect := Rect2(list_left, y, list_w, _game.STAGE_DEBUG_ROW_H - 4.0)
 		if sel:
@@ -859,18 +857,14 @@ func _draw_stage_debug(vp: Vector2) -> void:
 		var icx: float = list_left + list_w - icon_r - 12.0
 		var icy: float = y + _game.STAGE_DEBUG_ROW_H * 0.5 - 2.0
 		var drew_preview: bool = false
-		if i >= master_n and not raw_custom.is_empty():
-			var sh_pv: Variant = raw_custom.get("shape", {})
-			if typeof(sh_pv) == TYPE_DICTIONARY:
-				var se: Dictionary = StageEditPolygonTools.shape_polygon_vertices_and_edges(sh_pv as Dictionary)
-				if se.get("ok", false):
-					var pr: Rect2 = Rect2(icx - prev_sz * 0.5, icy - prev_sz * 0.5, prev_sz, prev_sz)
-					_game.draw_rect(pr, Color(1.0, 1.0, 1.0, 0.92))
-					_game.draw_rect(pr, Color(0.82, 0.8, 0.84), false, 1.0)
-					var verts_pv: Array[Vector2] = se["verts"] as Array[Vector2]
-					var edges_pv: Array[Dictionary] = se["edges"] as Array[Dictionary]
-					_draw_stage_custom_shape_preview(verts_pv, edges_pv, pr, accent if sel else text_c)
-					drew_preview = true
+		if i >= master_n and derived_custom.get("shape_ok", false):
+			var pr: Rect2 = Rect2(icx - prev_sz * 0.5, icy - prev_sz * 0.5, prev_sz, prev_sz)
+			_game.draw_rect(pr, Color(1.0, 1.0, 1.0, 0.92))
+			_game.draw_rect(pr, Color(0.82, 0.8, 0.84), false, 1.0)
+			var verts_pv: Array[Vector2] = derived_custom["verts"] as Array[Vector2]
+			var edges_pv: Array[Dictionary] = derived_custom["edges"] as Array[Dictionary]
+			_draw_stage_custom_shape_preview(verts_pv, edges_pv, pr, accent if sel else text_c)
+			drew_preview = true
 		if not drew_preview:
 			_draw_stage_debug_type_icon(Vector2(icx, icy), icon_r, tname, accent if sel else text_c)
 	# 左リスト右端（分割線寄り）のスクロールバー

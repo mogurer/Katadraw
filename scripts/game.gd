@@ -4012,6 +4012,7 @@ func _stage_debug_write_selected_row_to_disk(show_success_message: bool = true) 
 			stage_debug_state.last_error = err
 		else:
 			stage_debug_state.custom_pending.erase(path)
+			stage_debug_state.invalidate_path_cache(path)
 			if show_success_message:
 				stage_debug_state.last_error = "保存しました: %s" % path
 			else:

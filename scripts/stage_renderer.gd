@@ -192,7 +192,8 @@ func draw_guide_proximity_reveal() -> void:
 	for si in range(n):
 		var va: Vector2 = loop[si] as Vector2
 		var vb: Vector2 = loop[(si + 1) % n] as Vector2
-		for p: Vector2 in probes:
+		# 半辺開示はゲームポイントのみ判定（自キャラは近接描画で別処理）
+		for p: Vector2 in _game.point_positions:
 			# 頂点スナップ: その頂点側の半辺のみ開示
 			if p.distance_to(va) < _VERTEX_REVEAL_DIST:
 				reveal_from_a[si] = true
@@ -203,27 +204,6 @@ func draw_guide_proximity_reveal() -> void:
 				if _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
 					reveal_from_a[si] = true
 					reveal_from_b[si] = true
-
-	# 両端頂点にゲームポイントがある場合: その辺を完全表示
-	var game_pts: Array = _game.point_positions
-	if game_pts.size() >= 2:
-		for si in range(n):
-			if reveal_from_a[si] and reveal_from_b[si]:
-				continue
-			var va: Vector2 = loop[si] as Vector2
-			var vb: Vector2 = loop[(si + 1) % n] as Vector2
-			var va_has_pt: bool = false
-			var vb_has_pt: bool = false
-			for gp: Vector2 in game_pts:
-				if gp.distance_to(va) < _REVEAL_RADIUS:
-					va_has_pt = true
-				if gp.distance_to(vb) < _REVEAL_RADIUS:
-					vb_has_pt = true
-				if va_has_pt and vb_has_pt:
-					break
-			if va_has_pt and vb_has_pt:
-				reveal_from_a[si] = true
-				reveal_from_b[si] = true
 
 	# セグメント描画
 	for si in range(n):

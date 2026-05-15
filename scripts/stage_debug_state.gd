@@ -15,6 +15,11 @@ var field_focus_idx: int = -1
 var edit_buffer: String = ""
 var last_error: String = ""
 
+# Draw-time caches — eliminates per-frame file I/O.
+var _raw_file_cache: Dictionary = {}   # path → raw dict from parse_file
+var _merged_cache: Dictionary = {}     # path → raw dict with custom_pending applied
+var _derived_cache: Dictionary = {}    # path → {cfg, tname, shape_ok, verts, edges}
+
 
 func reset_for_screen(debug_tools_enabled: bool, field_keys: Array[String]) -> void:
 	refresh_custom_paths(debug_tools_enabled)
@@ -33,8 +38,10 @@ func reset_for_screen(debug_tools_enabled: bool, field_keys: Array[String]) -> v
 func refresh_custom_paths(debug_tools_enabled: bool) -> void:
 	if not debug_tools_enabled:
 		custom_paths.clear()
+		_invalidate_all_caches()
 		return
 	custom_paths = CustomStageFile.list_custom_stage_paths()
+	_invalidate_all_caches()
 
 
 func master_count() -> int:
@@ -65,32 +72,75 @@ func clamp_selection() -> void:
 
 
 func custom_raw_merged(path: String) -> Dictionary:
-	var pr: Dictionary = CustomStageFile.parse_file(path)
-	if not pr.get("ok", false):
-		return {}
-	var raw: Dictionary = (pr["raw"] as Dictionary).duplicate(true)
-	var pend: Dictionary = custom_pending.get(path, {})
-	if pend.is_empty():
-		return raw
-	var cfg_partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
-	var meta_partial: Dictionary = {}
-	if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
-		meta_partial = (raw["meta"] as Dictionary).duplicate(true)
-	for k in pend:
-		if k == "stage_name" or k == "description":
-			var vs: String = str(pend[k]).strip_edges()
-			if vs == "":
-				meta_partial.erase(k)
-			else:
-				meta_partial[k] = vs
+	if _merged_cache.has(path):
+		return _merged_cache[path]
+	if not _raw_file_cache.has(path):
+		var pr: Dictionary = CustomStageFile.parse_file(path)
+		if not pr.get("ok", false):
+			_raw_file_cache[path] = {}
 		else:
-			cfg_partial[k] = pend[k]
-	raw["config"] = cfg_partial
-	if not meta_partial.is_empty():
-		raw["meta"] = meta_partial
-	elif raw.has("meta"):
-		raw.erase("meta")
+			_raw_file_cache[path] = (pr["raw"] as Dictionary).duplicate(true)
+	var base: Dictionary = _raw_file_cache[path]
+	if base.is_empty():
+		return {}
+	var raw: Dictionary = base.duplicate(true)
+	var pend: Dictionary = custom_pending.get(path, {})
+	if not pend.is_empty():
+		var cfg_partial: Dictionary = (raw["config"] as Dictionary).duplicate(true)
+		var meta_partial: Dictionary = {}
+		if raw.has("meta") and typeof(raw["meta"]) == TYPE_DICTIONARY:
+			meta_partial = (raw["meta"] as Dictionary).duplicate(true)
+		for k in pend:
+			if k == "stage_name" or k == "description":
+				var vs: String = str(pend[k]).strip_edges()
+				if vs == "":
+					meta_partial.erase(k)
+				else:
+					meta_partial[k] = vs
+			else:
+				cfg_partial[k] = pend[k]
+		raw["config"] = cfg_partial
+		if not meta_partial.is_empty():
+			raw["meta"] = meta_partial
+		elif raw.has("meta"):
+			raw.erase("meta")
+	_merged_cache[path] = raw
 	return raw
+
+
+## Cached derived data: cfg, tname, shape preview geometry. One file-parse per path per session.
+func custom_derived(path: String) -> Dictionary:
+	if _derived_cache.has(path):
+		return _derived_cache[path]
+	var result: Dictionary = {"cfg": {}, "tname": "?", "shape_ok": false, "verts": [], "edges": []}
+	var raw: Dictionary = custom_raw_merged(path)
+	if raw.is_empty():
+		_derived_cache[path] = result
+		return result
+	var cfg_part: Dictionary = raw["config"] as Dictionary
+	result["tname"] = str(cfg_part.get("shape_type", cfg_part.get("type", "?")))
+	result["cfg"] = CustomStageFile.effective_config_with_shape(raw)
+	var sh_pv: Variant = raw.get("shape", {})
+	if typeof(sh_pv) == TYPE_DICTIONARY:
+		var se: Dictionary = StageEditPolygonTools.shape_polygon_vertices_and_edges(sh_pv as Dictionary)
+		if se.get("ok", false):
+			result["shape_ok"] = true
+			result["verts"] = se["verts"]
+			result["edges"] = se["edges"]
+	_derived_cache[path] = result
+	return result
+
+
+func invalidate_path_cache(path: String) -> void:
+	_raw_file_cache.erase(path)
+	_merged_cache.erase(path)
+	_derived_cache.erase(path)
+
+
+func _invalidate_all_caches() -> void:
+	_raw_file_cache.clear()
+	_merged_cache.clear()
+	_derived_cache.clear()
 
 
 func config_value_str_for_buffer(key: String, v: Variant) -> String:
@@ -225,6 +275,7 @@ func apply_field_string_to_pending(key: String, text: String) -> String:
 			custom_pending.erase(path)
 		else:
 			custom_pending[path] = p
+		invalidate_path_cache(path)
 		return ""
 
 	var idx: int = row
