@@ -1,0 +1,48 @@
+﻿{
+	"config": {
+		"clear_pct": 98.3,
+		"display_rate_min_pct": 80.0,
+		"guide_follows_player_radius": 0.0,
+		"max_radius": 400.0,
+		"min_radius": 200.0,
+		"num_points": 7.0,
+		"shape_type": "fish",
+		"type": "hexagon",
+		"variance": 0.15
+	},
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "ひばち",
+		"stage_name": "六角形",
+		"locale_key": "STAGE_HEXAGON"
+	},
+	"schema_version": 1.0,
+	"shape": {
+		"polygon_vertices": [
+			[
+				-0.81300812959671,
+				0.0
+			],
+			[
+				-0.406504064798355,
+				-0.696864128112793
+			],
+			[
+				0.406504064798355,
+				-0.696864128112793
+			],
+			[
+				0.81300812959671,
+				0.0
+			],
+			[
+				0.406504064798355,
+				0.696864128112793
+			],
+			[
+				-0.406504064798355,
+				0.696864128112793
+			]
+		]
+	}
+}

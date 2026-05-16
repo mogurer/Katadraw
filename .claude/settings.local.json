@@ -9,7 +9,11 @@
       "PowerShell(winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements)",
       "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Katadraw\\\\scripts\\\\\" -Filter \"*.gd\" | Select-Object Name)",
       "Bash(grep -n \"handle_mouse_motion\\\\|handle_mouse_press\\\\|input_handler\\\\\\\\.player\" \"e:\\\\GitHub\\\\Katadraw\\\\scripts\\\\game.gd\")",
-      "Bash(git grep *)"
+      "Bash(git grep *)",
+      "Bash(Sort-Object)",
+      "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Katadraw\\\\scripts\" -Recurse -Filter \"*.gd\")",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

@@ -1,10 +1,10 @@
-{
+﻿{
 	"schema_version": 1,
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
 		"stage_name": "星",
-		"locale_key": "STAGE_STAR"
+		"locale_key": "STAGE_STAR_10"
 	},
 	"config": {
 		"type": "star_10",

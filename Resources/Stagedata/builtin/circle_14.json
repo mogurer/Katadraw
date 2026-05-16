@@ -1,10 +1,10 @@
-{
+﻿{
 	"schema_version": 1,
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
 		"stage_name": "円",
-		"locale_key": "STAGE_CIRCLE"
+		"locale_key": "STAGE_CIRCLE_14"
 	},
 	"config": {
 		"type": "circle_14",

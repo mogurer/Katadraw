@@ -44,7 +44,7 @@ static func get_max_stage_index() -> int:
 		return -1
 	if EXPERIENCE_VERSION:
 		return mini(2, rows.size() - 1)
-	return rows.size() - 1
+	return mini(50, rows.size() - 1)
 
 
 static func get_stage_count() -> int:

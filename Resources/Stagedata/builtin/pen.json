@@ -1,0 +1,44 @@
+﻿{
+	"config": {
+		"clear_pct": 99.0,
+		"display_rate_min_pct": 80.0,
+		"guide_follows_player_radius": 0.0,
+		"max_radius": 450.0,
+		"min_radius": 400.0,
+		"num_points": 6.0,
+		"shape_type": "fish",
+		"type": "pen",
+		"variance": 0.15
+	},
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "ひばち",
+		"stage_name": "ペン",
+		"locale_key": "STAGE_PEN"
+	},
+	"schema_version": 1.0,
+	"shape": {
+		"polygon_vertices": [
+			[
+				-0.871080160140991,
+				0.580720067024231
+			],
+			[
+				0.290360033512115,
+				-0.871080160140991
+			],
+			[
+				0.580720067024231,
+				-0.580720067024231
+			],
+			[
+				-0.580720067024231,
+				0.871080160140991
+			],
+			[
+				-0.987224161624908,
+				0.987224161624908
+			]
+		]
+	}
+}

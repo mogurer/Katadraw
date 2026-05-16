@@ -1,10 +1,10 @@
-{
+﻿{
 	"schema_version": 1,
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
 		"stage_name": "ねこの顔",
-		"locale_key": "STAGE_CAT_FACE"
+		"locale_key": "STAGE_CAT_FACE_18"
 	},
 	"config": {
 		"type": "cat_face_18",

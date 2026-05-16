@@ -435,6 +435,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_stage_debug(vp)
 		"stage_edit":
 			_draw_stage_edit(vp)
+		"play_balance_debug":
+			_draw_play_balance_debug(vp)
 
 	# 画面遷移フェードオーバーレイ
 	if _transition_alpha < 1.0:
@@ -444,8 +446,13 @@ func draw(state: String, vp: Vector2) -> void:
 	if _game.stage_session.debug_test_mode and state == "playing":
 		_draw_debug_log_button(vp)
 
-	if not _game.pause_active:
-		_draw_player_avatar()
+	if not _game.pause_active and state != "logo" and state != "title_intro":
+		var _show_avatar: bool = true
+		if state == "title":
+			var _t: float = Time.get_ticks_msec() / 1000.0 - _game.title_start_time
+			_show_avatar = (_t - GameConfig.TITLE_FADE_IN - 0.3) > 0.0
+		if _show_avatar:
+			_draw_player_avatar()
 
 
 func draw_pause_overlay(vp: Vector2) -> void:
@@ -798,6 +805,79 @@ func _draw_stage_debug_text_action_button(r: Rect2, label: String, text_c: Color
 	var tx: float = clampf(r.position.x + (r.size.x - sz.x) * 0.5, r.position.x + 2.0, r.position.x + maxf(2.0, r.size.x - sz.x - 2.0))
 	var ty: float = r.position.y + (r.size.y + sz.y) * 0.5 - 1.0
 	_game.draw_string(_game.font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs_btn, text_c)
+
+
+func _draw_play_balance_debug(vp: Vector2) -> void:
+	_draw_bg(vp)
+	var accent: Color = Color(0.95, 0.19, 0.32)
+	var text_c: Color = Color(0.26, 0.21, 0.28)
+	var muted_c: Color = Color(0.55, 0.50, 0.58)
+	var panel: Rect2 = _game._pbd_panel_rect(vp)
+	_game.draw_rect(panel, Color(1.0, 1.0, 1.0, 0.97))
+	_game.draw_rect(panel, Color(0.85, 0.82, 0.86), false, 1.5)
+	# ヘッダー
+	_game.draw_string(_game.font_bold, Vector2(panel.position.x + 16.0, panel.position.y + 38.0),
+		"バランス調整: " + _game._pbd_stage_label(),
+		HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 32.0, 24, accent)
+	_game.draw_line(
+		Vector2(panel.position.x + 12.0, panel.position.y + _game.PBD_HEADER_H - 4.0),
+		Vector2(panel.position.x + panel.size.x - 12.0, panel.position.y + _game.PBD_HEADER_H - 4.0),
+		Color(0.90, 0.88, 0.92), 1.0)
+	# フィールド行
+	var fi: int = _game.stage_debug_state.field_focus_idx
+	for i in range(_game.PBD_FIELD_KEYS.size()):
+		var fk: String = _game.PBD_FIELD_KEYS[i]
+		var lbl: String = _game.PBD_FIELD_LABELS[i]
+		var val_rect: Rect2 = _game._pbd_field_value_rect(i, panel)
+		var row_y_center: float = panel.position.y + _game.PBD_HEADER_H + i * _game.PBD_ROW_H + _game.PBD_ROW_H * 0.5
+		# 区切り線
+		if i > 0:
+			_game.draw_line(
+				Vector2(panel.position.x + 12.0, panel.position.y + _game.PBD_HEADER_H + i * _game.PBD_ROW_H),
+				Vector2(panel.position.x + panel.size.x - 12.0, panel.position.y + _game.PBD_HEADER_H + i * _game.PBD_ROW_H),
+				Color(0.93, 0.91, 0.95), 1.0)
+		# ラベル
+		_game.draw_string(_game.font, Vector2(panel.position.x + 16.0, row_y_center + 7.0),
+			lbl, HORIZONTAL_ALIGNMENT_LEFT, 196.0, 15, text_c)
+		# 値フィールド
+		var focused: bool = i == fi
+		var field_bg: Color = Color(0.95, 0.90, 0.97) if focused else Color(0.97, 0.96, 0.98)
+		var field_border: Color = accent if focused else Color(0.80, 0.77, 0.84)
+		_game.draw_rect(val_rect, field_bg)
+		_game.draw_rect(val_rect, field_border, false, 1.5 if focused else 1.0)
+		var display_text: String
+		if focused:
+			display_text = _game.stage_debug_state.edit_buffer + "|"
+		else:
+			display_text = _game.stage_debug_state.field_buffers.get(fk, "")
+			# pending があれば強調
+			var pending_dict: Dictionary = _game.stage_debug_state.pending.get(_game.current_stage, {}) as Dictionary
+			if pending_dict.has(fk):
+				field_border = Color(0.95, 0.60, 0.20)
+				_game.draw_rect(val_rect, field_border, false, 1.5)
+		_game.draw_string(_game.font, Vector2(val_rect.position.x + 8.0, val_rect.position.y + 24.0),
+			display_text, HORIZONTAL_ALIGNMENT_LEFT, val_rect.size.x - 16.0, 16, text_c)
+	# エラー / ステータス行
+	if _game.stage_debug_state.last_error != "":
+		var err_y: float = panel.position.y + _game.PBD_HEADER_H + _game.PBD_FIELD_KEYS.size() * _game.PBD_ROW_H + 8.0
+		var err_c: Color = Color(0.20, 0.60, 0.30) if _game.stage_debug_state.last_error.begins_with("保存しました") else Color(0.90, 0.25, 0.18)
+		_game.draw_string(_game.font, Vector2(panel.position.x + 16.0, err_y + 18.0),
+			_game.stage_debug_state.last_error, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 32.0, 14, err_c)
+	# ボタン行
+	var btn_rects: Array[Rect2] = _game._pbd_btn_rects(panel)
+	for bi in range(btn_rects.size()):
+		var br: Rect2 = btn_rects[bi]
+		var is_save_btn: bool = bi == 1
+		var has_pending: bool = not (_game.stage_debug_state.pending.get(_game.current_stage, {}) as Dictionary).is_empty()
+		var btn_accent: Color = accent if (is_save_btn and has_pending) else Color(0.45, 0.38, 0.52)
+		_game.draw_rect(br, Color(btn_accent.r, btn_accent.g, btn_accent.b, 0.15))
+		_game.draw_rect(br, btn_accent, false, 1.5)
+		_game.draw_string(_game.font, Vector2(br.position.x + br.size.x * 0.5, br.position.y + 22.0),
+			_game.PBD_BTN_LABELS[bi], HORIZONTAL_ALIGNMENT_CENTER, br.size.x, 14, btn_accent)
+	# 操作ガイド
+	_game.draw_string(_game.font, Vector2(panel.position.x, panel.position.y + panel.size.y + 20.0),
+		"クリックでフィールド選択  |  Tab: 次フィールド  |  ESC: ステージセレクトへ",
+		HORIZONTAL_ALIGNMENT_CENTER, panel.size.x, 13, muted_c)
 
 
 func _draw_stage_debug(vp: Vector2) -> void:

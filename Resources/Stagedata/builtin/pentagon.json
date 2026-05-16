@@ -1,0 +1,44 @@
+﻿{
+	"config": {
+		"clear_pct": 99.0,
+		"display_rate_min_pct": 80.0,
+		"guide_follows_player_radius": 0.0,
+		"max_radius": 400.0,
+		"min_radius": 200.0,
+		"num_points": 6.0,
+		"shape_type": "fish",
+		"type": "pentagon",
+		"variance": 0.15
+	},
+	"kind": "katadraw_custom_stage",
+	"meta": {
+		"description": "ひばち",
+		"stage_name": "五角形",
+		"locale_key": "STAGE_PENTAGON"
+	},
+	"schema_version": 1.0,
+	"shape": {
+		"polygon_vertices": [
+			[
+				-0.754936099052429,
+				-0.348432064056396
+			],
+			[
+				0.0,
+				-0.871080160140991
+			],
+			[
+				0.754936099052429,
+				-0.348432064056396
+			],
+			[
+				0.464576065540314,
+				0.580720067024231
+			],
+			[
+				-0.464576065540314,
+				0.580720067024231
+			]
+		]
+	}
+}

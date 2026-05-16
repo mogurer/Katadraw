@@ -71,6 +71,7 @@ static func get_stages() -> Array:
 			if not lk.is_empty():
 				cfg["locale_key"] = lk
 		cfg["stage_index"] = stage_index
+		cfg["_source_file"] = fn
 		stage_index += 1
 		result.append(cfg)
 	_stages_cache = result

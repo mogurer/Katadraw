@@ -1,6 +1,6 @@
 keys,ja,en,zh_CN,zh_TW
 TITLE_NAME,KATA-DRAW,KATA-DRAW,KATA-DRAW,KATA-DRAW
-TITLE_START,クリックまたはキーでスタート,Click or press any key to start,点击或按任意键开始,點擊或按任意鍵開始
+TITLE_START,ボタンを押すとスタート,Press a button to start,按下按钮开始,按下按鈕開始
 TITLE_COPYRIGHT,©2026 meseed-software,©2026 meseed-software,©2026 meseed-software,©2026 meseed-software
 RULES_MAIN,点を操作して、お手本に重ねましょう,Move the points to overlap the template,移动点，与示范图形重叠,移動點，與示範圖形重疊
 RULES_START,Start!,Start!,Start!,Start!
@@ -135,7 +135,7 @@ MENU_QUIT,ゲームを終了する,Quit Game,退出游戏,退出遊戲
 MENU_QUIT_CONFIRM,ゲームを終了していいですか？,Quit the game?,确定要退出游戏吗？,確定要退出遊戲嗎？
 STAGE_TRIANGLE,正三角形,Equilateral Triangle,等边三角形,等邊三角形
 STAGE_SQUARE,正方形,Square,正方形,正方形
-STAGE_HEXAGON,正六角形,Regular Hexagon,正六边形,正六邊形
+STAGE_HEXAGON,六角形,Hexagon,六边形,六邊形
 STAGE_CIRCLE,正円,Circle,正圆,正圓
 STAGE_STAR,星,Star,星形,星形
 STAGE_CAT_FACE,ねこの顔,Cat Face,猫脸,貓臉
@@ -143,3 +143,60 @@ STAGE_RUGBY_BALL,ラグビーボール,Rugby Ball,橄榄球,欖球
 STAGE_HOME,家,House,房子,房子
 STAGE_OCARINA,オカリナ,Ocarina,陶笛,陶笛
 STAGE_MUG,マグカップ,Mug,马克杯,馬克杯
+STAGE_TUTORIAL_TRIANGLE,三角形,Triangle,三角形,三角形
+STAGE_TEST_SQUARE,正方形,Square,正方形,正方形
+STAGE_HEXAGON_6,正六角形,Regular Hexagon,正六边形,正六邊形
+STAGE_CIRCLE_14,円,Circle,正圆,正圓
+STAGE_STAR_10,星,Star,星形,星形
+STAGE_CAT_FACE_18,ねこの顔,Cat Face,猫脸,貓臉
+STAGE_ACOUSTIC_GUITAR,アコースティックギター,Acoustic Guitar,原声吉他,木吉他
+STAGE_AIRSHIP,飛行船,Airship,飞艇,飛船
+STAGE_ARROW,矢,Arrow,箭头,箭頭
+STAGE_BANANA,バナナ,Banana,香蕉,香蕉
+STAGE_BED,ベッド,Bed,床,床
+STAGE_BOOK,本,Book,书,書
+STAGE_BOTTLE_S,ビン,Bottle,瓶子,瓶子
+STAGE_BUTTERFLY,蝶,Butterfly,蝴蝶,蝴蝶
+STAGE_CACTUS,サボテン,Cactus,仙人掌,仙人掌
+STAGE_CAP,キャップ,Cap,帽子,帽子
+STAGE_CICADA,蝉,Cicada,蝉,蟬
+STAGE_COWS_FACE,ウシの顔,Cow Face,牛脸,牛臉
+STAGE_CROSS,十字,Cross,十字,十字
+STAGE_CUPCAKE,カップケーキ,Cupcake,纸杯蛋糕,紙杯蛋糕
+STAGE_DENT,凹み,Dent,凹陷,凹陷
+STAGE_FOLDING_FAN,扇子,Folding Fan,折扇,折扇
+STAGE_FROG,カエル,Frog,青蛙,青蛙
+STAGE_GHOST,おばけ,Ghost,幽灵,幽靈
+STAGE_GIFT_BOX,ギフトボックス,Gift Box,礼品盒,禮品盒
+STAGE_HEART,ハート,Heart,爱心,愛心
+STAGE_HEPTAGRAMSIL_J,七芒星シルエット,Heptagram Silhouette,七芒星剪影,七芒星剪影
+STAGE_HOURGLASS,すなどけい,Hourglass,沙漏,沙漏
+STAGE_KEITORA,軽トラ,Kei Truck,小型货车,小型貨車
+STAGE_KEY,鍵,Key,钥匙,鑰匙
+STAGE_KING,王,King,国王,國王
+STAGE_MILK_CARTON,牛乳パック,Milk Carton,牛奶盒,牛奶盒
+STAGE_MOUNT_FUJI,富士山,Mount Fuji,富士山,富士山
+STAGE_MUSHROOMS,きのこ,Mushrooms,蘑菇,蘑菇
+STAGE_ONE_QUARTER,四分の一,Quarter,四分之一,四分之一
+STAGE_ONION,玉ねぎ,Onion,洋葱,洋蔥
+STAGE_PARAMECIUM,ゾウリムシ,Paramecium,草履虫,草履蟲
+STAGE_PEN,ペン,Pen,笔,筆
+STAGE_PENGUIN,ペンギン,Penguin,企鹅,企鵝
+STAGE_PENTAGON,五角形,Pentagon,五边形,五邊形
+STAGE_POT,鍋,Pot,锅,鍋
+STAGE_RABBIT,うさぎ,Rabbit,兔子,兔子
+STAGE_RAINBOW,虹,Rainbow,彩虹,彩虹
+STAGE_SHARK,サメ,Shark,鲨鱼,鯊魚
+STAGE_SHIP_M,ふね,Ship,船,船
+STAGE_SHURIKEN,手裏剣,Shuriken,手里剑,手裏劍
+STAGE_SMALL_BIRD,小鳥,Small Bird,小鸟,小鳥
+STAGE_SORBET,シャーベット,Sorbet,雪芭,雪芭
+STAGE_TEARS,涙,Tears,泪水,淚水
+STAGE_TELEVISION,テレビ,Television,电视,電視
+STAGE_TREASURE_CHEST,宝箱,Treasure Chest,宝箱,寶箱
+STAGE_WANING_MOON,三日月,Waning Moon,弦月,弦月
+STAGE_WRENCH,スパナ,Wrench,扳手,扳手
+STAGE_CRAB,かに,Crab,螃蟹,螃蟹
+STAGE_THREE_STORIED_PAGODA,三重塔,Three-Storied Pagoda,三重塔,三重塔
+STAGE_TULIP,チューリップ,Tulip,郁金香,鬱金香
+STAGE_UMBRELLA,傘,Umbrella,雨伞,雨傘

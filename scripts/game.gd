@@ -68,6 +68,13 @@ var _dwell_prev_bucket: int = -1
 
 # --- Metrics dirty flag: 頂点が動いたフレームのみ calculate_metrics を実行する ---
 var _metrics_dirty: bool = false
+# メトリクス遅延計算: 頂点が静止してから _METRICS_SETTLE_DELAY 秒後に計算する
+const _METRICS_SETTLE_DELAY := 0.15  # 静止後 0.15 秒で計算（操作感に影響しない範囲で短く）
+var _metrics_settle_timer: float = -1.0  # -1 = 待機なし
+
+# --- 描画スロットル: playing アイドル時のタイマー表示用（毎フレーム描画しない） ---
+const _PLAY_IDLE_REDRAW_INTERVAL := 0.05  # 20fps 上限
+var _play_redraw_accum: float = 0.0
 
 # --- Star ---
 var star_rotation: float = 0.0
@@ -278,7 +285,7 @@ var display_mode: int = DISPLAY_MODE_WINDOW_1080
 const WINDOW_CLIENT_SIZE_720 := Vector2i(1280, 720)
 const WINDOW_CLIENT_SIZE_1080 := Vector2i(1920, 1080)
 ## ウィンドウ時: マウスカーソルをウィンドウ外へ出さない（Input.MOUSE_MODE_CONFINED）。OS が前面でないときは拘束しない。
-var mouse_confine_to_window: bool = true
+var mouse_confine_to_window: bool = false
 ## プレイ中: true のときだけマウス移動が自キャラ位置を更新する（クリック未取得はパッド専用。パッド入力で再度 false）。
 var playing_mouse_steers_player: bool = false
 const INTERNAL_VIEWPORT_SIZE := Vector2i(1920, 1080)
@@ -332,6 +339,22 @@ const STAGE_DEBUG_FIELD_KEYS: Array[String] = [
 	"stage_name", "description",
 ]
 var stage_debug_state: StageDebugState = StageDebugState.new()
+# --- バランス調整画面 (play_balance_debug) ---
+const PBD_FIELD_KEYS: Array[String] = [
+	"num_points", "clear_pct", "min_radius", "max_radius", "variance", "display_rate_min_pct"
+]
+const PBD_FIELD_LABELS: Array[String] = [
+	"ポイント数", "クリア一致度 (%)", "最小半径 (px)", "最大半径 (px)", "バラツキ", "最低表示率 (%)"
+]
+const PBD_BTN_LABELS: Array[String] = ["テスト", "保存", "図形編集", "閉じる"]
+const PBD_PANEL_W: float = 540.0
+const PBD_PANEL_Y: float = 80.0
+const PBD_HEADER_H: float = 64.0
+const PBD_ROW_H: float = 50.0
+const PBD_STATUS_H: float = 32.0
+const PBD_BTN_ROW_H: float = 56.0
+var _stage_edit_return_to: String = "stage_debug"
+var _pbd_return_after_test: bool = false
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
 	"fish", "cat_face", "triangle", "square", "hexagon", "circle", "star", "rugby_ball",
@@ -1002,7 +1025,8 @@ func _on_input_points_changed() -> void:
 	# プレイ中かつつかみ中のみ、「動いた」フラグを立てる（カウントは離した時点で行う）
 	if game_state == "playing" and _is_move_grab_active_for_count():
 		_move_count_track_valid = true
-	_metrics_dirty = true
+	# メトリクス遅延計算: 動くたびにタイマーをリセットし、静止後に計算する
+	_metrics_settle_timer = _METRICS_SETTLE_DELAY
 
 
 func _sync_stage_vars() -> void:
@@ -1486,6 +1510,10 @@ func _input(event: InputEvent) -> void:
 		_input_stage_debug(event)
 		return
 
+	if game_state == "play_balance_debug":
+		_input_play_balance_debug(event)
+		return
+
 	if game_state == "rules":
 		_input_rules(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
@@ -1591,7 +1619,7 @@ func _input(event: InputEvent) -> void:
 		_input_pause(event, is_confirm, is_pause_key)
 		return
 
-	# デバッグ用: [S] で実現率無視の強制クリア（エディタからの実行時のみ。エクスポート版では無効）
+	# デバッグ用: [S] でバランス調整画面を開く（エディタからの実行時のみ。エクスポート版では無効）
 	if (
 		game_state == "playing"
 		and _debug_tools_enabled()
@@ -1600,7 +1628,7 @@ func _input(event: InputEvent) -> void:
 		and not event.echo
 		and event.keycode == KEY_S
 	):
-		_force_clear_for_debug()
+		_enter_play_balance_debug()
 		return
 
 	if game_state == "playing" and is_pause_key:
@@ -2555,6 +2583,16 @@ func _enter_results_screen_debug() -> void:
 
 func _return_to_title_or_stage_debug_from_test() -> void:
 	_screenshot_folder_opened = false
+	if _pbd_return_after_test and _debug_tools_enabled():
+		_pbd_return_after_test = false
+		stage_session.clear_debug_test()
+		input_recorder = null
+		stage_debug_state.last_error = ""
+		_sync_stage_debug_field_buffers()
+		debug_mode = true
+		game_state = "play_balance_debug"
+		queue_redraw()
+		return
 	var back_to_stage_debug: bool = stage_session.debug_test_mode and _debug_tools_enabled()
 	stage_session.clear_debug_test()
 	input_recorder = null
@@ -2584,6 +2622,257 @@ func _enter_stage_debug_screen() -> void:
 	game_state = "stage_debug"
 	_stage_debug_sync_ime_for_field_focus()
 	queue_redraw()
+
+
+# =============================================================================
+# PLAY BALANCE DEBUG (playing 中の [S] キーで開くバランス調整画面)
+# =============================================================================
+
+func _enter_play_balance_debug() -> void:
+	if not _debug_tools_enabled():
+		return
+	is_dragging = false
+	input_handler.release_mouse_grab()
+	stage_debug_state.selected = current_stage
+	stage_debug_state.last_error = ""
+	stage_debug_state.field_focus_idx = -1
+	stage_debug_state.edit_buffer = ""
+	_sync_stage_debug_field_buffers()
+	debug_mode = true
+	game_state = "play_balance_debug"
+	queue_redraw()
+
+
+func _pbd_panel_rect(vp: Vector2) -> Rect2:
+	var w: float = minf(PBD_PANEL_W, vp.x - 40.0)
+	var total_h: float = PBD_HEADER_H + PBD_FIELD_KEYS.size() * PBD_ROW_H + PBD_STATUS_H + PBD_BTN_ROW_H + 16.0
+	return Rect2((vp.x - w) * 0.5, PBD_PANEL_Y, w, total_h)
+
+
+func _pbd_field_value_rect(i: int, panel: Rect2) -> Rect2:
+	var fx: float = panel.position.x + 212.0
+	var fy: float = panel.position.y + PBD_HEADER_H + i * PBD_ROW_H + 7.0
+	var fw: float = panel.position.x + panel.size.x - 16.0 - fx
+	return Rect2(fx, fy, fw, 36.0)
+
+
+func _pbd_btn_rects(panel: Rect2) -> Array[Rect2]:
+	var n: int = PBD_BTN_LABELS.size()
+	var by: float = panel.position.y + panel.size.y - PBD_BTN_ROW_H + 8.0
+	var total_w: float = panel.size.x - 32.0
+	var btn_w: float = (total_w - 8.0 * (n - 1)) / n
+	var rects: Array[Rect2] = []
+	for i in range(n):
+		rects.append(Rect2(panel.position.x + 16.0 + i * (btn_w + 8.0), by, btn_w, 34.0))
+	return rects
+
+
+func _pbd_stage_label() -> String:
+	var stages: Array = StageData.get_stages()
+	if current_stage < 0 or current_stage >= stages.size():
+		return "ステージ %d" % (current_stage + 1)
+	var sn: String = str((stages[current_stage] as Dictionary).get("guide_type_label", ""))
+	if sn.is_empty():
+		sn = str((stages[current_stage] as Dictionary).get("_source_file", "stage"))
+	return "%s  [%d]" % [sn, current_stage + 1]
+
+
+func _pbd_source_path() -> String:
+	var stages: Array = StageData.get_stages()
+	if current_stage < 0 or current_stage >= stages.size():
+		return ""
+	var fn: String = str((stages[current_stage] as Dictionary).get("_source_file", ""))
+	if fn.is_empty():
+		return ""
+	return StageData.BUILTIN_STAGEDATA_DIR + fn
+
+
+func _input_play_balance_debug(event: InputEvent) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	if event is InputEventKey and event.pressed and not event.echo:
+		if stage_debug_state.field_focus_idx >= 0:
+			_pbd_input_focused_field(event as InputEventKey)
+			return
+		if event.keycode == KEY_ESCAPE:
+			stage_debug_state.field_focus_idx = -1
+			_pbd_exit_to_stage_select()
+			return
+		if event.keycode == KEY_TAB:
+			var dir: int = -1 if (event as InputEventKey).shift_pressed else 1
+			stage_debug_state.field_focus_idx = (stage_debug_state.field_focus_idx + PBD_FIELD_KEYS.size() + dir) % PBD_FIELD_KEYS.size()
+			stage_debug_state.edit_buffer = stage_debug_state.field_buffers.get(PBD_FIELD_KEYS[stage_debug_state.field_focus_idx], "")
+			queue_redraw()
+			return
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		_pbd_handle_click((event as InputEventMouseButton).position, vp)
+
+
+func _pbd_input_focused_field(event: InputEventKey) -> void:
+	match event.keycode:
+		KEY_ENTER, KEY_KP_ENTER:
+			_pbd_commit_focused_field()
+			stage_debug_state.field_focus_idx = -1
+		KEY_ESCAPE:
+			stage_debug_state.field_focus_idx = -1
+			stage_debug_state.edit_buffer = ""
+		KEY_BACKSPACE:
+			if stage_debug_state.edit_buffer.length() > 0:
+				stage_debug_state.edit_buffer = stage_debug_state.edit_buffer.left(-1)
+		KEY_TAB:
+			_pbd_commit_focused_field()
+			var dir: int = -1 if event.shift_pressed else 1
+			stage_debug_state.field_focus_idx = (stage_debug_state.field_focus_idx + PBD_FIELD_KEYS.size() + dir) % PBD_FIELD_KEYS.size()
+			stage_debug_state.edit_buffer = stage_debug_state.field_buffers.get(PBD_FIELD_KEYS[stage_debug_state.field_focus_idx], "")
+		_:
+			if event.unicode > 0:
+				var ch: String = char(event.unicode)
+				if ch.is_valid_int() or ch == "." or (ch == "-" and stage_debug_state.edit_buffer.is_empty()):
+					stage_debug_state.edit_buffer += ch
+	queue_redraw()
+
+
+func _pbd_commit_focused_field() -> void:
+	var fi: int = stage_debug_state.field_focus_idx
+	if fi < 0 or fi >= PBD_FIELD_KEYS.size():
+		return
+	var fk: String = PBD_FIELD_KEYS[fi]
+	var raw: String = stage_debug_state.edit_buffer.strip_edges()
+	var parsed: Variant = _pbd_parse_field_value(fk, raw)
+	if parsed != null:
+		if not stage_debug_state.pending.has(current_stage):
+			stage_debug_state.pending[current_stage] = {}
+		(stage_debug_state.pending[current_stage] as Dictionary)[fk] = parsed
+		_sync_stage_debug_field_buffers()
+	stage_debug_state.edit_buffer = stage_debug_state.field_buffers.get(fk, raw)
+
+
+func _pbd_parse_field_value(key: String, raw: String) -> Variant:
+	if raw.is_empty() or not raw.is_valid_float():
+		return null
+	match key:
+		"num_points":
+			var v: int = int(float(raw))
+			return v if v >= 3 else null
+		"clear_pct", "display_rate_min_pct":
+			return clampf(float(raw), 0.0, 100.0)
+		"min_radius", "max_radius":
+			var v: float = float(raw)
+			return v if v > 0.0 else null
+		"variance":
+			return clampf(float(raw), 0.0, 1.0)
+	return null
+
+
+func _pbd_handle_click(mouse_pos: Vector2, vp: Vector2) -> void:
+	var panel: Rect2 = _pbd_panel_rect(vp)
+	for i in range(PBD_FIELD_KEYS.size()):
+		if _pbd_field_value_rect(i, panel).has_point(mouse_pos):
+			if stage_debug_state.field_focus_idx >= 0 and stage_debug_state.field_focus_idx != i:
+				_pbd_commit_focused_field()
+			stage_debug_state.field_focus_idx = i
+			stage_debug_state.edit_buffer = stage_debug_state.field_buffers.get(PBD_FIELD_KEYS[i], "")
+			queue_redraw()
+			return
+	var btn_rects: Array[Rect2] = _pbd_btn_rects(panel)
+	for i in range(btn_rects.size()):
+		if btn_rects[i].has_point(mouse_pos):
+			if stage_debug_state.field_focus_idx >= 0:
+				_pbd_commit_focused_field()
+				stage_debug_state.field_focus_idx = -1
+			_pbd_handle_button(i)
+			return
+	if stage_debug_state.field_focus_idx >= 0:
+		_pbd_commit_focused_field()
+		stage_debug_state.field_focus_idx = -1
+		queue_redraw()
+
+
+func _pbd_handle_button(btn_idx: int) -> void:
+	match btn_idx:
+		0:
+			_pbd_start_test()
+		1:
+			_pbd_save_to_disk()
+		2:
+			_pbd_open_shape_edit()
+		3:
+			stage_debug_state.field_focus_idx = -1
+			_pbd_exit_to_stage_select()
+
+
+func _pbd_save_to_disk() -> void:
+	var path: String = _pbd_source_path()
+	if path.is_empty():
+		stage_debug_state.last_error = "ソースファイルが不明です"
+		queue_redraw()
+		return
+	var pr: Dictionary = CustomStageFile.parse_file(path)
+	if not pr.get("ok", false):
+		stage_debug_state.last_error = "読込失敗: %s" % str(pr.get("error", ""))
+		queue_redraw()
+		return
+	var raw: Dictionary = (pr["raw"] as Dictionary).duplicate(true)
+	if not raw.has("config"):
+		raw["config"] = {}
+	var cfg: Dictionary = raw["config"] as Dictionary
+	var pending: Dictionary = stage_debug_state.pending.get(current_stage, {}) as Dictionary
+	for key in PBD_FIELD_KEYS:
+		if pending.has(key):
+			cfg[key] = pending[key]
+	var err: String = CustomStageFile.save_to_path(path, raw)
+	if err != "":
+		stage_debug_state.last_error = "保存失敗: %s" % err
+	else:
+		stage_debug_state.pending.erase(current_stage)
+		StageData._stages_cache_ready = false
+		_sync_stage_debug_field_buffers()
+		stage_debug_state.last_error = "保存しました: %s" % path.get_file()
+	queue_redraw()
+
+
+func _pbd_start_test() -> void:
+	_pbd_save_to_disk()
+	if stage_debug_state.last_error.begins_with("保存失敗") or stage_debug_state.last_error.begins_with("読込"):
+		return
+	var all_stages: Array = GameConfig.get_play_stage_rows()
+	if current_stage < 0 or current_stage >= all_stages.size():
+		stage_debug_state.last_error = "ステージが範囲外です"
+		queue_redraw()
+		return
+	var cfg: Dictionary = all_stages[current_stage] as Dictionary
+	var err: String = StageDebugOverrides.validate_effective_config(cfg)
+	if err != "":
+		stage_debug_state.last_error = err
+		queue_redraw()
+		return
+	stage_debug_state.last_error = ""
+	_pbd_return_after_test = true
+	seed(stage_session.start_debug_test(cfg))
+	input_recorder = DebugInputRecorder.new()
+	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(get_viewport_rect().size, current_stage))
+	input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
+
+
+func _pbd_exit_to_stage_select() -> void:
+	stage_debug_state.field_focus_idx = -1
+	debug_mode = false
+	BGMManager.stop()
+	if not GameConfig.IS_DEMO:
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	else:
+		game_state = "title"
+		title_start_time = Time.get_ticks_msec() / 1000.0
+		queue_redraw()
+
+
+func _pbd_open_shape_edit() -> void:
+	var path: String = _pbd_source_path()
+	if path.is_empty():
+		stage_debug_state.last_error = "ソースファイルが不明です"
+		queue_redraw()
+		return
+	_stage_edit_return_to = "play_balance_debug"
+	_enter_stage_edit_from_path(path)
 
 
 ## STAGE DEBUG: 日本語 IME 用（カスタム描画の値欄で stage_name / description のときのみ有効化）
@@ -3105,13 +3394,28 @@ func _enter_stage_edit_from_path(path: String) -> void:
 
 func _exit_stage_edit_to_debug() -> void:
 	stage_edit_state.clear_error()
-	game_state = "stage_debug"
+	var return_to: String = _stage_edit_return_to
+	_stage_edit_return_to = "stage_debug"
+	game_state = return_to
+	if return_to == "play_balance_debug":
+		StageData._stages_cache_ready = false
+		_sync_stage_debug_field_buffers()
 	queue_redraw()
 
 
 func _exit_stage_edit_after_save(saved_path: String) -> void:
+	var return_to: String = _stage_edit_return_to
+	_stage_edit_return_to = "stage_debug"
 	stage_debug_state.custom_pending.erase(saved_path)
 	_refresh_stage_debug_custom_paths()
+	if return_to == "play_balance_debug":
+		stage_edit_state.clear_error()
+		StageData._stages_cache_ready = false
+		_sync_stage_debug_field_buffers()
+		stage_debug_state.last_error = "保存しました: %s" % saved_path.get_file()
+		game_state = "play_balance_debug"
+		queue_redraw()
+		return
 	var idx: int = stage_debug_state.custom_paths.find(saved_path)
 	if idx < 0:
 		for i in range(stage_debug_state.custom_paths.size()):
@@ -3123,7 +3427,7 @@ func _exit_stage_edit_after_save(saved_path: String) -> void:
 	else:
 		_clamp_stage_debug_selection()
 	stage_edit_state.clear_error()
-	game_state = "stage_debug"
+	game_state = return_to
 	_sync_stage_debug_field_buffers()
 	stage_debug_state.last_error = "保存しました: %s" % saved_path.get_file()
 	queue_redraw()
@@ -4180,6 +4484,11 @@ func _process(delta: float) -> void:
 
 	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config":
 		if game_state == "rules":
+			if _metrics_settle_timer > 0.0:
+				_metrics_settle_timer -= delta
+				if _metrics_settle_timer <= 0.0:
+					_metrics_settle_timer = -1.0
+					_metrics_dirty = true
 			if _metrics_dirty:
 				_metrics_dirty = false
 				_calculate_metrics()
@@ -4188,6 +4497,9 @@ func _process(delta: float) -> void:
 
 	elif game_state == "stage_debug":
 		_stage_debug_process_scroll(delta)
+		queue_redraw()
+
+	elif game_state == "play_balance_debug":
 		queue_redraw()
 
 	elif game_state == "guide_info":
@@ -4217,6 +4529,12 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "playing":
+		# メトリクス遅延計算: 静止タイマーをカウントダウンし、0 以下になったら計算を実行
+		if _metrics_settle_timer > 0.0:
+			_metrics_settle_timer -= delta
+			if _metrics_settle_timer <= 0.0:
+				_metrics_settle_timer = -1.0
+				_metrics_dirty = true
 		if _metrics_dirty:
 			_metrics_dirty = false
 			_calculate_metrics()
@@ -4257,7 +4575,16 @@ func _process(delta: float) -> void:
 						hint_alpha = 0.8
 						break
 		ui_renderer.update_spore_particles(delta)
-		queue_redraw()
+		# 描画の分離: 以下のいずれかの場合のみ queue_redraw を発行する。
+		# moved=true のとき input_handler.update_drag_physics が既に発行済みのため重複しても問題ない。
+		var _has_particles: bool = not ui_renderer.spore_particles.is_empty()
+		_play_redraw_accum += delta
+		if _has_particles or hint_alpha > 0.001 or input_handler.grab_input_active:
+			_play_redraw_accum = 0.0
+			queue_redraw()
+		elif _play_redraw_accum >= _PLAY_IDLE_REDRAW_INTERVAL:
+			_play_redraw_accum = 0.0
+			queue_redraw()
 
 	elif game_state == "cleared":
 		ui_renderer.update_particles(delta)

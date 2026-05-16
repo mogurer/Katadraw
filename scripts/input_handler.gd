@@ -33,7 +33,7 @@ const DRAG_FOLLOW_SPEED_MAX := 30.0
 const DRAG_FOLLOW_MIN_FACTOR := 0.05
 const DRAG_ANGLE_SPRING := 34.0
 const DRAG_ANGLE_DAMPING := 8.0
-const DRAG_VELOCITY_DAMPING := 4.6
+const DRAG_VELOCITY_DAMPING := 9.0
 const DRAG_MAX_INFLUENCE_RATIO := 0.35
 const DRAG_STOP_SPEED := 8.0
 const DRAG_STEP_MAX := 1.0 / 120.0
@@ -77,6 +77,8 @@ const PLAYER_MIN_FORCE_DISTANCE := 8.0
 ## 辺が交差しているときの強制解消: 未ロック頂点をこの半径の円周に等間隔配置
 const PLAYER_CROSS_RESOLVE_RADIUS := 64.0
 const POINT_PAIR_REPULSE_DISTANCE := 64.0
+## ガイド辺の空間グリッドセルサイズ (px)。スナップ半径 26px の約 3 倍で余裕を確保。
+const _GUIDE_GRID_CELL := 80.0
 const POINT_PAIR_REPULSE_STRENGTH := 2600.0
 const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
 ## A+X 同時長押し: 頂点同士を押し広げて周上の等間隔に近づける追加斥力（長押しで増幅、上限あり）
@@ -107,10 +109,12 @@ const PLAYFIELD_EDGE_RETURN_REPULSE_MUL := 1.65
 const PLAYFIELD_EDGE_RETURN_VEL_BOOST := 0.006
 ## ガイド上・斥力が法線方向に強いとき接線へ逃がして滑らせる
 const GUIDE_REPEL_SLIDE_ASSIST := 0.42
-## この距離以内ならプレイヤー引力・斥力でガイド拘束を弱め、剥がしやすくする（px）
-const GUIDE_PEEL_DISTANCE_PX := 32.0
-## peel_mul の下限（小さいほどガイドに吸い付く力が弱く剥がれやすい）。旧 0.18 から約 3 倍外れやすく
-const GUIDE_PEEL_SNAP_FLOOR := 0.06
+## 引力でガイドへ向かって接近中のポイントを弾く判定速度閾値（px/s）
+const GUIDE_ATTRACT_APPROACH_THRESHOLD := 20.0
+## 引力がガイド方向へ向いていると判定する最小力量（force 単位）
+const GUIDE_ATTRACT_TOWARD_GUIDE_MIN := 10.0
+## 引力接近時にポイントをガイドから弾く斥力強度
+const GUIDE_ATTRACT_REPEL_STRENGTH := 4000.0
 ## 自キャラ中心に近いほど引力・斥力を強める（端での倍率 1、重なりに近いほど上乗せ）
 const PLAYER_FORCE_PROXIMITY_BOOST := 1.55
 
@@ -140,6 +144,21 @@ const GUIDE_ATTRACT_FREE_EDGE_DIST_PX := 10.0
 ## 自キャラが上記より遠く、かつガイド辺に乗っているときの引力・斥力: 法線を弱め接線を強めて剥がれにくく滑らせる
 const PLAYER_DISTANT_ON_GUIDE_NORMAL_SCALE := 0.28
 const PLAYER_DISTANT_ON_GUIDE_TANGENT_SCALE := 1.18
+
+# --- ガイド辺空間グリッド（_compute_nearest_guide_features の O(N) → O(k) 高速化） ---
+var _guide_grid: Dictionary = {}       # Vector2i セル → Array [[va, vb, vi, loop_idx, loop_sz], ...]
+var _guide_grid_n: int = -1            # 前回ビルド時の総頂点数（変化時のみ再構築）
+var _guide_loops_cache: Array = []     # _build_fixed_guide_snap_loops() の結果をキャッシュ
+var _guide_loops_cache_n: int = -1     # キャッシュ無効化用頂点数
+
+# --- 安定化力アクティブゾーン（引力・斥力時の非影響ポイントをスキップ） ---
+var _phys_active_mask: PackedByteArray = PackedByteArray()  # 1=アクティブ, 0=スキップ
+var _phys_mask_enabled: bool = false   # false のとき全点対象（マスク無効）
+var _stabilize_skip_frame: bool = false  # フレームスロットル用フラグ
+
+# --- 交差判定スロットル（3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減） ---
+var _isect_throttle: int = 0
+const _ISECT_THROTTLE_EVERY: int = 3
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -1207,18 +1226,31 @@ func update_drag_physics(delta: float) -> void:
 	):
 		return
 
+	# ガイドループをフレーム内で一度だけ構築してキャッシュする（ゲームプレイ中は変化しない）
+	var raw_loops: Array = _game.stage_manager.get_active_guide_loops_world()
+	var _n_total: int = 0
+	for lp: Array in raw_loops:
+		_n_total += lp.size()
+	if _n_total != _guide_loops_cache_n:
+		_guide_loops_cache_n = _n_total
+		_guide_loops_cache.clear()
+		for lp: Array in raw_loops:
+			if lp.size() >= 2:
+				_guide_loops_cache.append(lp)
+	var guide_loops: Array = _guide_loops_cache
+
 	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
 	var step_delta: float = delta / float(steps)
 	var moved: bool = false
 	for _i in range(steps):
-		moved = _step_drag_physics(step_delta) or moved
+		moved = _step_drag_physics(step_delta, guide_loops) or moved
 
 	if moved:
 		_notify_points_changed()
 		_game.queue_redraw()
 
 
-func _step_drag_physics(delta: float) -> bool:
+func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 	if _game.point_positions.is_empty():
 		player_force_active = false
 		player_influenced_point_count = 0
@@ -1234,7 +1266,6 @@ func _step_drag_physics(delta: float) -> bool:
 	_ensure_drag_state_arrays()
 	_update_ax_spacing_vertex_dwell(delta)
 
-	var guide_loops: Array = _build_fixed_guide_snap_loops()
 	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
 	var vertex_locks: Dictionary = _compute_vertex_locks(nearest_features)
 	var forces: Array[Vector2] = []
@@ -1252,23 +1283,38 @@ func _step_drag_physics(delta: float) -> bool:
 			player_force = _remap_player_force_when_distant_on_guide(i, nearest_features[i], player_force)
 			forces[i] += player_force
 			player_influenced_point_count += 1
-	# 空間グリッドを1回だけ構築して pair/edge 両方の斥力計算で使い回す
-	var _pos_grid: Dictionary = _build_position_grid(POINT_PAIR_REPULSE_DISTANCE)
-	_apply_point_pair_repulsion(forces, _pos_grid)
-	if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
-		_apply_ax_spacing_equal_spacing_repulsion(forces)
-	var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
-	_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
-	_apply_polygon_ccw_order_constraint(forces, guide_constraint_mul)
-	_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
-	_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
-	_apply_playfield_edge_return_forces(forces, lo, hi)
+
 	player_force_active = player_influenced_point_count > 0
 	grab_input_active = (
 		player_force_active
 		or _get_player_force_mode() != 0
 		or _ax_spacing_active
 	)
+
+	# 安定化力（ガイドスナップ・点間斥力・CCW・辺斥力）はプレイヤー影響中か均等化中のみ実行する。
+	# アイドル時はこれらの力が微小速度を再注入し続け、物理が永遠に収束しない原因になる。
+	if player_force_active or _ax_spacing_active:
+		# ①アクティブゾーン: player_force_active 中はプレイヤー影響半径 + pair斥力距離マージン
+		# 内のポイントのみを安定化対象にする。A+X 均等化のみのときは全点対象。
+		if player_force_active:
+			var _ar: float = _get_effective_player_force_limit() + POINT_PAIR_REPULSE_DISTANCE
+			_build_phys_active_mask(player_position, _ar * _ar)
+		else:
+			_phys_mask_enabled = false
+		# ②フレームスロットル: 1フレームおきに安定化力をスキップ。A+X 均等化中は常に実行。
+		_stabilize_skip_frame = not _stabilize_skip_frame
+		if not _stabilize_skip_frame or _ax_spacing_active:
+			# 空間グリッドを1回だけ構築して pair/edge 両方の斥力計算で使い回す
+			var _pos_grid: Dictionary = _build_position_grid(POINT_PAIR_REPULSE_DISTANCE)
+			_apply_point_pair_repulsion(forces, _pos_grid)
+			if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
+				_apply_ax_spacing_equal_spacing_repulsion(forces)
+			var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
+			_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
+			_apply_polygon_ccw_order_constraint(forces, guide_constraint_mul)
+			_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
+			_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
+	_apply_playfield_edge_return_forces(forces, lo, hi)
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
 
@@ -1281,12 +1327,14 @@ func _step_drag_physics(delta: float) -> bool:
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
 
-	if not guide_loops.is_empty():
+	if player_force_active and not guide_loops.is_empty() and not _stabilize_skip_frame:
 		var post_features: Array = _compute_nearest_guide_features(guide_loops)
 		_apply_post_move_guide_constraints(post_features, vertex_locks)
 
+	# 交差判定: 3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減
+	_isect_throttle = (_isect_throttle + 1) % _ISECT_THROTTLE_EVERY
 	var topology_changed: bool = false
-	if _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
+	if _isect_throttle == 0 and _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
 		topology_changed = true
 		_resolve_intersections_2opt(lo, hi)
 
@@ -1369,15 +1417,12 @@ func _get_effective_player_force_limit() -> float:
 	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS + bonus
 
 
-func _is_guide_snap_bypassed_by_player_force(point_idx: int, feature: Dictionary) -> bool:
+func _is_guide_snap_bypassed_by_player_force(point_idx: int, _feature: Dictionary) -> bool:
 	if _get_player_force_mode() == 0:
 		return false
 	if point_idx < 0 or point_idx >= _game.point_positions.size():
 		return false
-	if player_position.distance_to(_game.point_positions[point_idx]) > GUIDE_ATTRACT_FREE_PROXIMITY_PX:
-		return false
-	var ed: float = feature.get("edge_dist", INF) as float
-	return ed <= GUIDE_ATTRACT_FREE_EDGE_DIST_PX
+	return _is_player_touching_point(point_idx)
 
 
 func _remap_player_force_when_distant_on_guide(point_idx: int, feature: Dictionary, pf: Vector2) -> Vector2:
@@ -1471,9 +1516,11 @@ func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 	var thr: float = POINT_PAIR_REPULSE_DISTANCE
 	var threshold_sq: float = thr * thr
 	var inv: float = 1.0 / thr  # cell_size == thr なので 1セル分が閾値半径に対応
+	var mask_n: int = _phys_active_mask.size() if _phys_mask_enabled else 0
 	for i in range(n_vert):
 		if _is_locked(i):
 			continue
+		var i_active: bool = not _phys_mask_enabled or (i < mask_n and _phys_active_mask[i] != 0)
 		var pi: Vector2 = _game.point_positions[i]
 		var cx: int = int(floor(pi.x * inv))
 		var cy: int = int(floor(pi.y * inv))
@@ -1487,6 +1534,9 @@ func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 						continue  # 対称ペアの重複を回避
 					if _is_locked(j):
 						continue
+					var j_active: bool = not _phys_mask_enabled or (j < mask_n and _phys_active_mask[j] != 0)
+					if not i_active and not j_active:
+						continue  # 両方非アクティブ → スキップ
 					var delta: Vector2 = _game.point_positions[j] - pi
 					var dist_sq: float = delta.length_squared()
 					if dist_sq > threshold_sq:
@@ -1495,8 +1545,10 @@ func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 					var falloff: float = 1.0 - dist / thr
 					var dir: Vector2 = delta / dist
 					var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
-					forces[i] -= force
-					forces[j] += force
+					if i_active:
+						forces[i] -= force
+					if j_active:
+						forces[j] += force
 
 
 ## ワールド座標の2頂点間。戻りは i→j 方向の斥力ベクトル（i に -v、j に +v を足す用）
@@ -1704,18 +1756,45 @@ func _polygon_edges_have_interior_intersection() -> bool:
 	var n_edges: int = edges.size()
 	if n_edges < 4:
 		return false
-	for ii in range(n_edges):
-		var e1: Vector2i = edges[ii]
-		var p1: Vector2 = _game.point_positions[e1.x]
-		var p2: Vector2 = _game.point_positions[e1.y]
-		for jj in range(ii + 1, n_edges):
-			var e2: Vector2i = edges[jj]
-			if _polygon_edges_share_vertex(e1, e2):
-				continue
-			var p3: Vector2 = _game.point_positions[e2.x]
-			var p4: Vector2 = _game.point_positions[e2.y]
-			if _segment_intersect_strict_interior(p1, p2, p3, p4):
-				return true
+	# 空間グリッド: 各辺を両端点の 3×3 近傍セルに登録し、同セル内ペアのみ判定する。
+	# O(N²=1770) → O(N×k)（k=セル内辺数）に削減。
+	const CELL: float = 128.0
+	var inv: float = 1.0 / CELL
+	var grid: Dictionary = {}
+	for ei in range(n_edges):
+		var e: Vector2i = edges[ei]
+		for ep: Vector2 in [_game.point_positions[e.x], _game.point_positions[e.y]]:
+			var cx: int = int(floor(ep.x * inv))
+			var cy: int = int(floor(ep.y * inv))
+			for dy in range(-1, 2):
+				for dx in range(-1, 2):
+					var key: Vector2i = Vector2i(cx + dx, cy + dy)
+					if not grid.has(key):
+						grid[key] = []
+					(grid[key] as Array).append(ei)
+	# セル内ペアを確認（checked で重複ペアをスキップ）
+	var checked: Dictionary = {}
+	for cell_raw in grid.values():
+		var cell: Array = cell_raw as Array
+		var m: int = cell.size()
+		for a in range(m):
+			var ei: int = cell[a] as int
+			var e1: Vector2i = edges[ei]
+			for b in range(a + 1, m):
+				var ej: int = cell[b] as int
+				if ei == ej:
+					continue
+				var pk: int = mini(ei, ej) * n_edges + maxi(ei, ej)
+				if checked.has(pk):
+					continue
+				checked[pk] = true
+				var e2: Vector2i = edges[ej]
+				if _polygon_edges_share_vertex(e1, e2):
+					continue
+				if _segment_intersect_strict_interior(
+						_game.point_positions[e1.x], _game.point_positions[e1.y],
+						_game.point_positions[e2.x], _game.point_positions[e2.y]):
+					return true
 	return false
 
 
@@ -1840,6 +1919,8 @@ func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary, guide
 							continue
 						if _is_locked(k):
 							continue
+						if _phys_mask_enabled and k < _phys_active_mask.size() and _phys_active_mask[k] == 0:
+							continue  # 非アクティブポイントへの辺斥力はスキップ
 						var p: Vector2 = _game.point_positions[k]
 						var t_proj: float = clampf((p - pa).dot(ab) / ab_len_sq, 0.0, 1.0)
 						var closest: Vector2 = pa + ab * t_proj
@@ -1882,11 +1963,17 @@ func _apply_polygon_ccw_order_constraint(forces: Array[Vector2], guide_constrain
 func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count: int, center: Vector2, guide_constraint_mul: PackedFloat32Array) -> void:
 	if idx_count < 3:
 		return
+	var mask_n: int = _phys_active_mask.size() if _phys_mask_enabled else 0
 	for offset in range(idx_count):
 		var i: int = idx_start + offset
 		var nxt: int = idx_start + ((offset + 1) % idx_count)
 		if _is_locked(i) and _is_locked(nxt):
 			continue
+		if _phys_mask_enabled:
+			var i_act: bool = i < mask_n and _phys_active_mask[i] != 0
+			var nxt_act: bool = nxt < mask_n and _phys_active_mask[nxt] != 0
+			if not i_act and not nxt_act:
+				continue  # 両隣接点が非アクティブ → スキップ
 		var a: Vector2 = _game.point_positions[i] - center
 		var b: Vector2 = _game.point_positions[nxt] - center
 		var al: float = a.length()
@@ -1917,11 +2004,17 @@ func _apply_ccw_order_for_walk_segment(forces: Array[Vector2], seg_start_in_orde
 	if seg_len < 3:
 		return
 	var order: PackedInt32Array = _game.polygon_walk_order
+	var mask_n: int = _phys_active_mask.size() if _phys_mask_enabled else 0
 	for t in range(seg_len):
 		var i: int = order[seg_start_in_order + t]
 		var nxt: int = order[seg_start_in_order + ((t + 1) % seg_len)]
 		if _is_locked(i) and _is_locked(nxt):
 			continue
+		if _phys_mask_enabled:
+			var i_act: bool = i < mask_n and _phys_active_mask[i] != 0
+			var nxt_act: bool = nxt < mask_n and _phys_active_mask[nxt] != 0
+			if not i_act and not nxt_act:
+				continue
 		var a: Vector2 = _game.point_positions[i] - center
 		var b: Vector2 = _game.point_positions[nxt] - center
 		var al: float = a.length()
@@ -2087,10 +2180,7 @@ func _zero_all_point_velocities() -> void:
 
 func _has_active_point_velocity() -> bool:
 	for velocity in point_velocities:
-		if velocity.length() > DRAG_STOP_SPEED:
-			return true
-	for i in range(point_velocities.size()):
-		if point_velocities[i].length_squared() > 0.01:
+		if velocity.length_squared() > 9.0:  # 3 px/s — sub-pixel jitter は無視
 			return true
 	return false
 
@@ -2161,24 +2251,31 @@ func _apply_local_angle_spring(forces: Array[Vector2]) -> void:
 
 
 func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
-	var pf_mode_peel: int = _get_player_force_mode()
+	var fm: int = _get_player_force_mode()
+	var mask_n: int = _phys_active_mask.size() if _phys_mask_enabled else 0
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
+		if _phys_mask_enabled and i < mask_n and _phys_active_mask[i] == 0:
+			continue  # 非アクティブポイントへのガイドスナップはスキップ
 		var feature: Dictionary = nearest_features[i] as Dictionary
 		if _is_guide_snap_bypassed_by_player_force(i, feature):
 			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		var vertex_dist: float = feature.get("vertex_dist", INF) as float
-		var edge_pass_through: bool = _is_edge_pass_through(feature, pos, point_velocities[i])
-		# ガイド付近 32px 以内かつ自キャラが頂点に近いときだけ剥がしやすく弱める（遠距離からの力ではガイドを維持）
-		var peel_mul: float = 1.0
-		if pf_mode_peel != 0 and edge_dist < GUIDE_PEEL_DISTANCE_PX:
-			var dist_player_pt: float = player_position.distance_to(pos)
-			if dist_player_pt <= GUIDE_ATTRACT_FREE_PROXIMITY_PX:
-				peel_mul = clampf(edge_dist / GUIDE_PEEL_DISTANCE_PX, GUIDE_PEEL_SNAP_FLOOR, 1.0)
-		if edge_dist < GUIDE_EDGE_SNAP_RADIUS and not edge_pass_through:
+		# 引力操作でガイドへ向かって接近中 → スナップの代わりにガイドから弾く
+		if fm > 0 and edge_dist < GUIDE_EDGE_SNAP_RADIUS:
+			var inward_normal: Vector2 = _feature_edge_normal(feature, pos)
+			var approach_speed: float = point_velocities[i].dot(inward_normal)
+			if approach_speed > GUIDE_ATTRACT_APPROACH_THRESHOLD:
+				var pf: Vector2 = _compute_player_force(i)
+				if pf.dot(inward_normal) > GUIDE_ATTRACT_TOWARD_GUIDE_MIN:
+					var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
+					forces[i] -= inward_normal * (GUIDE_ATTRACT_REPEL_STRENGTH * edge_strength)
+					forces[i] -= inward_normal * (approach_speed * GUIDE_SNAP_DAMPING * edge_strength * 2.0)
+					continue  # 頂点ロックもスキップ
+		if edge_dist < GUIDE_EDGE_SNAP_RADIUS:
 			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
 			var edge_spring: float = GUIDE_EDGE_SPRING
 			if edge_dist < GUIDE_EDGE_SUCTION_RADIUS:
@@ -2189,19 +2286,19 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 			var edge_target: Vector2 = feature.get("edge_point", pos) as Vector2
 			var edge_normal: Vector2 = _feature_edge_normal(feature, pos)
 			var normal_velocity: Vector2 = edge_normal * point_velocities[i].dot(edge_normal)
-			forces[i] += (edge_target - pos) * (edge_spring * edge_strength * peel_mul * edge_spring_mul)
-			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength * peel_mul * edge_snap_damp_mul)
+			forces[i] += (edge_target - pos) * (edge_spring * edge_strength * edge_spring_mul)
+			forces[i] -= normal_velocity * (GUIDE_SNAP_DAMPING * edge_strength * edge_snap_damp_mul)
 			if edge_dist < GUIDE_EDGE_GLIDE_RADIUS and vertex_dist >= GUIDE_VERTEX_LOCK_RADIUS:
 				var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
 				var glide_damp_mul: float = 1.0 + GUIDE_STICK_EDGE_GLIDE_DAMP_EXTRA * glide_t
-				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t * peel_mul * glide_damp_mul)
+				forces[i] -= normal_velocity * (GUIDE_EDGE_GLIDE_DAMPING * glide_t * glide_damp_mul)
 		if vertex_dist < GUIDE_VERTEX_SNAP_RADIUS:
 			var vertex_strength: float = 1.0 - vertex_dist / GUIDE_VERTEX_SNAP_RADIUS
 			var vertex_spring_mul: float = 1.0 + GUIDE_STICK_VERTEX_SPRING_EXTRA * vertex_strength
 			var vertex_damp_mul: float = 1.0 + GUIDE_STICK_SNAP_DAMP_EXTRA * vertex_strength
 			var vertex_target: Vector2 = feature.get("vertex_pos", pos) as Vector2
-			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength * peel_mul * vertex_spring_mul)
-			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength * peel_mul * vertex_damp_mul)
+			forces[i] += (vertex_target - pos) * (GUIDE_VERTEX_SPRING * vertex_strength * vertex_spring_mul)
+			forces[i] -= point_velocities[i] * (GUIDE_SNAP_DAMPING * vertex_strength * vertex_damp_mul)
 		var lock_data: Dictionary = vertex_locks.get(i, {}) as Dictionary
 		if lock_data.is_empty():
 			continue
@@ -2212,14 +2309,18 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 		var lock_mul: float = GUIDE_VERTEX_CONTACT_RELEASE_MUL if player_touching else 1.0
 		var lock_spring_mul: float = 1.0 + GUIDE_STICK_VERTEX_LOCK_SPRING_EXTRA * lock_strength
 		var lock_damp_mul: float = 1.0 + GUIDE_STICK_SNAP_DAMP_EXTRA * 0.55 * lock_strength
-		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul * peel_mul * lock_spring_mul)
-		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul * peel_mul * lock_damp_mul)
+		forces[i] += (lock_pos - pos) * (GUIDE_VERTEX_LOCK_SPRING * lock_mul * lock_spring_mul)
+		forces[i] -= point_velocities[i] * (GUIDE_VERTEX_LOCK_DAMPING * lock_mul * lock_damp_mul)
 
 
 func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: Array, vertex_locks: Dictionary) -> void:
+	var fm: int = _get_player_force_mode()
+	var mask_n: int = _phys_active_mask.size() if _phys_mask_enabled else 0
 	for i in range(_game.point_positions.size()):
 		if _is_locked(i):
 			continue
+		if _phys_mask_enabled and i < mask_n and _phys_active_mask[i] == 0:
+			continue  # 非アクティブポイントへの辺スライド拘束はスキップ
 		var feature: Dictionary = nearest_features[i] as Dictionary
 		if _is_guide_snap_bypassed_by_player_force(i, feature):
 			continue
@@ -2227,8 +2328,11 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
 			continue
-		if _is_edge_pass_through(feature, pos, point_velocities[i]):
-			continue
+		# 引力操作でガイドへ向かって接近中のポイントはスライド拘束をスキップ（スナップ関数が弾く）
+		if fm > 0:
+			var inward_normal: Vector2 = _feature_edge_normal(feature, pos)
+			if point_velocities[i].dot(inward_normal) > GUIDE_ATTRACT_APPROACH_THRESHOLD:
+				continue
 		var glide_t: float = 1.0 - edge_dist / GUIDE_EDGE_GLIDE_RADIUS
 		var tangent: Vector2 = _feature_edge_tangent(feature)
 		var tangent_force: Vector2 = tangent * forces[i].dot(tangent)
@@ -2296,48 +2400,90 @@ func _build_circle_loop(center: Vector2, radius: float) -> Array:
 	return verts
 
 
+func _build_phys_active_mask(center: Vector2, radius_sq: float) -> void:
+	var n: int = _game.point_positions.size()
+	if _phys_active_mask.size() != n:
+		_phys_active_mask.resize(n)
+	for i in range(n):
+		_phys_active_mask[i] = 1 if center.distance_squared_to(_game.point_positions[i]) <= radius_sq else 0
+	_phys_mask_enabled = true
+
+
+func _rebuild_guide_grid_if_needed(guide_loops: Array) -> void:
+	var n: int = 0
+	for lp: Array in guide_loops:
+		n += lp.size()
+	if n == _guide_grid_n:
+		return
+	_guide_grid_n = n
+	_guide_grid.clear()
+	var cell: float = _GUIDE_GRID_CELL
+	for loop_idx in range(guide_loops.size()):
+		var loop: Array = guide_loops[loop_idx] as Array
+		var loop_size: int = loop.size()
+		for vi in range(loop_size):
+			var va: Vector2 = loop[vi] as Vector2
+			var vb: Vector2 = loop[(vi + 1) % loop_size] as Vector2
+			# 辺の AABB をカバーする全セルに登録
+			var c0x: int = int(floor(minf(va.x, vb.x) / cell))
+			var c1x: int = int(floor(maxf(va.x, vb.x) / cell))
+			var c0y: int = int(floor(minf(va.y, vb.y) / cell))
+			var c1y: int = int(floor(maxf(va.y, vb.y) / cell))
+			for cx in range(c0x, c1x + 1):
+				for cy in range(c0y, c1y + 1):
+					var k := Vector2i(cx, cy)
+					if not _guide_grid.has(k):
+						_guide_grid[k] = []
+					(_guide_grid[k] as Array).append([va, vb, vi, loop_idx, loop_size])
+
+
 func _compute_nearest_guide_features(guide_loops: Array) -> Array:
+	_rebuild_guide_grid_if_needed(guide_loops)
 	var features: Array = []
+	var cell: float = _GUIDE_GRID_CELL
 	for i in range(_game.point_positions.size()):
 		var pos: Vector2 = _game.point_positions[i]
 		var best: Dictionary = {
-			"vertex_dist": INF,
-			"vertex_pos": pos,
-			"vertex_idx": -1,
-			"vertex_loop": -1,
-			"edge_dist": INF,
-			"edge_point": pos,
-			"edge_start_idx": -1,
-			"edge_loop": -1,
-			"edge_tangent": Vector2.RIGHT,
-			"loop_size": 0,
+			"vertex_dist": INF, "vertex_pos": pos, "vertex_idx": -1, "vertex_loop": -1,
+			"edge_dist": INF, "edge_point": pos, "edge_start_idx": -1, "edge_loop": -1,
+			"edge_tangent": Vector2.RIGHT, "loop_size": 0,
 		}
-		for loop_idx in range(guide_loops.size()):
-			var loop: Array = guide_loops[loop_idx] as Array
-			var loop_size: int = loop.size()
-			for vertex_idx in range(loop_size):
-				var vertex_pos: Vector2 = loop[vertex_idx] as Vector2
-				var vertex_dist: float = pos.distance_to(vertex_pos)
-				if vertex_dist < (best.get("vertex_dist", INF) as float):
-					best["vertex_dist"] = vertex_dist
-					best["vertex_pos"] = vertex_pos
-					best["vertex_idx"] = vertex_idx
-					best["vertex_loop"] = loop_idx
-				var next_idx: int = (vertex_idx + 1) % loop_size
-				var edge_point: Vector2 = _closest_point_on_segment(pos, vertex_pos, loop[next_idx] as Vector2)
-				var edge_dist: float = pos.distance_to(edge_point)
-				if edge_dist < (best.get("edge_dist", INF) as float):
-					var edge_tangent: Vector2 = (loop[next_idx] as Vector2) - vertex_pos
-					if edge_tangent.length_squared() > 0.0001:
-						edge_tangent = edge_tangent.normalized()
-					else:
-						edge_tangent = Vector2.RIGHT
-					best["edge_dist"] = edge_dist
-					best["edge_point"] = edge_point
-					best["edge_start_idx"] = vertex_idx
-					best["edge_loop"] = loop_idx
-					best["edge_tangent"] = edge_tangent
-					best["loop_size"] = loop_size
+		# ±1 セル（±80px）をクエリ → スナップ半径 26px の約 3 倍の安全マージン
+		var cx0: int = int(floor((pos.x - cell) / cell))
+		var cx1: int = int(floor((pos.x + cell) / cell))
+		var cy0: int = int(floor((pos.y - cell) / cell))
+		var cy1: int = int(floor((pos.y + cell) / cell))
+		for cx in range(cx0, cx1 + 1):
+			for cy in range(cy0, cy1 + 1):
+				var k := Vector2i(cx, cy)
+				if not _guide_grid.has(k):
+					continue
+				for edge in (_guide_grid[k] as Array):
+					var va: Vector2 = edge[0] as Vector2
+					var vb: Vector2 = edge[1] as Vector2
+					var vi: int = int(edge[2])
+					var li: int = int(edge[3])
+					var lsz: int = int(edge[4])
+					var vd: float = pos.distance_to(va)
+					if vd < best["vertex_dist"]:
+						best["vertex_dist"] = vd
+						best["vertex_pos"] = va
+						best["vertex_idx"] = vi
+						best["vertex_loop"] = li
+					var ep: Vector2 = _closest_point_on_segment(pos, va, vb)
+					var ed: float = pos.distance_to(ep)
+					if ed < best["edge_dist"]:
+						var et: Vector2 = vb - va
+						if et.length_squared() > 0.0001:
+							et = et.normalized()
+						else:
+							et = Vector2.RIGHT
+						best["edge_dist"] = ed
+						best["edge_point"] = ep
+						best["edge_start_idx"] = vi
+						best["edge_loop"] = li
+						best["edge_tangent"] = et
+						best["loop_size"] = lsz
 		features.append(best)
 	return features
 

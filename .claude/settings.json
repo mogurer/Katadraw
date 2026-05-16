@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Read(//c/Users/krtek/AppData/Roaming/Godot/app_userdata/KATA-DRAW/custom_stages/**)"
     ]
   }
 }

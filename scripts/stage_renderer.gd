@@ -14,9 +14,15 @@ const HUD_GUIDE_LINE_WIDTH_PX := 3.5
 const _HUD_GUIDE_GLOW_MAX_OFFSET_PX := 10.0
 ## 層数（多いほど滑らか。外にいくほど透過率が下がる）
 const _HUD_GUIDE_GLOW_LAYERS := 8
+## 近接表示用空間グリッドのセルサイズ (px)。頂点開示距離 20px の 4 倍以上を確保。
+const _PROX_GRID_CELL := 80.0
 
 var _game: Node2D
 var _renderer: UIRenderer
+
+## 近接表示用ガイド辺空間グリッド（フレームをまたいで再利用）
+var _prox_grid: Dictionary = {}   # Vector2i → Array [[va, vb, vi], ...]
+var _prox_grid_n: int = -1        # 前回ビルド時の辺数（変化時のみ再構築）
 
 
 func _init(game: Node2D, renderer: UIRenderer) -> void:
@@ -189,21 +195,32 @@ func draw_guide_proximity_reveal() -> void:
 	reveal_from_b.resize(n)
 	reveal_from_a.fill(false)
 	reveal_from_b.fill(false)
-	for si in range(n):
-		var va: Vector2 = loop[si] as Vector2
-		var vb: Vector2 = loop[(si + 1) % n] as Vector2
-		# 半辺開示はゲームポイントのみ判定（自キャラは近接描画で別処理）
-		for p: Vector2 in _game.point_positions:
-			# 頂点スナップ: その頂点側の半辺のみ開示
-			if p.distance_to(va) < _VERTEX_REVEAL_DIST:
-				reveal_from_a[si] = true
-			elif p.distance_to(vb) < _VERTEX_REVEAL_DIST:
-				reveal_from_b[si] = true
-			else:
-				# 辺の中間付近（頂点スナップなし）→ 辺全体を開示
-				if _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
-					reveal_from_a[si] = true
-					reveal_from_b[si] = true
+	# 空間グリッド経由で O(M×k) に削減（逆順ループ: ポイント → 近傍辺）
+	_rebuild_prox_grid_if_needed(loop)
+	var pcell: float = _PROX_GRID_CELL
+	for p: Vector2 in _game.point_positions:
+		var pcx0: int = int(floor((p.x - pcell) / pcell))
+		var pcx1: int = int(floor((p.x + pcell) / pcell))
+		var pcy0: int = int(floor((p.y - pcell) / pcell))
+		var pcy1: int = int(floor((p.y + pcell) / pcell))
+		for pcx in range(pcx0, pcx1 + 1):
+			for pcy in range(pcy0, pcy1 + 1):
+				var pk := Vector2i(pcx, pcy)
+				if not _prox_grid.has(pk):
+					continue
+				for pedge in (_prox_grid[pk] as Array):
+					var si: int = int(pedge[2])
+					if reveal_from_a[si] and reveal_from_b[si]:
+						continue  # 既に全開示済み
+					var va: Vector2 = pedge[0] as Vector2
+					var vb: Vector2 = pedge[1] as Vector2
+					if p.distance_to(va) < _VERTEX_REVEAL_DIST:
+						reveal_from_a[si] = true
+					elif p.distance_to(vb) < _VERTEX_REVEAL_DIST:
+						reveal_from_b[si] = true
+					elif _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
+						reveal_from_a[si] = true
+						reveal_from_b[si] = true
 
 	# セグメント描画
 	for si in range(n):
@@ -272,33 +289,77 @@ func _draw_guide_seg_full(va: Vector2, vb: Vector2, col: Color, width: float,
 	_game.draw_polyline_colors(pts, cols, width, true)
 
 
+func _rebuild_prox_grid_if_needed(loop: Array) -> void:
+	var n: int = loop.size()
+	if n == _prox_grid_n:
+		return
+	_prox_grid_n = n
+	_prox_grid.clear()
+	var cell: float = _PROX_GRID_CELL
+	for vi in range(n):
+		var va: Vector2 = loop[vi] as Vector2
+		var vb: Vector2 = loop[(vi + 1) % n] as Vector2
+		var c0x: int = int(floor(minf(va.x, vb.x) / cell))
+		var c1x: int = int(floor(maxf(va.x, vb.x) / cell))
+		var c0y: int = int(floor(minf(va.y, vb.y) / cell))
+		var c1y: int = int(floor(maxf(va.y, vb.y) / cell))
+		for cx in range(c0x, c1x + 1):
+			for cy in range(c0y, c1y + 1):
+				var k := Vector2i(cx, cy)
+				if not _prox_grid.has(k):
+					_prox_grid[k] = []
+				(_prox_grid[k] as Array).append([va, vb, vi])
+
+
+## 辺 [va,vb] と半径 r の円の交差を辺パラメータ [t0,t1] で返す。交差なしは (-1,-1)。
+func _seg_circle_t_range(va: Vector2, vb: Vector2, center: Vector2, r: float) -> Vector2:
+	var d: Vector2 = vb - va
+	var f: Vector2 = va - center
+	var a2: float = d.dot(d)
+	if a2 < 1e-8:
+		return Vector2(-1.0, -1.0)
+	var b2: float = 2.0 * f.dot(d)
+	var c2: float = f.dot(f) - r * r
+	var disc: float = b2 * b2 - 4.0 * a2 * c2
+	if disc < 0.0:
+		return Vector2(-1.0, -1.0)
+	var sq: float = sqrt(disc)
+	var inv: float = 0.5 / a2
+	var t0: float = clampf((-b2 - sq) * inv, 0.0, 1.0)
+	var t1: float = clampf((-b2 + sq) * inv, 0.0, 1.0)
+	if t1 - t0 < 1e-6:
+		return Vector2(-1.0, -1.0)
+	return Vector2(t0, t1)
+
+
+## 近接表示辺の描画: 各プローブの円と辺の交差区間を求めてマージし描画する。
+## O(M×samples) のサンプリングループを O(M) の解析的区間計算に置き換えた。
 func _draw_guide_seg_proximity(va: Vector2, vb: Vector2,
 		probes: Array[Vector2], col: Color, width: float) -> void:
-	var seg_len: float = va.distance_to(vb)
-	if seg_len < 0.5:
+	if va.distance_squared_to(vb) < 0.25:
 		return
-	var has_influence: bool = false
+	# 各プローブの可視区間 [t0, t1] を収集
+	var intervals: Array = []
 	for p: Vector2 in probes:
-		if _dist_to_seg(p, va, vb) < _REVEAL_RADIUS:
-			has_influence = true
-			break
-	if not has_influence:
+		var iv: Vector2 = _seg_circle_t_range(va, vb, p, _REVEAL_RADIUS)
+		if iv.x >= 0.0:
+			intervals.append([iv.x, iv.y])
+	if intervals.is_empty():
 		return
-
-	var n_pts: int = maxi(2, int(seg_len / _REVEAL_SAMPLE_STEP) + 1)
-	var pts := PackedVector2Array()
-	var cols := PackedColorArray()
-	for i in range(n_pts):
-		var t: float = float(i) / float(n_pts - 1)
-		var pt: Vector2 = va.lerp(vb, t)
-		var in_range: bool = false
-		for p: Vector2 in probes:
-			if pt.distance_to(p) < _REVEAL_RADIUS:
-				in_range = true
-				break
-		pts.append(pt)
-		cols.append(Color(col.r, col.g, col.b, col.a if in_range else 0.0))
-	_game.draw_polyline_colors(pts, cols, width, true)
+	# t0 順にソートしてマージ、各区間を draw_line で描画
+	intervals.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var t0: float = float(intervals[0][0])
+	var t1: float = float(intervals[0][1])
+	for j in range(1, intervals.size()):
+		var nx: float = float(intervals[j][0])
+		var ny: float = float(intervals[j][1])
+		if nx <= t1:
+			t1 = maxf(t1, ny)
+		else:
+			_game.draw_line(va.lerp(vb, t0), va.lerp(vb, t1), col, width, true)
+			t0 = nx
+			t1 = ny
+	_game.draw_line(va.lerp(vb, t0), va.lerp(vb, t1), col, width, true)
 
 
 func _dist_to_seg(p: Vector2, a: Vector2, b: Vector2) -> float:

@@ -121,7 +121,7 @@ var _accuracy_alpha_cache: PackedFloat32Array = PackedFloat32Array()
 
 # --- Hausdorff 間引き ---
 ## Hausdorff / HUD 距離計算は重いため、N 回に 1 回だけ実行してキャッシュを再利用する。
-const HAUSDORFF_THROTTLE_EVERY: int = 5
+const HAUSDORFF_THROTTLE_EVERY: int = 10
 var _hausdorff_call_counter: int = 0  # 0 のとき実行
 var _run_hausdorff_this_call: bool = true
 var _hausdorff_cached_err: float = 0.0
