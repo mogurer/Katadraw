@@ -354,6 +354,8 @@ const PBD_ROW_H: float = 50.0
 const PBD_STATUS_H: float = 32.0
 const PBD_BTN_ROW_H: float = 56.0
 var _stage_edit_return_to: String = "stage_debug"
+var _stage_edit_source_path: String = ""  # ファイルから開いた場合の元パス（保存先の決定に使用）
+var _stage_edit_source_raw: Dictionary = {}  # ビルトインファイルを開いた場合の元 raw データ（保存時に config 保持）
 var _pbd_return_after_test: bool = false
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
@@ -477,7 +479,7 @@ var input_recorder: DebugInputRecorder
 
 # --- Pause Menu ---
 var pause_active: bool = false
-var pause_index: int = 0          # 0=閉じる, 1=やりなおし, 2=タイトルへ戻る
+var pause_index: int = 0          # 0=閉じる, 1=やりなおし, 2=ステージをやめる
 var pause_confirm_title: bool = false
 var pause_confirm_index: int = 0  # 0=はい, 1=いいえ
 var pause_elapsed: float = 0.0    # elapsed time saved when pausing
@@ -1025,8 +1027,10 @@ func _on_input_points_changed() -> void:
 	# プレイ中かつつかみ中のみ、「動いた」フラグを立てる（カウントは離した時点で行う）
 	if game_state == "playing" and _is_move_grab_active_for_count():
 		_move_count_track_valid = true
-	# メトリクス遅延計算: 動くたびにタイマーをリセットし、静止後に計算する
-	_metrics_settle_timer = _METRICS_SETTLE_DELAY
+	# メトリクス遅延計算: プレイヤー/均等化が動かしているときのみタイマーをリセット。
+	# ドリフトのみの場合はリセットしない（毎フレーム延び続けてメトリクスが永久に発火しなくなる）。
+	if input_handler.grab_input_active or _metrics_settle_timer < 0.0:
+		_metrics_settle_timer = _METRICS_SETTLE_DELAY
 
 
 func _sync_stage_vars() -> void:
@@ -1581,7 +1585,9 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "cleared":
-		if stage_session.debug_test_mode:
+		# play_balance_debug の「テスト開始」経由でのクリアのみデバッグ用戻り先へ。
+		# 通常プレイ（debug_test_mode が true でもデバッグオーバーレイ目的の場合）はステージセレクトへ。
+		if _pbd_return_after_test:
 			if is_confirm_key or is_confirm_pad:
 				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
 					BGMManager.stop()  # BGMManager に移行
@@ -2388,8 +2394,7 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 
 	# Confirm
 	if is_confirm:
-		var _pause_back_label: String = tr("PAUSE_TITLE") if GameConfig.IS_DEMO else "セレクト画面へ"
-		var pause_labels: Array[String] = [tr("PAUSE_CLOSE"), tr("PAUSE_RETRY"), _pause_back_label]
+		var pause_labels: Array[String] = [tr("PAUSE_CLOSE"), tr("PAUSE_RETRY"), tr("PAUSE_TITLE")]
 		var pidx: int = pause_index
 		ui_renderer.set_btn_press_with_callback(pause_labels[pidx], func():
 			match pidx:
@@ -2397,10 +2402,20 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 					_resume_from_pause()
 				1:  # やりなおし
 					_do_pause_retry()
-				2:  # タイトルへ戻る
-					pause_confirm_title = true
-					pause_confirm_index = 1  # Default to "いいえ"
-					_play_sfx(sfx_window_open)
+				2:  # ステージをやめる
+					pause_active = false
+					pause_confirm_title = false
+					pause_retry_elapsed = -1.0
+					BGMManager.stop()
+					_play_sfx(sfx_window_close)
+					if _pbd_return_after_test:
+						_return_to_title_or_stage_debug_from_test()
+					elif not GameConfig.IS_DEMO:
+						get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+					else:
+						debug_mode = false
+						game_state = "title"
+						title_start_time = Time.get_ticks_msec() / 1000.0
 			queue_redraw()
 		)
 		queue_redraw()
@@ -2411,7 +2426,7 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 
 
 func _hit_pause_button(pos: Vector2, vp: Vector2) -> int:
-	"""ポーズ下部ボタンのヒットテスト。0=閉じる, 1=やりなおし, 2=タイトルへ戻る, -1=なし"""
+	"""ポーズ下部ボタンのヒットテスト。0=閉じる, 1=やりなおし, 2=ステージをやめる, -1=なし"""
 	var ui_w: float = vp.x * GameConfig.UI_WIDTH_RATIO
 	var play_w: float = vp.x - ui_w
 	var play_cx: float = ui_w + play_w / 2.0
@@ -2490,9 +2505,18 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 				pause_active = false
 				pause_confirm_title = false
 				pause_retry_elapsed = -1.0
-				BGMManager.stop()  # BGMManager に移行
+				BGMManager.stop()
 				_play_sfx(sfx_window_close)
-				_return_to_title_or_stage_debug_from_test()
+				# play_balance_debug のテスト開始経由のみデバッグ用戻り先へ。通常はステージセレクトへ。
+				if _pbd_return_after_test:
+					_return_to_title_or_stage_debug_from_test()
+				elif not GameConfig.IS_DEMO:
+					get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+				else:
+					debug_mode = false
+					game_state = "title"
+					title_start_time = Time.get_ticks_msec() / 1000.0
+					queue_redraw()
 			else:  # いいえ
 				pause_confirm_title = false
 				_play_sfx(sfx_window_close)
@@ -3356,6 +3380,8 @@ func _stage_edit_snap_current_canvas_to_grid() -> void:
 
 func _open_stage_edit(raw: Dictionary = {}) -> void:
 	DisplayServer.window_set_ime_active(false)
+	_stage_edit_source_path = ""
+	_stage_edit_source_raw = {}
 	if raw.is_empty():
 		stage_edit_state.reset_new()
 	else:
@@ -3390,6 +3416,8 @@ func _enter_stage_edit_from_path(path: String) -> void:
 		return
 	stage_debug_state.last_error = ""
 	_open_stage_edit(pr["raw"] as Dictionary)
+	_stage_edit_source_path = path
+	_stage_edit_source_raw = (pr["raw"] as Dictionary).duplicate(true)
 
 
 func _exit_stage_edit_to_debug() -> void:
@@ -3801,26 +3829,17 @@ func _stage_edit_save() -> void:
 		stage_edit_last_error = "Stage ID は小文字・数字・_ のみで指定してください"
 		queue_redraw()
 		return
-	CustomStageFile.ensure_custom_stage_dir()
-	var path: String = "%s/%s.json" % [CustomStageFile.CUSTOM_STAGE_DIR, base]
+	# 元ファイルが res:// のビルトインステージの場合はプロジェクト内のJSONに直接上書き保存。
+	# それ以外（新規・カスタムステージ）は従来どおり user://custom_stages/ に保存。
+	var path: String
+	if not _stage_edit_source_path.is_empty() and _stage_edit_source_path.begins_with("res://"):
+		path = ProjectSettings.globalize_path(_stage_edit_source_path)
+	else:
+		CustomStageFile.ensure_custom_stage_dir()
+		path = "%s/%s.json" % [CustomStageFile.CUSTOM_STAGE_DIR, base]
 	var tidx: int = clampi(stage_edit_type_idx, 0, STAGE_EDIT_TYPE_OPTIONS.size() - 1)
 	var shape_kind: String = STAGE_EDIT_TYPE_OPTIONS[tidx]
-	var partial: Dictionary = {"type": base, "shape_type": shape_kind}
-	if StageConfig.EDITOR_NEW_STAGE_DEFAULTS.has(shape_kind):
-		var defs: Dictionary = StageConfig.EDITOR_NEW_STAGE_DEFAULTS[shape_kind] as Dictionary
-		for k in defs:
-			partial[k] = defs[k]
-	var np: int
-	if (shape_kind == "fish" or shape_kind == "cat_face") and stage_edit_canvas_edges.size() > 0:
-		np = StageEditPolygonTools.compute_num_points_from_edges(stage_edit_canvas_edges)
-	else:
-		np = int((StageConfig.EDITOR_NEW_STAGE_DEFAULTS.get(shape_kind, {}) as Dictionary).get("num_points", 12))
-	partial["num_points"] = np
-	partial["min_radius"] = 200.0
-	partial["max_radius"] = 400.0
-	partial["display_rate_min_pct"] = 80.0
-	partial["clear_pct"] = 99.0
-	partial["guide_follows_player_radius"] = 0
+	# shape ポリゴンを組み立て（ビルトイン・カスタム共通）
 	var shape: Dictionary = {}
 	if shape_kind == "fish" or shape_kind == "cat_face":
 		if stage_edit_canvas_vertices.size() >= 3:
@@ -3835,8 +3854,38 @@ func _stage_edit_save() -> void:
 					var pt: Vector2 = built[k] as Vector2
 					ac_out[str(k)] = [pt.x, pt.y]
 				shape["arc_controls"] = ac_out
-	var meta: Dictionary = stage_edit_meta_preserve.duplicate(true)
-	var payload: Dictionary = CustomStageFile.build_payload(partial, shape, meta)
+	var payload: Dictionary
+	if not _stage_edit_source_raw.is_empty():
+		# ビルトイン/既存ファイルへの上書き: 元の config を保持し shape だけ置き換える
+		payload = _stage_edit_source_raw.duplicate(true)
+		if shape.is_empty():
+			payload.erase("shape")
+		else:
+			payload["shape"] = shape.duplicate(true)
+		# polygon 変更に伴い num_points を再計算して config に反映
+		if (shape_kind == "fish" or shape_kind == "cat_face") and stage_edit_canvas_edges.size() > 0:
+			if payload.has("config"):
+				(payload["config"] as Dictionary)["num_points"] = StageEditPolygonTools.compute_num_points_from_edges(stage_edit_canvas_edges)
+	else:
+		# 新規カスタムステージ: デフォルト値から組み立て
+		var partial: Dictionary = {"type": base, "shape_type": shape_kind}
+		if StageConfig.EDITOR_NEW_STAGE_DEFAULTS.has(shape_kind):
+			var defs: Dictionary = StageConfig.EDITOR_NEW_STAGE_DEFAULTS[shape_kind] as Dictionary
+			for k in defs:
+				partial[k] = defs[k]
+		var np: int
+		if (shape_kind == "fish" or shape_kind == "cat_face") and stage_edit_canvas_edges.size() > 0:
+			np = StageEditPolygonTools.compute_num_points_from_edges(stage_edit_canvas_edges)
+		else:
+			np = int((StageConfig.EDITOR_NEW_STAGE_DEFAULTS.get(shape_kind, {}) as Dictionary).get("num_points", 12))
+		partial["num_points"] = np
+		partial["min_radius"] = 200.0
+		partial["max_radius"] = 400.0
+		partial["display_rate_min_pct"] = 80.0
+		partial["clear_pct"] = 99.0
+		partial["guide_follows_player_radius"] = 0
+		var meta: Dictionary = stage_edit_meta_preserve.duplicate(true)
+		payload = CustomStageFile.build_payload(partial, shape, meta)
 	var err: String = CustomStageFile.save_to_path(path, payload)
 	if err != "":
 		stage_edit_last_error = err

@@ -84,6 +84,8 @@ var ideal_points: Array = []  # 理想点（原点中心）。start_stage で設
 var ideal_outline_points: Array = []  # cat_face: 描画用（弧を細かくサンプルした頂点）
 ## ideal_outline と同じ長さの閉じた輪郭: 辺 i（頂点 i→i+1）が弧サンプル由来なら true
 var ideal_outline_segment_is_arc: Array = []
+## 形状の実際の角（正規化済み）。ideal_points と同じ座標系。circle/triangle は空。
+var shape_corner_points: Array = []
 var correspondence_scale: float = 1.0
 var correspondence_rotation: float = 0.0
 # CustomStageFile / デバッグ用: cfg の shape_polygon_vertices / shape_arc_controls（JSON 由来）
@@ -258,6 +260,42 @@ func _apply_hud_correspondence_scale() -> void:
 	correspondence_scale = hud_guide_scale
 	if stage_type == "triangle":
 		ideal_display_radius = hud_guide_scale
+
+
+func get_ideal_positions_world() -> Array:
+	"""ideal_points（正規化済み）をワールド座標に変換して返す。"""
+	var result: Array = []
+	if ideal_points.is_empty():
+		return result
+	var center: Vector2 = guide_center_1
+	var s: float = correspondence_scale
+	var cos_r: float = cos(correspondence_rotation)
+	var sin_r: float = sin(correspondence_rotation)
+	for ip in ideal_points:
+		var p: Vector2 = ip as Vector2
+		var tx: float = (p.x * cos_r - p.y * sin_r) * s
+		var ty: float = (p.x * sin_r + p.y * cos_r) * s
+		result.append(center + Vector2(tx, ty))
+	return result
+
+
+func get_corner_positions_world() -> Array:
+	"""shape_corner_points（形状の実際の角、正規化済み）をワールド座標に変換して返す。
+	HUD ガイドモードでは hud_guide_center（= shape_center）を基点にする。
+	guide_center_1 は面積重心計算のズレを含むためここでは使わない。"""
+	var result: Array = []
+	if shape_corner_points.is_empty():
+		return result
+	var center: Vector2 = hud_guide_center if GameConfig.USE_SCREEN_HUD_GUIDE else guide_center_1
+	var s: float = correspondence_scale
+	var cos_r: float = cos(correspondence_rotation)
+	var sin_r: float = sin(correspondence_rotation)
+	for cp in shape_corner_points:
+		var p: Vector2 = cp as Vector2
+		var tx: float = (p.x * cos_r - p.y * sin_r) * s
+		var ty: float = (p.x * sin_r + p.y * cos_r) * s
+		result.append(center + Vector2(tx, ty))
+	return result
 
 
 func _regular_hexagon_unit_vertices() -> Array:
@@ -628,6 +666,7 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 
 	point_positions.clear()
 	ideal_points.clear()
+	shape_corner_points.clear()
 	match stage_type:
 		"triangle":
 			var vr: Array = cfg["vertex_range"]
@@ -646,17 +685,21 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			ideal_outline_points = _build_square_outline()
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
+			var _sq := 1.0 / sqrt(2.0)
+			shape_corner_points = [Vector2(-_sq,-_sq), Vector2(_sq,-_sq), Vector2(_sq,_sq), Vector2(-_sq,_sq)]
 		"rhombus":
 			_generate_rhombus_shape(shape_center, point_positions, cfg)
 			var b_rh: float = float(cfg.get("rhombus_vertical_half", 0.5))
 			ideal_outline_points = _build_rhombus_outline(b_rh)
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
+			shape_corner_points = [Vector2(0.0,-b_rh), Vector2(1.0,0.0), Vector2(0.0,b_rh), Vector2(-1.0,0.0)]
 		"hexagon":
 			_generate_hexagon_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_hexagon_outline()
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
+			shape_corner_points = _regular_hexagon_unit_vertices()
 		"cat_face":
 			_generate_cat_face_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
@@ -772,6 +815,9 @@ func _generate_star_polygon_shape(center: Vector2, pts: Array[Vector2], cfg: Dic
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)
@@ -969,6 +1015,9 @@ func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Diction
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)
@@ -1146,6 +1195,9 @@ func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary)
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)
@@ -1177,6 +1229,9 @@ func _generate_heptagram_polygon_shape(center: Vector2, pts: Array[Vector2], cfg
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)
@@ -1208,6 +1263,9 @@ func _generate_heptagram_silhouette_polygon_shape(center: Vector2, pts: Array[Ve
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)
@@ -1241,6 +1299,9 @@ func _generate_rugby_ball_polygon_shape(center: Vector2, pts: Array[Vector2], cf
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)

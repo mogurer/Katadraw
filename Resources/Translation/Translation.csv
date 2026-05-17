@@ -126,9 +126,9 @@ PAUSE_CLOSE,閉じる,Close,关闭,關閉
 PAUSE_RETRY,やりなおし,Retry,重试,重試
 PAUSE_CONTINUE,ゲームをつづける,Continue,继续游戏,繼續遊戲
 PAUSE_CONTROLS,操作方法を見る,View Controls,查看操作方法,查看操作方法
-PAUSE_TITLE,タイトルへ戻る,Back to Title,返回标题,返回標題
+PAUSE_TITLE,ステージをやめる,Quit Stage,放弃关卡,放棄關卡
 PAUSE_CONTROLS_BACK,何かキーを押してもどる,Press any key to return,按任意键返回,按任意鍵返回
-PAUSE_CONFIRM_MSG,タイトルにもどりますか？,Return to title?,返回标题吗？,返回標題嗎？
+PAUSE_CONFIRM_MSG,ステージをやめますか？,Quit this stage?,放弃这个关卡吗？,放棄這個關卡嗎？
 PAUSE_CONFIRM_YES,はい,Yes,是,是
 PAUSE_CONFIRM_NO,いいえ,No,否,否
 MENU_QUIT,ゲームを終了する,Quit Game,退出游戏,退出遊戲

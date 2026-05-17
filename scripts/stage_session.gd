@@ -5,7 +5,7 @@ var stage_times: Array[float] = []
 var stage_move_counts: Array[int] = []
 var stage_result_shapes: Array = []
 
-var debug_test_mode: bool = false
+var debug_test_mode: bool = OS.is_debug_build()
 var debug_test_seed: int = 0
 var debug_test_restart_cfg: Dictionary = {}
 var debug_test_meta_stage_name: String = ""
@@ -40,7 +40,7 @@ func start_debug_test(cfg: Dictionary, meta_stage_name: String = "") -> int:
 
 
 func clear_debug_test() -> void:
-	debug_test_mode = false
+	debug_test_mode = OS.is_debug_build()  # デバッグビルドでは true を維持
 	debug_test_seed = 0
 	debug_test_restart_cfg.clear()
 	debug_test_meta_stage_name = ""

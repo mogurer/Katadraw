@@ -146,9 +146,12 @@ var _pending_state: String = ""       # フェードアウト完了後に切り�
 # 自キャラ円中心から実現率テキストをずらす（右＋上＝+x, -y）
 const REPRO_RATE_OFFSET_FROM_PLAYER := Vector2(32.0, -28.0)
 const REPRO_FLOAT_CHANGE_MIN_PCT := 0.02
-const REPRO_FLOAT_SHOW_MS := 2000
-var _repro_rate_prev_for_float: float = -1000.0
-var _repro_rate_float_show_until_msec: int = 0
+const REPRO_ANIM_DURATION_MS: int = 600   # 値が変化した時のカウントアップアニメーション時間
+const REPRO_HOLD_AFTER_ANIM_MS: int = 1400  # アニメーション完了後の表示維持時間
+var _repro_prev_stable: float = -1000.0   # 前回の安定値（変化検出用）
+var _repro_anim_from: float = 0.0         # アニメーション開始値
+var _repro_anim_to: float = 0.0           # アニメーション目標値
+var _repro_anim_start_msec: int = -1      # アニメーション開始時刻（-1=未開始）
 var _result_mouse_pos: Vector2 = Vector2(-1.0, -1.0)  # リザルト画面のマウス座標
 ## 0=スクリーンショット 1=Twitter 2=NEXT（マウスが各ボタン上ならそちらを優先）
 var results_action_focus_index: int = 2
@@ -389,11 +392,11 @@ func on_state_changed(new_state: String) -> void:
 		title_intro.reset()
 	# 一致度の「変化直後」表示: プレイ/ルール以外に出たらリセット
 	if new_state != "playing" and new_state != "rules":
-		_repro_rate_prev_for_float = -1000.0
-		_repro_rate_float_show_until_msec = 0
+		_repro_prev_stable = -1000.0
+		_repro_anim_start_msec = -1
 	elif new_state == "playing" or new_state == "rules":
-		_repro_rate_prev_for_float = -1000.0
-		_repro_rate_float_show_until_msec = 0
+		_repro_prev_stable = -1000.0
+		_repro_anim_start_msec = -1
 	_prev_state = new_state
 
 
@@ -1799,17 +1802,32 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 		_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
 
 
+func _repro_get_display_value() -> float:
+	if _repro_anim_start_msec < 0:
+		return _repro_anim_to
+	var elapsed: float = float(Time.get_ticks_msec() - _repro_anim_start_msec) / float(REPRO_ANIM_DURATION_MS)
+	var t: float = minf(elapsed, 1.0)
+	var t_eased: float = 1.0 - pow(1.0 - t, 2.0)  # ease-out quadratic
+	return lerpf(_repro_anim_from, _repro_anim_to, t_eased)
+
+
 func _repro_rate_float_on_metric(circ_val: float) -> void:
-	if _repro_rate_prev_for_float < -500.0:
-		_repro_rate_prev_for_float = circ_val
+	if _repro_prev_stable < -500.0:
+		_repro_prev_stable = circ_val
+		_repro_anim_from = circ_val
+		_repro_anim_to = circ_val
 		return
-	if absf(circ_val - _repro_rate_prev_for_float) > REPRO_FLOAT_CHANGE_MIN_PCT:
-		_repro_rate_float_show_until_msec = Time.get_ticks_msec() + REPRO_FLOAT_SHOW_MS
-	_repro_rate_prev_for_float = circ_val
+	if absf(circ_val - _repro_prev_stable) > REPRO_FLOAT_CHANGE_MIN_PCT:
+		_repro_anim_from = _repro_prev_stable
+		_repro_anim_to = circ_val
+		_repro_anim_start_msec = Time.get_ticks_msec()
+		_repro_prev_stable = circ_val
 
 
 func _repro_rate_should_show_temporary() -> bool:
-	return Time.get_ticks_msec() < _repro_rate_float_show_until_msec
+	if _repro_anim_start_msec < 0:
+		return false
+	return Time.get_ticks_msec() < _repro_anim_start_msec + REPRO_ANIM_DURATION_MS + REPRO_HOLD_AFTER_ANIM_MS
 
 
 func _draw_rules_demo_player_layer(vp: Vector2) -> void:
@@ -1825,8 +1843,9 @@ func _draw_rules_demo_player_layer(vp: Vector2) -> void:
 		_repro_rate_float_on_metric(circ_val)
 		if _game.input_handler.grab_input_active or _repro_rate_should_show_temporary():
 			var pt: Vector2 = _game.input_handler.get_player_position()
-			var rate_text: String = "%.1f%%" % circ_val
-			var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(circ_val)
+			var disp_val: float = _repro_get_display_value()
+			var rate_text: String = "%.1f%%" % disp_val
+			var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(disp_val)
 			_draw_realization_rate_with_glow(pt + REPRO_RATE_OFFSET_FROM_PLAYER, rate_text, rate_color)
 	_draw_right_stick_debug_line(vp)
 
@@ -1909,13 +1928,13 @@ func _draw_game(vp: Vector2) -> void:
 	if _game.game_state == "playing":
 		var circ_tracked: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
 		_repro_rate_float_on_metric(circ_tracked)
-	if _game.input_handler.has_player_avatar() and (
+	if _game.game_state == "playing" and _game.input_handler.has_player_avatar() and (
 		_game.input_handler.grab_input_active or _repro_rate_should_show_temporary()
 	):
 		var pt: Vector2 = _game.input_handler.get_player_position()
-		var circ_val: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
-		var rate_text: String = "%.1f%%" % circ_val
-		var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(circ_val)
+		var disp_val: float = _repro_get_display_value()
+		var rate_text: String = "%.1f%%" % disp_val
+		var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(disp_val)
 		_draw_realization_rate_with_glow(pt + REPRO_RATE_OFFSET_FROM_PLAYER, rate_text, rate_color)
 
 	# イントロ演出のtransformをリセット（HUDはスケーリングしない）
@@ -1933,6 +1952,9 @@ func _draw_game(vp: Vector2) -> void:
 		_stage_renderer.draw_ideal_shape()
 
 	_draw_hud(vp)
+
+	_draw_debug_circularity_overlay(vp)
+	_draw_debug_ideal_points_overlay()
 
 	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
@@ -2378,6 +2400,75 @@ func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
 				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a10),
 			])
 			_game.draw_polygon(pts, cols)
+
+
+func _draw_debug_circularity_overlay(vp: Vector2) -> void:
+	if not _game.stage_session.debug_test_mode:
+		return
+	if _game.game_state != "playing":
+		return
+	var raw: float = _game.current_circularity
+	var disp: float = _game.get_display_reproduction_rate(raw)
+	var goal: float = 100.0 - _game.clear_threshold
+	var min_p: float = _game.display_rate_min_pct
+	var lines: Array[String] = [
+		"実測値: %.2f%%" % raw,
+		"表示値: %.1f%%" % disp,
+		"クリア: %.1f%%" % goal,
+		"下限:   %.1f%%" % min_p,
+	]
+	var fs: int = 15
+	var pad: float = 6.0
+	var line_h: float = fs + 3.0
+	var bg_w: float = 160.0
+	var bg_h: float = line_h * lines.size() + pad * 2.0
+	var ox: float = 8.0
+	var oy: float = 8.0
+	_game.draw_rect(Rect2(ox, oy, bg_w, bg_h), Color(0.0, 0.0, 0.0, 0.52))
+	for li in range(lines.size()):
+		_game.draw_string(_game.font, Vector2(ox + pad, oy + pad + fs + line_h * li), lines[li],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 1.0, 1.0, 0.92))
+
+
+func _draw_debug_ideal_points_overlay() -> void:
+	if not _game.stage_session.debug_test_mode:
+		return
+	if _game.game_state != "playing":
+		return
+	var sm: StageManager = _game.stage_manager
+
+	# HUD ガイドと同じ座標系: shape_center を基点に hud_guide_scale でスケール。
+	# guide_center_1 は重心計算方式の違い（周長重心 vs 面積重心）でずれるため使わない。
+	var center: Vector2 = _game.shape_center
+	var scale: float = sm.hud_guide_scale if GameConfig.USE_SCREEN_HUD_GUIDE else sm.guide_radius_val
+	var cos_r: float = cos(sm.correspondence_rotation)
+	var sin_r: float = sin(sm.correspondence_rotation)
+
+	# ideal_points: 水色の丸 + 十字 + インデックス番号
+	var ideal_color := Color(0.0, 0.85, 0.95, 0.9)
+	for i in range(sm.ideal_points.size()):
+		var n: Vector2 = sm.ideal_points[i] as Vector2
+		var wx: float = (n.x * cos_r - n.y * sin_r) * scale
+		var wy: float = (n.x * sin_r + n.y * cos_r) * scale
+		var p: Vector2 = center + Vector2(wx, wy)
+		_game.draw_circle(p, 4.0, ideal_color)
+		_game.draw_line(p + Vector2(-8, 0), p + Vector2(8, 0), ideal_color, 1.5)
+		_game.draw_line(p + Vector2(0, -8), p + Vector2(0, 8), ideal_color, 1.5)
+		_game.draw_string(_game.font, p + Vector2(5, -4), str(i),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.0, 0.85, 0.95, 1.0))
+
+	# shape_corner_points: オレンジの丸 + 十字 + "C" + インデックス番号
+	var corner_color := Color(1.0, 0.50, 0.05, 0.95)
+	for i in range(sm.shape_corner_points.size()):
+		var n: Vector2 = sm.shape_corner_points[i] as Vector2
+		var wx: float = (n.x * cos_r - n.y * sin_r) * scale
+		var wy: float = (n.x * sin_r + n.y * cos_r) * scale
+		var p: Vector2 = center + Vector2(wx, wy)
+		_game.draw_circle(p, 6.0, corner_color)
+		_game.draw_line(p + Vector2(-12, 0), p + Vector2(12, 0), corner_color, 2.0)
+		_game.draw_line(p + Vector2(0, -12), p + Vector2(0, 12), corner_color, 2.0)
+		_game.draw_string(_game.font, p + Vector2(8, -6), "C" + str(i),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.55, 0.05, 1.0))
 
 
 func _draw_right_stick_debug_line(vp: Vector2) -> void:

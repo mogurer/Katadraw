@@ -54,6 +54,7 @@ const GUIDE_VERTEX_LOCK_RADIUS := 7.0
 const GUIDE_VERTEX_LOCK_SPRING := 220.0
 const GUIDE_VERTEX_LOCK_DAMPING := 30.0
 const GUIDE_VERTEX_CONTACT_RELEASE_MUL := 0.35
+const GUIDE_VERTEX_LOCK_PERSIST_RELEASE_RADIUS := 30.0
 ## 「強制力」(CCW・点-辺斥力): ガイドへの最短距離がこの値より内側ほど弱く（0 で無効に近い）
 const GUIDE_CONSTRAINT_SUPPRESS_DIST := GUIDE_EDGE_SNAP_RADIUS
 const GUIDE_CONSTRAINT_SUPPRESS_EXP := 2.2
@@ -93,6 +94,12 @@ const AX_SPACING_REPULSE_DISTANCE := 400.0
 const AX_SPACING_REPULSE_STRENGTH := 10240.0
 const AX_SPACING_REPULSE_MIN_DISTANCE := 2.0
 const AX_SPACING_MAX_STRENGTH_MUL := 2.0
+## ideal_points へのパッシブドリフト
+const IDEAL_VERTEX_SPRING := 8.0
+const IDEAL_VERTEX_REPEL_STRENGTH := 12.0
+const IDEAL_VERTEX_ATTRACT_RANGE := 200.0
+const IDEAL_VERTEX_OCCUPIED_RADIUS := 20.0
+const IDEAL_DRIFT_DURATION := 3.0
 ## 均等化半径内での滞在累積（ms）から強さ係数 0〜1 に飽和させる時間
 const AX_SPACING_DWELL_RAMP_FULL_MS := 2500.0
 const AX_SPACING_DWELL_ACCUM_CAP_MS := 4000.0
@@ -154,6 +161,8 @@ var _guide_loops_cache_n: int = -1     # キャッシュ無効化用頂点数
 # --- 安定化力アクティブゾーン（引力・斥力時の非影響ポイントをスキップ） ---
 var _phys_active_mask: PackedByteArray = PackedByteArray()  # 1=アクティブ, 0=スキップ
 var _phys_mask_enabled: bool = false   # false のとき全点対象（マスク無効）
+var _vertex_lock_flags: PackedByteArray = PackedByteArray()  # 1=頂点ロック済み（ペア/辺斥力をスキップ）
+var _persistent_vertex_corners: Dictionary = {}  # point_index -> Vector2: 永続頂点ロック先
 var _stabilize_skip_frame: bool = false  # フレームスロットル用フラグ
 
 # --- 交差判定スロットル（3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減） ---
@@ -248,6 +257,9 @@ var _ax_spacing_prev_stationary_for_region: bool = true
 var _ax_spacing_region_charge_suppress_until_msec: int = 0
 ## 均等化半径内での頂点別滞在累積（ms）。半径外へ出たフレームで 0 に戻す
 var _ax_spacing_vertex_dwell_ms: Array[float] = []
+## ideal_points ドリフト: プレイヤーが離れた後も物理ループを継続する残り時間（秒）
+var _ideal_drift_timer: float = 0.0
+var _prev_player_force_active: bool = false
 
 # --- 空間グリッド用: 点-辺斥力の visited 世代管理 ---
 ## _apply_point_edge_repulsion 内での重複チェックを Dictionary 割り当てなしで行うための世代カウンタ
@@ -342,6 +354,7 @@ func reset_for_stage() -> void:
 	_ax_spacing_vertex_dwell_ms.clear()
 	_mouse_rel_motion_for_charge = 0.0
 	_pad_move_ramp_ms = 0.0
+	_persistent_vertex_corners.clear()
 	_reset_player_position()
 
 
@@ -1218,11 +1231,16 @@ func update_drag_physics(delta: float) -> void:
 	_ensure_drag_state_arrays()
 	if not player_position_initialized:
 		_reset_player_position()
+	if _ideal_drift_timer > 0.0:
+		_ideal_drift_timer -= delta
+		if _ideal_drift_timer < 0.0:
+			_ideal_drift_timer = 0.0
 	if (
 		not player_force_active
 		and not _has_points_within_player_force()
 		and not _has_active_point_velocity()
 		and not _ax_spacing_active
+		and _ideal_drift_timer <= 0.0
 	):
 		return
 
@@ -1244,6 +1262,10 @@ func update_drag_physics(delta: float) -> void:
 	var moved: bool = false
 	for _i in range(steps):
 		moved = _step_drag_physics(step_delta, guide_loops) or moved
+
+	if _prev_player_force_active and not player_force_active and not _ax_spacing_active:
+		_ideal_drift_timer = IDEAL_DRIFT_DURATION
+	_prev_player_force_active = player_force_active
 
 	if moved:
 		_notify_points_changed()
@@ -1293,7 +1315,8 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 
 	# 安定化力（ガイドスナップ・点間斥力・CCW・辺斥力）はプレイヤー影響中か均等化中のみ実行する。
 	# アイドル時はこれらの力が微小速度を再注入し続け、物理が永遠に収束しない原因になる。
-	if player_force_active or _ax_spacing_active:
+	# _ideal_drift_timer > 0 のとき: ガイドスナップ・ドリフトのみ継続（pair/edge斥力は省略）。
+	if player_force_active or _ax_spacing_active or _ideal_drift_timer > 0.0:
 		# ①アクティブゾーン: player_force_active 中はプレイヤー影響半径 + pair斥力距離マージン
 		# 内のポイントのみを安定化対象にする。A+X 均等化のみのときは全点対象。
 		if player_force_active:
@@ -1304,16 +1327,18 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 		# ②フレームスロットル: 1フレームおきに安定化力をスキップ。A+X 均等化中は常に実行。
 		_stabilize_skip_frame = not _stabilize_skip_frame
 		if not _stabilize_skip_frame or _ax_spacing_active:
-			# 空間グリッドを1回だけ構築して pair/edge 両方の斥力計算で使い回す
+			# pair斥力はドリフト中も有効（プレイヤー不在時にポイントが1か所に集まるのを防ぐ）
 			var _pos_grid: Dictionary = _build_position_grid(POINT_PAIR_REPULSE_DISTANCE)
 			_apply_point_pair_repulsion(forces, _pos_grid)
-			if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
-				_apply_ax_spacing_equal_spacing_repulsion(forces)
-			var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
-			_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
-			_apply_polygon_ccw_order_constraint(forces, guide_constraint_mul)
-			_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
-			_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
+			if player_force_active or _ax_spacing_active:
+				if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
+					_apply_ax_spacing_equal_spacing_repulsion(forces)
+				var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
+				_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
+				_apply_polygon_ccw_order_constraint(forces, guide_constraint_mul)
+				_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
+				_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
+			_apply_ideal_vertex_drift(forces, nearest_features)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
@@ -1324,6 +1349,13 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 			continue
 		point_velocities[i] += forces[i] * delta
 		point_velocities[i] *= damping
+		# ガイド上のポイント（プレイヤー非接触）: 法線方向の速度をゼロ化してガイドから外れないようにする
+		if not _is_player_touching_point(i) and i < nearest_features.size():
+			var feat: Dictionary = nearest_features[i] as Dictionary
+			var e_dist: float = feat.get("edge_dist", INF) as float
+			if e_dist < GUIDE_EDGE_GLIDE_RADIUS:
+				var e_norm: Vector2 = _feature_edge_normal(feat, _game.point_positions[i])
+				point_velocities[i] -= e_norm * point_velocities[i].dot(e_norm)
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
 
@@ -1428,17 +1460,14 @@ func _is_guide_snap_bypassed_by_player_force(point_idx: int, _feature: Dictionar
 func _remap_player_force_when_distant_on_guide(point_idx: int, feature: Dictionary, pf: Vector2) -> Vector2:
 	if pf.length_squared() < 0.0001:
 		return pf
-	if player_position.distance_to(_game.point_positions[point_idx]) <= GUIDE_ATTRACT_FREE_PROXIMITY_PX:
-		return pf
 	var edge_dist: float = feature.get("edge_dist", INF) as float
 	if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
-		return pf
-	var pos: Vector2 = _game.point_positions[point_idx]
+		return pf  # ガイド外: リマップなし
+	if _is_player_touching_point(point_idx):
+		return pf  # 接触中: フルフォース（ガイドから外れることを許可）
+	# ガイド上で非接触: 接線成分のみ（法線ゼロ → ガイドから外れない）
 	var tangent: Vector2 = _feature_edge_tangent(feature)
-	var normal: Vector2 = _feature_edge_normal(feature, pos)
-	var fn: float = pf.dot(normal)
-	var ft: float = pf.dot(tangent)
-	return tangent * (ft * PLAYER_DISTANT_ON_GUIDE_TANGENT_SCALE) + normal * (fn * PLAYER_DISTANT_ON_GUIDE_NORMAL_SCALE)
+	return tangent * pf.dot(tangent)
 
 
 func _compute_player_force(point_idx: int) -> Vector2:
@@ -1545,9 +1574,12 @@ func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 					var falloff: float = 1.0 - dist / thr
 					var dir: Vector2 = delta / dist
 					var force: Vector2 = dir * (POINT_PAIR_REPULSE_STRENGTH * falloff * falloff)
-					if i_active:
+					# 頂点ロック済みポイントには斥力を加えない（頂点から押し出されないよう保護）
+					var i_locked: bool = i < _vertex_lock_flags.size() and _vertex_lock_flags[i] != 0
+					var j_locked: bool = j < _vertex_lock_flags.size() and _vertex_lock_flags[j] != 0
+					if i_active and not i_locked:
 						forces[i] -= force
-					if j_active:
+					if j_active and not j_locked:
 						forces[j] += force
 
 
@@ -1936,6 +1968,9 @@ func _apply_point_edge_repulsion(forces: Array[Vector2], grid: Dictionary, guide
 							gmul = guide_constraint_mul[k]
 						if gmul < 0.001:
 							continue
+						# 頂点ロック済みポイントは辺斥力からも保護
+						if k < _vertex_lock_flags.size() and _vertex_lock_flags[k] != 0:
+							continue
 						forces[k] += dir * (POINT_EDGE_REPULSE_STRENGTH * falloff * falloff * gmul)
 
 
@@ -1994,9 +2029,9 @@ func _apply_ccw_order_for_loop(forces: Array[Vector2], idx_start: int, idx_count
 			continue
 		perp /= pl
 		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0) * gmul
-		if not _is_locked(nxt):
+		if not _is_locked(nxt) and not (nxt < _vertex_lock_flags.size() and _vertex_lock_flags[nxt] != 0):
 			forces[nxt] += perp * mag
-		if not _is_locked(i):
+		if not _is_locked(i) and not (i < _vertex_lock_flags.size() and _vertex_lock_flags[i] != 0):
 			forces[i] -= perp * mag * 0.42
 
 
@@ -2035,9 +2070,9 @@ func _apply_ccw_order_for_walk_segment(forces: Array[Vector2], seg_start_in_orde
 			continue
 		perp /= pl
 		var mag: float = POLYGON_CCW_ORDER_STRENGTH * clampf((-cr) / (al * bl + 80.0), 0.04, 3.0) * gmul
-		if not _is_locked(nxt):
+		if not _is_locked(nxt) and not (nxt < _vertex_lock_flags.size() and _vertex_lock_flags[nxt] != 0):
 			forces[nxt] += perp * mag
-		if not _is_locked(i):
+		if not _is_locked(i) and not (i < _vertex_lock_flags.size() and _vertex_lock_flags[i] != 0):
 			forces[i] -= perp * mag * 0.42
 
 
@@ -2264,17 +2299,6 @@ func _apply_guide_snap_and_repulsion(forces: Array[Vector2], nearest_features: A
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		var vertex_dist: float = feature.get("vertex_dist", INF) as float
-		# 引力操作でガイドへ向かって接近中 → スナップの代わりにガイドから弾く
-		if fm > 0 and edge_dist < GUIDE_EDGE_SNAP_RADIUS:
-			var inward_normal: Vector2 = _feature_edge_normal(feature, pos)
-			var approach_speed: float = point_velocities[i].dot(inward_normal)
-			if approach_speed > GUIDE_ATTRACT_APPROACH_THRESHOLD:
-				var pf: Vector2 = _compute_player_force(i)
-				if pf.dot(inward_normal) > GUIDE_ATTRACT_TOWARD_GUIDE_MIN:
-					var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
-					forces[i] -= inward_normal * (GUIDE_ATTRACT_REPEL_STRENGTH * edge_strength)
-					forces[i] -= inward_normal * (approach_speed * GUIDE_SNAP_DAMPING * edge_strength * 2.0)
-					continue  # 頂点ロックもスキップ
 		if edge_dist < GUIDE_EDGE_SNAP_RADIUS:
 			var edge_strength: float = 1.0 - edge_dist / GUIDE_EDGE_SNAP_RADIUS
 			var edge_spring: float = GUIDE_EDGE_SPRING
@@ -2324,6 +2348,9 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		var feature: Dictionary = nearest_features[i] as Dictionary
 		if _is_guide_snap_bypassed_by_player_force(i, feature):
 			continue
+		# 頂点ロック済みポイントはスライド拘束をスキップ（角でタンジェントが不定になるため頂点ロックバネに任せる）
+		if vertex_locks.has(i):
+			continue
 		var pos: Vector2 = _game.point_positions[i]
 		var edge_dist: float = feature.get("edge_dist", INF) as float
 		if edge_dist >= GUIDE_EDGE_GLIDE_RADIUS:
@@ -2342,8 +2369,7 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 		forces[i] = tangent_force + track_force
 		if _get_player_force_mode() != 0:
 			var pf: Vector2 = _compute_player_force(i)
-			if player_position.distance_to(pos) > GUIDE_ATTRACT_FREE_PROXIMITY_PX:
-				pf = _remap_player_force_when_distant_on_guide(i, feature, pf)
+			pf = _remap_player_force_when_distant_on_guide(i, feature, pf)
 			var pl: float = pf.length()
 			if pl > 0.5:
 				var par: Vector2 = tangent * pf.dot(tangent)
@@ -2357,6 +2383,77 @@ func _constrain_forces_for_edge_slide(forces: Array[Vector2], nearest_features: 
 					if absf(sign_slide) < 0.001:
 						sign_slide = 1.0
 					forces[i] += tangent * (pl * GUIDE_REPEL_SLIDE_ASSIST * sign_slide)
+
+
+func _apply_ideal_vertex_drift(forces: Array[Vector2], nearest_features: Array) -> void:
+	var corner_world: Array = _game.stage_manager.get_corner_positions_world()
+	if corner_world.is_empty():
+		return
+	var n: int = _game.point_positions.size()
+	var nc: int = corner_world.size()
+	var mask_n: int = _phys_active_mask.size() if _phys_mask_enabled else 0
+
+	# 各コーナーの占有者を事前計算: OCCUPIED_RADIUS 以内で最も近いポイント index (-1=未占有)
+	var corner_occupant: Array = []
+	corner_occupant.resize(nc)
+	for j in range(nc):
+		var c_pos: Vector2 = corner_world[j] as Vector2
+		var best_k: int = -1
+		var best_kd: float = IDEAL_VERTEX_OCCUPIED_RADIUS
+		for k in range(n):
+			if _is_locked(k):
+				continue
+			var d: float = _game.point_positions[k].distance_to(c_pos)
+			if d < best_kd:
+				best_kd = d
+				best_k = k
+		corner_occupant[j] = best_k
+
+	for i in range(n):
+		if _is_locked(i):
+			continue
+		if i < _vertex_lock_flags.size() and _vertex_lock_flags[i] != 0:
+			continue
+		if _phys_mask_enabled and i < mask_n and _phys_active_mask[i] == 0:
+			continue
+		var feature: Dictionary = nearest_features[i] as Dictionary
+		if _is_guide_snap_bypassed_by_player_force(i, feature):
+			continue
+		var edge_dist: float = feature.get("edge_dist", INF) as float
+		if edge_dist >= GUIDE_EDGE_SNAP_RADIUS:
+			continue
+		var pos: Vector2 = _game.point_positions[i]
+
+		# 自分が占有者、または未占有のコーナーの中で最近のものへ引力
+		var best_j: int = -1
+		var best_dist: float = IDEAL_VERTEX_ATTRACT_RANGE
+		for j in range(nc):
+			var occ: int = corner_occupant[j]
+			if occ != -1 and occ != i:
+				continue  # 別ポイントが占有中
+			var d: float = pos.distance_to(corner_world[j] as Vector2)
+			if d < best_dist:
+				best_dist = d
+				best_j = j
+
+		if best_j >= 0:
+			forces[i] += (corner_world[best_j] as Vector2 - pos) * IDEAL_VERTEX_SPRING
+		else:
+			# 範囲内に空きコーナーなし → 最近の占有済みコーナーから押し出す斥力
+			var rep_j: int = -1
+			var rep_dist: float = IDEAL_VERTEX_ATTRACT_RANGE
+			for j in range(nc):
+				var d: float = pos.distance_to(corner_world[j] as Vector2)
+				if d < rep_dist:
+					rep_dist = d
+					rep_j = j
+			if rep_j >= 0:
+				var away: Vector2 = pos - (corner_world[rep_j] as Vector2)
+				var al: float = away.length()
+				if al < 0.5:
+					away = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).normalized()
+					al = 1.0
+				forces[i] += (away / al) * IDEAL_VERTEX_REPEL_STRENGTH
 
 
 func _build_fixed_guide_snap_loops() -> Array:
@@ -2548,9 +2645,55 @@ func _is_edge_pass_through(feature: Dictionary, pos: Vector2, velocity: Vector2)
 	return normal_speed > tangent_speed * GUIDE_EDGE_PASS_THROUGH_RATIO
 
 
-func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
-	# 旧: ガイド頂点へ GUIDE_VERTEX_LOCK_* で強固定していたが、角で「レール」が途切れるため無効化。
-	return {}
+func _compute_vertex_locks(nearest_features: Array) -> Dictionary:
+	# ガイドポリライン頂点（ideal_points を含む）ではなく、形状の実際の角（shape_corner_points）
+	# にのみロックする。これにより辺の中点にある理想点への意図しない定着を防ぐ。
+	# 永続ロック: 一度ハマった角は、プレイヤーが直接掴んで PERSIST_RELEASE_RADIUS 以上
+	# 引き離すまでロックを維持する。他の物理力ではロックは解除されない。
+	var result: Dictionary = {}
+	var n: int = _game.point_positions.size()
+	_vertex_lock_flags.resize(n)
+	var corner_world: Array = _game.stage_manager.get_corner_positions_world()
+	for i in range(n):
+		_vertex_lock_flags[i] = 0
+	if corner_world.is_empty():
+		_persistent_vertex_corners.clear()
+		return result  # circle/triangle など角のない形状はロックなし
+	for i in range(n):
+		var pos: Vector2 = _game.point_positions[i]
+
+		# 永続ロック中: 維持 or 解除
+		if _persistent_vertex_corners.has(i):
+			var p_corner: Vector2 = _persistent_vertex_corners[i]
+			var p_dist: float = pos.distance_to(p_corner)
+			if p_dist >= GUIDE_VERTEX_LOCK_PERSIST_RELEASE_RADIUS and _is_player_touching_point(i):
+				# プレイヤーが掴んで意図的に引き剥がした → 解除して通常判定へ
+				_persistent_vertex_corners.erase(i)
+			else:
+				# 維持: スプリングが引き戻し続けるので遠くてもロックフラグを立てる
+				_vertex_lock_flags[i] = 1
+				result[i] = {"vertex_pos": p_corner}
+				continue
+
+		# 通常ロック判定: GUIDE_VERTEX_LOCK_RADIUS 以内の角にスナップ
+		if i >= nearest_features.size():
+			continue
+		var feature: Dictionary = nearest_features[i] as Dictionary
+		var edge_dist: float = feature.get("edge_dist", INF) as float
+		if edge_dist >= GUIDE_EDGE_SNAP_RADIUS:
+			continue  # ガイド外のポイントはロック対象外
+		var best_corner: Vector2 = Vector2.ZERO
+		var best_d: float = GUIDE_VERTEX_LOCK_RADIUS
+		for cp in corner_world:
+			var d: float = pos.distance_to(cp as Vector2)
+			if d < best_d:
+				best_d = d
+				best_corner = cp as Vector2
+		if best_d < GUIDE_VERTEX_LOCK_RADIUS:
+			_vertex_lock_flags[i] = 1
+			_persistent_vertex_corners[i] = best_corner
+			result[i] = {"vertex_pos": best_corner}
+	return result
 
 
 func _feature_is_on_same_vertex_or_edge(feature: Dictionary, occupied_data: Dictionary) -> bool:

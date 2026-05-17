@@ -1,11 +1,11 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 98.0,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 450.0,
 		"min_radius": 350.0,
-		"num_points": 25.0,
+		"num_points": 27.0,
 		"shape_type": "fish",
 		"type": "cactus",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "サボテン",
-		"locale_key": "STAGE_CACTUS"
+		"locale_key": "STAGE_CACTUS",
+		"stage_name": "サボテン"
 	},
 	"schema_version": 1.0,
 	"shape": {
