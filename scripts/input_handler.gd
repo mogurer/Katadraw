@@ -161,13 +161,101 @@ var _guide_loops_cache_n: int = -1     # キャッシュ無効化用頂点数
 # --- 安定化力アクティブゾーン（引力・斥力時の非影響ポイントをスキップ） ---
 var _phys_active_mask: PackedByteArray = PackedByteArray()  # 1=アクティブ, 0=スキップ
 var _phys_mask_enabled: bool = false   # false のとき全点対象（マスク無効）
-var _vertex_lock_flags: PackedByteArray = PackedByteArray()  # 1=頂点ロック済み（ペア/辺斥力をスキップ）
-var _persistent_vertex_corners: Dictionary = {}  # point_index -> Vector2: 永続頂点ロック先
+var _vertex_lock_flags: PackedByteArray = PackedByteArray()  # 1=頂点ロック済み（未使用・互換性のため残存）
 var _stabilize_skip_frame: bool = false  # フレームスロットル用フラグ
+
+# --- 新スナップシステム（アリジゴク型） ---
+## コーナー占有管理: corner_index → point_index（そのコーナーを確保したポイント番号）
+var _snap_corner_occupant: Dictionary = {}
+## 各ポイントのスナップ状態: 0=未吸着, 1=コーナー吸着中, 2=辺吸着中
+var _snap_point_state: PackedByteArray = PackedByteArray()
+## スナップ先のワールド座標（吸着確定後の引き戻し先）
+var _snap_point_target: Array[Vector2] = []
+## スナップ先のコーナーインデックス（-1 = 辺スナップ）
+var _snap_point_corner_idx: PackedInt32Array = PackedInt32Array()
+## ガイドデータのフレームキャッシュ（update_drag_physics で1回だけ更新）
+var _snap_cached_corner_world: Array = []
+var _snap_cached_guide_loops: Array = []
 
 # --- 交差判定スロットル（3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減） ---
 var _isect_throttle: int = 0
+## スワップ発生後のクールダウン（サブステップ単位）。
+## この値が正の間は折り返し検出を停止し振動を防ぐ。実交差は引き続き検出する。
+const FOLDBACK_COOLDOWN_STEPS: int = 18  # ≒ 60fps × 3サブステップ × 0.1秒
+var _foldback_cooldown: int = 0
+
+# --- デバッグ: 再接続ハイライト（赤円で発火ポイントを表示）---
+## point_index -> expire_msec: この時刻まで赤ハイライト表示する
+var _debug_reconnect_highlight: Dictionary = {}
+const _DEBUG_RECONNECT_HIGHLIGHT_MS: int = 2000  # 2秒間赤表示
+
+# --- 物理パフォーマンス計測（デバッグ用） ---
+## 直近 N フレームの計測値を蓄積してオーバーレイに表示する
+const PERF_SAMPLE_FRAMES := 60
+var _perf_frame_us: Array[float] = []      # フレームごとの物理合計時間 (μs)
+var _perf_substeps: Array[int] = []        # フレームごとのサブステップ数
+var _perf_isect_us: Array[float] = []      # フレームごとの交差判定時間 (μs)
+## 外部参照用（UIRenderer から読む）
+var perf_avg_us: float = 0.0
+var perf_max_us: float = 0.0
+var perf_avg_substeps: float = 0.0
+var perf_avg_isect_us: float = 0.0
+var perf_isect_triggered: int = 0          # 今フレームの交差解消発動回数
+var _perf_last_isect_us: float = 0.0      # 直前サブステップの交差判定時間
+
+## フレーム計測値を記録して集計を更新する
+func _perf_record(frame_us: float, substeps: int, isect_us: float) -> void:
+	_perf_frame_us.append(frame_us)
+	_perf_substeps.append(substeps)
+	_perf_isect_us.append(isect_us)
+	if _perf_frame_us.size() > PERF_SAMPLE_FRAMES:
+		_perf_frame_us.pop_front()
+		_perf_substeps.pop_front()
+		_perf_isect_us.pop_front()
+	var sum_us: float = 0.0
+	var max_us: float = 0.0
+	var sum_ss: float = 0.0
+	var sum_is: float = 0.0
+	for v in _perf_frame_us:
+		sum_us += v
+		max_us = maxf(max_us, v)
+	for v in _perf_substeps:
+		sum_ss += v
+	for v in _perf_isect_us:
+		sum_is += v
+	var cnt: float = float(_perf_frame_us.size())
+	perf_avg_us = sum_us / cnt
+	perf_max_us = max_us
+	perf_avg_substeps = sum_ss / cnt
+	perf_avg_isect_us = sum_is / cnt
 const _ISECT_THROTTLE_EVERY: int = 3
+## 鋭角折り返し（ヘアピン）検出の内積閾値。
+## 連続する2辺の方向ベクトルの内積がこの値未満なら折り返しとみなす（-1.0=180°, 0.0=90°）。
+const FOLDBACK_DOT_THRESHOLD: float = -0.70
+
+## ===== アリジゴク型スナップシステム =====
+## スナップステップ周期（秒）: この間隔で未吸着ポイントをガイドへ引き寄せる
+const SNAP_STEP_PERIOD: float = 1.0
+## 1ステップあたりの引き寄せ割合（0.18 = 距離の18%を縮める）
+const SNAP_STEP_RATIO: float = 0.18
+## コーナー吸着確定半径（px）: この距離以内に入ったらコーナーへ確定吸着
+const SNAP_CORNER_RADIUS: float = 20.0
+## 辺吸着確定半径（px）: コーナーが取れないとき、この距離以内なら辺に確定吸着
+const SNAP_EDGE_RADIUS: float = 20.0
+## コーナー検索優先半径（px）: この距離以内のコーナーを辺より優先して検索する
+const SNAP_CORNER_PREFER_RADIUS: float = 60.0
+## 吸着解除距離（px）: 吸着確定後にターゲットからこれ以上離れたら解除
+const SNAP_RELEASE_RADIUS: float = 30.0
+## 吸着後の弱いバネ係数（px/s² per px）
+const SNAP_SPRING: float = 80.0
+## 吸着後のダンピング係数
+const SNAP_DAMPING: float = 12.0
+## 未吸着時のアプローチバネ係数: 常時ガイドへ引き寄せる（スムーズ移動を実現）
+const SNAP_APPROACH_SPRING: float = 8.0
+## 未吸着ポイント間の分離最小距離 (px) = 2 × POINT_RADIUS（視覚的重なり防止）
+const SNAP_SEPARATION_DISTANCE: float = 18.0
+## 未吸着ポイント間の分離力強度
+const SNAP_SEPARATION_STRENGTH: float = 2400.0
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -354,7 +442,14 @@ func reset_for_stage() -> void:
 	_ax_spacing_vertex_dwell_ms.clear()
 	_mouse_rel_motion_for_charge = 0.0
 	_pad_move_ramp_ms = 0.0
-	_persistent_vertex_corners.clear()
+	_foldback_cooldown = 0
+	_debug_reconnect_highlight.clear()
+	_snap_corner_occupant.clear()
+	_snap_point_state.clear()
+	_snap_point_target.clear()
+	_snap_point_corner_idx.clear()
+	_snap_cached_corner_world.clear()
+	_snap_cached_guide_loops.clear()
 	_reset_player_position()
 
 
@@ -1227,6 +1322,38 @@ func _sync_point_indices_to_centroid_polygon_order() -> void:
 	_permute_input_state_after_vertex_reorder(ord_perm)
 
 
+func _has_active_snap_state() -> bool:
+	for s in _snap_point_state:
+		if s != 0:
+			return true
+	return false
+
+
+## 吸着済みポイントのうち、まだターゲットに到達していないものがあるか確認
+func _snap_is_actively_pulling() -> bool:
+	var n: int = _snap_point_state.size()
+	for i in range(n):
+		if _snap_point_state[i] == 0:
+			continue
+		if i >= _game.point_positions.size():
+			continue
+		if _game.point_positions[i].distance_to(_snap_point_target[i]) > DRAG_POSITION_EPSILON:
+			return true
+	return false
+
+
+## 未吸着の（ロックされていない）ポイントが存在するか確認（Fix #2: 常に移動させる）
+func _has_unsnapped_active_points() -> bool:
+	var n: int = _game.point_positions.size()
+	var sn: int = _snap_point_state.size()
+	for i in range(n):
+		if _is_locked(i):
+			continue
+		if i >= sn or _snap_point_state[i] == 0:
+			return true
+	return false
+
+
 func update_drag_physics(delta: float) -> void:
 	_ensure_drag_state_arrays()
 	if not player_position_initialized:
@@ -1235,44 +1362,45 @@ func update_drag_physics(delta: float) -> void:
 		_ideal_drift_timer -= delta
 		if _ideal_drift_timer < 0.0:
 			_ideal_drift_timer = 0.0
+
 	if (
 		not player_force_active
 		and not _has_points_within_player_force()
 		and not _has_active_point_velocity()
 		and not _ax_spacing_active
 		and _ideal_drift_timer <= 0.0
+		and not _snap_is_actively_pulling()
+		and not _has_unsnapped_active_points()
 	):
+		_perf_record(0.0, 0, 0.0)
 		return
 
-	# ガイドループをフレーム内で一度だけ構築してキャッシュする（ゲームプレイ中は変化しない）
-	var raw_loops: Array = _game.stage_manager.get_active_guide_loops_world()
-	var _n_total: int = 0
-	for lp: Array in raw_loops:
-		_n_total += lp.size()
-	if _n_total != _guide_loops_cache_n:
-		_guide_loops_cache_n = _n_total
-		_guide_loops_cache.clear()
-		for lp: Array in raw_loops:
-			if lp.size() >= 2:
-				_guide_loops_cache.append(lp)
-	var guide_loops: Array = _guide_loops_cache
+	var _t_frame_start: int = Time.get_ticks_usec()
+
+	# ガイドデータをフレームごとに1回キャッシュ（サブステップで使い回すため、物理実行時のみ）
+	_snap_cached_corner_world = _game.stage_manager.get_corner_positions_world()
+	_snap_cached_guide_loops = _game.stage_manager.get_active_guide_loops_world()
 
 	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
 	var step_delta: float = delta / float(steps)
+	perf_isect_triggered = 0
 	var moved: bool = false
 	for _i in range(steps):
-		moved = _step_drag_physics(step_delta, guide_loops) or moved
+		moved = _step_drag_physics(step_delta) or moved
 
 	if _prev_player_force_active and not player_force_active and not _ax_spacing_active:
 		_ideal_drift_timer = IDEAL_DRIFT_DURATION
 	_prev_player_force_active = player_force_active
+
+	var _t_frame_end: int = Time.get_ticks_usec()
+	_perf_record(float(_t_frame_end - _t_frame_start), steps, float(_perf_last_isect_us))
 
 	if moved:
 		_notify_points_changed()
 		_game.queue_redraw()
 
 
-func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
+func _step_drag_physics(delta: float) -> bool:
 	if _game.point_positions.is_empty():
 		player_force_active = false
 		player_influenced_point_count = 0
@@ -1288,8 +1416,6 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 	_ensure_drag_state_arrays()
 	_update_ax_spacing_vertex_dwell(delta)
 
-	var nearest_features: Array = _compute_nearest_guide_features(guide_loops)
-	var vertex_locks: Dictionary = _compute_vertex_locks(nearest_features)
 	var forces: Array[Vector2] = []
 	forces.resize(_game.point_positions.size())
 	for i in range(forces.size()):
@@ -1302,7 +1428,6 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 			continue
 		var player_force: Vector2 = _compute_player_force(i)
 		if player_force.length_squared() > 0.0001:
-			player_force = _remap_player_force_when_distant_on_guide(i, nearest_features[i], player_force)
 			forces[i] += player_force
 			player_influenced_point_count += 1
 
@@ -1313,33 +1438,25 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 		or _ax_spacing_active
 	)
 
-	# 安定化力（ガイドスナップ・点間斥力・CCW・辺斥力）はプレイヤー影響中か均等化中のみ実行する。
-	# アイドル時はこれらの力が微小速度を再注入し続け、物理が永遠に収束しない原因になる。
-	# _ideal_drift_timer > 0 のとき: ガイドスナップ・ドリフトのみ継続（pair/edge斥力は省略）。
-	if player_force_active or _ax_spacing_active or _ideal_drift_timer > 0.0:
-		# ①アクティブゾーン: player_force_active 中はプレイヤー影響半径 + pair斥力距離マージン
-		# 内のポイントのみを安定化対象にする。A+X 均等化のみのときは全点対象。
+	# ガイド・ペア関連の力はすべて無効化。自キャラ操作（引力・斥力・A+X均等化）のみ有効。
+	if player_force_active or _ax_spacing_active:
 		if player_force_active:
 			var _ar: float = _get_effective_player_force_limit() + POINT_PAIR_REPULSE_DISTANCE
 			_build_phys_active_mask(player_position, _ar * _ar)
 		else:
 			_phys_mask_enabled = false
-		# ②フレームスロットル: 1フレームおきに安定化力をスキップ。A+X 均等化中は常に実行。
 		_stabilize_skip_frame = not _stabilize_skip_frame
 		if not _stabilize_skip_frame or _ax_spacing_active:
-			# pair斥力はドリフト中も有効（プレイヤー不在時にポイントが1か所に集まるのを防ぐ）
-			var _pos_grid: Dictionary = _build_position_grid(POINT_PAIR_REPULSE_DISTANCE)
-			_apply_point_pair_repulsion(forces, _pos_grid)
 			if player_force_active or _ax_spacing_active:
 				if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
 					_apply_ax_spacing_equal_spacing_repulsion(forces)
-				var guide_constraint_mul: PackedFloat32Array = _build_guide_constraint_mul_array(nearest_features)
-				_apply_point_edge_repulsion(forces, _pos_grid, guide_constraint_mul)
-				_apply_polygon_ccw_order_constraint(forces, guide_constraint_mul)
-				_apply_guide_snap_and_repulsion(forces, nearest_features, vertex_locks)
-				_constrain_forces_for_edge_slide(forces, nearest_features, vertex_locks)
-			_apply_ideal_vertex_drift(forces, nearest_features)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
+
+	# === スナップ力（アプローチ + 吸着後バネ + 未吸着分離）===
+	_snap_ensure_arrays()
+	_apply_snap_approach_forces(forces)
+	_apply_snap_spring_forces(forces)
+	_apply_snap_separation_forces(forces)
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
 
@@ -1349,26 +1466,73 @@ func _step_drag_physics(delta: float, guide_loops: Array) -> bool:
 			continue
 		point_velocities[i] += forces[i] * delta
 		point_velocities[i] *= damping
-		# ガイド上のポイント（プレイヤー非接触）: 法線方向の速度をゼロ化してガイドから外れないようにする
-		if not _is_player_touching_point(i) and i < nearest_features.size():
-			var feat: Dictionary = nearest_features[i] as Dictionary
-			var e_dist: float = feat.get("edge_dist", INF) as float
-			if e_dist < GUIDE_EDGE_GLIDE_RADIUS:
-				var e_norm: Vector2 = _feature_edge_normal(feat, _game.point_positions[i])
-				point_velocities[i] -= e_norm * point_velocities[i].dot(e_norm)
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
 
-	if player_force_active and not guide_loops.is_empty() and not _stabilize_skip_frame:
-		var post_features: Array = _compute_nearest_guide_features(guide_loops)
-		_apply_post_move_guide_constraints(post_features, vertex_locks)
-
 	# 交差判定: 3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減
+	# 案A: 実交差がなくても鋭角折り返し（ヘアピン）を検出して再接続を試みる
+	# クールダウン中は折り返し検出を停止して振動（チカチカ）を防ぐ
 	_isect_throttle = (_isect_throttle + 1) % _ISECT_THROTTLE_EVERY
+	if _foldback_cooldown > 0:
+		_foldback_cooldown -= 1
 	var topology_changed: bool = false
-	if _isect_throttle == 0 and _polygon_edges_have_interior_intersection() and _has_any_unlocked_polygon_vertex():
-		topology_changed = true
-		_resolve_intersections_2opt(lo, hi)
+	var _t_isect0: int = Time.get_ticks_usec()
+	if _isect_throttle == 0 and _has_any_unlocked_polygon_vertex():
+		var _n_pts: int = _game.point_positions.size()
+		var _now_ms: int = Time.get_ticks_msec()
+		var _exp_ms: int = _now_ms + _DEBUG_RECONNECT_HIGHLIGHT_MS
+		if _polygon_edges_have_interior_intersection():
+			# デバッグ: 最初の交差辺ペアを記録・表示
+			var dbg_pair: Vector2i = _find_first_crossing_edge_indices()
+			if dbg_pair.x >= 0:
+				var _pa: int = dbg_pair.x
+				var _pb: int = (dbg_pair.x + 1) % _n_pts
+				var _pc: int = dbg_pair.y
+				var _pd: int = (dbg_pair.y + 1) % _n_pts
+				for _hi in [_pa, _pb, _pc, _pd]:
+					_debug_reconnect_highlight[_hi] = _exp_ms
+				print("[ISECT] 交差: 辺(%d→%d) × 辺(%d→%d)  pos: %v→%v × %v→%v" % [
+					_pa, _pb, _pc, _pd,
+					_game.point_positions[_pa].snapped(Vector2.ONE),
+					_game.point_positions[_pb].snapped(Vector2.ONE),
+					_game.point_positions[_pc].snapped(Vector2.ONE),
+					_game.point_positions[_pd].snapped(Vector2.ONE),
+				])
+			topology_changed = true
+			perf_isect_triggered += 1
+			_resolve_intersections_2opt(lo, hi)
+			_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS
+		elif _foldback_cooldown == 0:
+			var fb_k: int = _find_first_foldback_vertex_index(FOLDBACK_DOT_THRESHOLD)
+			if fb_k >= 0:
+				# デバッグ: 折り返し頂点を記録・表示
+				var _fb_prev: int = fb_k - 1
+				var _fb_nxt: int = fb_k + 1
+				var _d_in: Vector2 = _game.point_positions[fb_k] - _game.point_positions[_fb_prev]
+				var _d_out: Vector2 = _game.point_positions[_fb_nxt] - _game.point_positions[fb_k]
+				var _dot_v: float = _d_in.dot(_d_out) / maxf(_d_in.length() * _d_out.length(), 1e-6)
+				for _hi in [fb_k - 2, fb_k - 1, fb_k, fb_k + 1, fb_k + 2]:
+					if _hi >= 0 and _hi < _n_pts:
+						_debug_reconnect_highlight[_hi] = _exp_ms
+				topology_changed = true
+				perf_isect_triggered += 1
+				var _fold_ok: bool = _resolve_foldback_at_vertex(fb_k)
+				if _fold_ok:
+					print("[FOLD]  折返解消: k=%d(ei=%d,ej=%d) dot=%.3f  pos:%v" % [
+						fb_k, fb_k - 2, fb_k + 1, _dot_v,
+						_game.point_positions[fb_k].snapped(Vector2.ONE),
+					])
+					_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS
+				else:
+					# swap すると交差が生じるため取り消し → この折り返しは受け入れる
+					print("[FOLD]  折返=交差と両立不可、現状維持: k=%d dot=%.3f" % [fb_k, _dot_v])
+					# 長いクールダウンで同じ試行を繰り返さない
+					_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS * 10
+	_perf_last_isect_us = float(Time.get_ticks_usec() - _t_isect0)
+
+	# 交差解消後: 位置が変わったスナップ点を解除（案Y: 交差解消優先）
+	if topology_changed:
+		_snap_release_far_points()
 
 	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
@@ -1437,6 +1601,7 @@ func _permute_input_state_after_vertex_reorder(ord: PackedInt32Array) -> void:
 		for i in range(n):
 			drag_influence_weights.append(new_w[i])
 	_game.ui_renderer.permute_guide_point_distances_for_vertex_reorder(ord)
+	_snap_permute_after_reorder(ord)
 
 
 func _get_effective_player_force_limit() -> float:
@@ -1781,6 +1946,53 @@ func _segment_intersect_strict_interior(a1: Vector2, a2: Vector2, b1: Vector2, b
 	var u: float = (qp.x * r.y - qp.y * r.x) / rxs
 	const eps: float = 1e-4
 	return t > eps and t < 1.0 - eps and u > eps and u < 1.0 - eps
+
+
+## 鋭角折り返し（ヘアピン）頂点を検索する。
+## 連続する入辺・出辺の方向ベクトルの内積が threshold 未満の最初の頂点インデックスを返す。
+## 隣接する辺が極めて逆方向（約 170°以上の折り返し）を向いているとき、
+## 視覚的には交差に見えるが幾何学的交差判定では検出されないケースを補足する。
+func _find_first_foldback_vertex_index(threshold: float) -> int:
+	var n: int = _game.point_positions.size()
+	if n < 3:
+		return -1
+	for i in range(n):
+		var prev: int = (i - 1 + n) % n
+		var nxt: int = (i + 1) % n
+		var d_in: Vector2 = _game.point_positions[i] - _game.point_positions[prev]
+		var d_out: Vector2 = _game.point_positions[nxt] - _game.point_positions[i]
+		var li: float = d_in.length()
+		var lo_len: float = d_out.length()
+		if li < 1e-6 or lo_len < 1e-6:
+			continue
+		if d_in.dot(d_out) / (li * lo_len) < threshold:
+			return i
+	return -1
+
+
+## 折り返し頂点 k の近傍3頂点 [k-1, k, k+1] を 2-opt swap で反転して解消する。
+## ラップアラウンドが必要なケース（k が 0, 1, n-1 付近）はスキップする。
+## swap 後に幾何学的交差が生じた場合は swap を取り消して元の状態（折り返しあり・交差なし）を維持する。
+## 戻り値: swap が有効に適用された場合 true、取り消した場合 false。
+func _resolve_foldback_at_vertex(k: int) -> bool:
+	var n: int = _game.point_positions.size()
+	if n < 5:
+		return false
+	# 2-opt swap (ei, ej) は [ei+1 .. ej] を逆順にする。
+	# 折り返しが頂点 k にある場合、ei = k-2, ej = k+1 で [k-1, k, k+1] を反転する。
+	var ei: int = k - 2
+	var ej: int = k + 1
+	# ei < 0 または ej >= n の場合はラップアラウンドが必要 → スキップ
+	if ei < 0 or ej >= n:
+		return false
+	if ej - ei < 2:
+		return false
+	_2opt_swap_and_permute_state(ei, ej)
+	# swap 後に新たな交差が生じた場合は元に戻す（同じ swap は自己逆置換）
+	if _polygon_edges_have_interior_intersection():
+		_2opt_swap_and_permute_state(ei, ej)
+		return false
+	return true
 
 
 func _polygon_edges_have_interior_intersection() -> bool:
@@ -2645,57 +2857,246 @@ func _is_edge_pass_through(feature: Dictionary, pos: Vector2, velocity: Vector2)
 	return normal_speed > tangent_speed * GUIDE_EDGE_PASS_THROUGH_RATIO
 
 
-func _compute_vertex_locks(nearest_features: Array) -> Dictionary:
-	# ガイドポリライン頂点（ideal_points を含む）ではなく、形状の実際の角（shape_corner_points）
-	# にのみロックする。これにより辺の中点にある理想点への意図しない定着を防ぐ。
-	# 永続ロック: 一度ハマった角は、プレイヤーが直接掴んで PERSIST_RELEASE_RADIUS 以上
-	# 引き離すまでロックを維持する。他の物理力ではロックは解除されない。
-	var result: Dictionary = {}
+## 旧バージョンの頂点ロック関数（廃止済み）。
+## 新スナップシステムへ移行のため、呼び出し元がない。互換性のため宣言のみ残す。
+func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
+	return {}
+
+
+## ===== 新スナップシステム（アリジゴク型）=====
+
+## スナップ状態配列のサイズをポイント数に合わせる
+func _snap_ensure_arrays() -> void:
 	var n: int = _game.point_positions.size()
-	_vertex_lock_flags.resize(n)
-	var corner_world: Array = _game.stage_manager.get_corner_positions_world()
-	for i in range(n):
-		_vertex_lock_flags[i] = 0
-	if corner_world.is_empty():
-		_persistent_vertex_corners.clear()
-		return result  # circle/triangle など角のない形状はロックなし
-	for i in range(n):
-		var pos: Vector2 = _game.point_positions[i]
+	# PackedByteArray: resize は新要素を 0 で初期化
+	if _snap_point_state.size() != n:
+		_snap_point_state.resize(n)
+	# Array[Vector2]: resize は新要素を Vector2.ZERO で初期化
+	if _snap_point_target.size() != n:
+		_snap_point_target.resize(n)
+	# PackedInt32Array: resize は新要素を 0 で初期化 → -1 で埋め直す
+	if _snap_point_corner_idx.size() != n:
+		var old_cn: int = _snap_point_corner_idx.size()
+		_snap_point_corner_idx.resize(n)
+		for i in range(old_cn, n):
+			_snap_point_corner_idx[i] = -1
 
-		# 永続ロック中: 維持 or 解除
-		if _persistent_vertex_corners.has(i):
-			var p_corner: Vector2 = _persistent_vertex_corners[i]
-			var p_dist: float = pos.distance_to(p_corner)
-			if p_dist >= GUIDE_VERTEX_LOCK_PERSIST_RELEASE_RADIUS and _is_player_touching_point(i):
-				# プレイヤーが掴んで意図的に引き剥がした → 解除して通常判定へ
-				_persistent_vertex_corners.erase(i)
-			else:
-				# 維持: スプリングが引き戻し続けるので遠くてもロックフラグを立てる
-				_vertex_lock_flags[i] = 1
-				result[i] = {"vertex_pos": p_corner}
-				continue
 
-		# 通常ロック判定: GUIDE_VERTEX_LOCK_RADIUS 以内の角にスナップ
-		if i >= nearest_features.size():
+## ポイント i のスナップを解除し、コーナー占有も解放する
+func _snap_release_point(i: int) -> void:
+	if i >= _snap_point_state.size():
+		return
+	if _snap_point_state[i] == 1:
+		var ci: int = _snap_point_corner_idx[i]
+		if ci >= 0 and _snap_corner_occupant.get(ci, -1) == i:
+			_snap_corner_occupant.erase(ci)
+	_snap_point_state[i] = 0
+	_snap_point_corner_idx[i] = -1
+
+
+## プレイヤーが斥力を point i に向けて発動中かどうか
+func _is_player_repelling_this_snap_point(i: int) -> bool:
+	if not player_force_repelling:
+		return false
+	var r: float = PLAYER_FORCE_RADIUS + _empty_repulse_radius_bonus
+	return player_position.distance_squared_to(_game.point_positions[i]) <= r * r
+
+
+## ガイドの辺上で pos に最近接の点を返す。guide_loops は get_active_guide_loops_world() の値。
+func _snap_nearest_edge_point(pos: Vector2, guide_loops: Array) -> Vector2:
+	var best_pt: Vector2 = pos
+	var best_d: float = INF
+	for loop in guide_loops:
+		var pts: Array = loop as Array
+		var lsz: int = pts.size()
+		if lsz < 2:
 			continue
-		var feature: Dictionary = nearest_features[i] as Dictionary
-		var edge_dist: float = feature.get("edge_dist", INF) as float
-		if edge_dist >= GUIDE_EDGE_SNAP_RADIUS:
-			continue  # ガイド外のポイントはロック対象外
-		var best_corner: Vector2 = Vector2.ZERO
-		var best_d: float = GUIDE_VERTEX_LOCK_RADIUS
-		for cp in corner_world:
-			var d: float = pos.distance_to(cp as Vector2)
+		for vi in range(lsz):
+			var va: Vector2 = pts[vi] as Vector2
+			var vb: Vector2 = pts[(vi + 1) % lsz] as Vector2
+			var ep: Vector2 = _closest_point_on_segment(pos, va, vb)
+			var d: float = pos.distance_to(ep)
 			if d < best_d:
 				best_d = d
-				best_corner = cp as Vector2
-		if best_d < GUIDE_VERTEX_LOCK_RADIUS:
-			_vertex_lock_flags[i] = 1
-			_persistent_vertex_corners[i] = best_corner
-			result[i] = {"vertex_pos": best_corner}
-	return result
+				best_pt = ep
+	return best_pt
 
 
+## 未吸着ポイントをガイド角または辺へ常時バネ力で引き寄せる（Fix #1: スムーズ移動）。
+## 吸着確定半径に入ったらその場で確定吸着する（Fix #2: 常に動作）。
+## キャッシュ済みの _snap_cached_corner_world / _snap_cached_guide_loops を使用。
+func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
+	var n: int = _game.point_positions.size()
+	var corner_world: Array = _snap_cached_corner_world
+	var guide_loops: Array = _snap_cached_guide_loops
+	var n_corners: int = corner_world.size()
+
+	for i in range(n):
+		if _is_locked(i):
+			continue
+		if _snap_point_state[i] != 0:
+			# 吸着済み: 解除条件チェック（遠すぎ or プレイヤー斥力）
+			var dist: float = _game.point_positions[i].distance_to(_snap_point_target[i])
+			if dist > SNAP_RELEASE_RADIUS or _is_player_repelling_this_snap_point(i):
+				_snap_release_point(i)
+			continue
+
+		# B-2: プレイヤーが斥力を発動中のポイントはスナップしない
+		if _is_player_repelling_this_snap_point(i):
+			continue
+
+		var pos: Vector2 = _game.point_positions[i]
+
+		# === 最近接の空きコーナーを探す（距離制限なし: Fix #2）===
+		var best_ci: int = -1
+		var best_cd: float = INF
+		for ci in range(n_corners):
+			var cp: Vector2 = corner_world[ci] as Vector2
+			var d: float = pos.distance_to(cp)
+			if d >= best_cd:
+				continue
+			# 先着方式: 空きコーナーのみ
+			var occupant: int = int(_snap_corner_occupant.get(ci, -1))
+			if occupant < 0 or occupant == i:
+				best_cd = d
+				best_ci = ci
+
+		if best_ci >= 0:
+			var target: Vector2 = corner_world[best_ci] as Vector2
+			if best_cd <= SNAP_CORNER_RADIUS:
+				# コーナー確定吸着
+				_snap_corner_occupant[best_ci] = i
+				_snap_point_state[i] = 1
+				_snap_point_target[i] = target
+				_snap_point_corner_idx[i] = best_ci
+				_game.point_positions[i] = target
+				point_velocities[i] = Vector2.ZERO
+			else:
+				# 常時アプローチバネ力（スムーズ移動）
+				forces[i] += (target - pos) * SNAP_APPROACH_SPRING
+			continue  # 辺スナップは不要
+
+		# === 全コーナー占有 → 辺スナップへフォールバック ===
+		if guide_loops.is_empty():
+			continue
+		var edge_pt: Vector2 = _snap_nearest_edge_point(pos, guide_loops)
+		var edge_d: float = pos.distance_to(edge_pt)
+		if edge_d <= SNAP_EDGE_RADIUS:
+			# 辺確定吸着
+			_snap_point_state[i] = 2
+			_snap_point_target[i] = edge_pt
+			_snap_point_corner_idx[i] = -1
+			_game.point_positions[i] = edge_pt
+			point_velocities[i] = Vector2.ZERO
+		else:
+			# 常時アプローチバネ力（辺方向）
+			forces[i] += (edge_pt - pos) * SNAP_APPROACH_SPRING
+
+
+## 未吸着ポイント同士が重ならないよう分離力を加える（Fix #3）。
+## 吸着済みポイントは対象外（snap spring に任せる）。
+func _apply_snap_separation_forces(forces: Array[Vector2]) -> void:
+	var n: int = _game.point_positions.size()
+	var sn: int = _snap_point_state.size()
+	for i in range(n - 1):
+		if _is_locked(i):
+			continue
+		if i < sn and _snap_point_state[i] != 0:
+			continue  # 吸着済みは対象外
+		var pi: Vector2 = _game.point_positions[i]
+		for j in range(i + 1, n):
+			if _is_locked(j):
+				continue
+			if j < sn and _snap_point_state[j] != 0:
+				continue  # 吸着済みは対象外
+			var pj: Vector2 = _game.point_positions[j]
+			var delta_v: Vector2 = pi - pj
+			var dist: float = delta_v.length()
+			if dist < 0.001 or dist >= SNAP_SEPARATION_DISTANCE:
+				continue
+			var dir: Vector2 = delta_v / dist
+			var falloff: float = 1.0 - dist / SNAP_SEPARATION_DISTANCE
+			var fmag: float = SNAP_SEPARATION_STRENGTH * falloff * falloff
+			forces[i] += dir * fmag
+			forces[j] -= dir * fmag
+
+
+## 吸着後の弱いバネ力を forces に加算する。
+## 吸着点が SNAP_RELEASE_RADIUS を超えていたら自動解除する。
+## 収束後（ターゲットに十分近い）は速度をゼロにしてマイクロ振動を防ぐ。
+func _apply_snap_spring_forces(forces: Array[Vector2]) -> void:
+	var n: int = _snap_point_state.size()
+	if n == 0:
+		return
+	for i in range(mini(n, _game.point_positions.size())):
+		if _snap_point_state[i] == 0:
+			continue
+		if _is_locked(i):
+			_snap_release_point(i)
+			continue
+		var pos: Vector2 = _game.point_positions[i]
+		var target: Vector2 = _snap_point_target[i]
+		var dist: float = pos.distance_to(target)
+		# 吸着解除条件
+		if dist > SNAP_RELEASE_RADIUS or _is_player_repelling_this_snap_point(i):
+			_snap_release_point(i)
+			continue
+		# 収束判定: ターゲットに十分近いなら位置を固定して速度をゼロに
+		if dist < DRAG_POSITION_EPSILON:
+			_game.point_positions[i] = target
+			point_velocities[i] = Vector2.ZERO
+			continue
+		# 弱いバネ力で引き戻す
+		forces[i] += (target - pos) * SNAP_SPRING
+		forces[i] -= point_velocities[i] * SNAP_DAMPING
+
+
+## 全吸着点を走査し、ターゲットから SNAP_RELEASE_RADIUS 以上離れていたら解除する
+## （交差解消後の位置変化への対応）
+func _snap_release_far_points() -> void:
+	var n: int = _snap_point_state.size()
+	for i in range(mini(n, _game.point_positions.size())):
+		if _snap_point_state[i] == 0:
+			continue
+		if _game.point_positions[i].distance_to(_snap_point_target[i]) > SNAP_RELEASE_RADIUS:
+			_snap_release_point(i)
+
+
+## 2-opt 置換後にスナップ状態配列を同じ順序で並び替える
+func _snap_permute_after_reorder(ord: PackedInt32Array) -> void:
+	var n: int = ord.size()
+	if n == 0 or _snap_point_state.size() != n:
+		return
+	# 逆置換 (old_idx → new_idx)
+	var inv: PackedInt32Array = PackedInt32Array()
+	inv.resize(n)
+	for new_i in range(n):
+		inv[ord[new_i]] = new_i
+	# 状態配列を置換
+	var new_state: PackedByteArray = PackedByteArray()
+	new_state.resize(n)
+	var new_target: Array[Vector2] = []
+	new_target.resize(n)
+	var new_cidx: PackedInt32Array = PackedInt32Array()
+	new_cidx.resize(n)
+	for new_i in range(n):
+		var old_i: int = ord[new_i]
+		new_state[new_i] = _snap_point_state[old_i]
+		new_target[new_i] = _snap_point_target[old_i]
+		new_cidx[new_i] = _snap_point_corner_idx[old_i]
+	_snap_point_state = new_state
+	_snap_point_target = new_target
+	_snap_point_corner_idx = new_cidx
+	# コーナー占有辞書のポイントインデックスを新インデックスに更新
+	var new_occ: Dictionary = {}
+	for ci in _snap_corner_occupant:
+		var old_pi: int = int(_snap_corner_occupant[ci])
+		if old_pi >= 0 and old_pi < n:
+			new_occ[ci] = inv[old_pi]
+	_snap_corner_occupant = new_occ
+
+
+## ===== 旧スナップシステム（未使用、互換性のため残存）=====
 func _feature_is_on_same_vertex_or_edge(feature: Dictionary, occupied_data: Dictionary) -> bool:
 	var occupied_loop: int = occupied_data.get("vertex_loop", -1) as int
 	var occupied_vertex: int = occupied_data.get("vertex_idx", -1) as int

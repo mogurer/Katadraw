@@ -1794,12 +1794,23 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 	else:
 		for i in range(n):
 			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
+	var _dbg_hl: Dictionary = _game.input_handler._debug_reconnect_highlight
+	var _dbg_now: int = Time.get_ticks_msec()
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var r: float = _point_radius_by_guide(i)
 		var base_c: Color = POINT_COLOR
 		var alpha: float = _game._point_accuracy_alpha(i)
 		_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
+		# デバッグ: 再接続発火ポイントを赤円でハイライト
+		if _dbg_hl.has(i):
+			var _exp: int = _dbg_hl[i] as int
+			if _dbg_now < _exp:
+				var _fade: float = clampf(float(_exp - _dbg_now) / 500.0, 0.0, 1.0)
+				_game.draw_circle(pos, r * 1.6, Color(1.0, 0.08, 0.08, 0.72 * _fade))
+				_game.draw_arc(pos, r * 1.6, 0.0, TAU, 24, Color(1.0, 0.5, 0.1, _fade), 2.5, true)
+			else:
+				_dbg_hl.erase(i)
 
 
 func _repro_get_display_value() -> float:
@@ -2411,23 +2422,42 @@ func _draw_debug_circularity_overlay(vp: Vector2) -> void:
 	var disp: float = _game.get_display_reproduction_rate(raw)
 	var goal: float = 100.0 - _game.clear_threshold
 	var min_p: float = _game.display_rate_min_pct
+	var ih: InputHandler = _game.input_handler
+	var phys_avg: float = ih.perf_avg_us
+	var phys_max: float = ih.perf_max_us
+	var isect_avg: float = ih.perf_avg_isect_us
+	var substep_avg: float = ih.perf_avg_substeps
+	var isect_hit: int = ih.perf_isect_triggered
 	var lines: Array[String] = [
 		"実測値: %.2f%%" % raw,
 		"表示値: %.1f%%" % disp,
 		"クリア: %.1f%%" % goal,
 		"下限:   %.1f%%" % min_p,
+		"─── 物理 (60f avg) ───",
+		"合計 avg: %5.0f μs" % phys_avg,
+		"合計 max: %5.0f μs" % phys_max,
+		"交差判定:  %5.0f μs" % isect_avg,
+		"サブステップ: %.1f" % substep_avg,
+		"交差解消: %d / f" % isect_hit,
 	]
 	var fs: int = 15
 	var pad: float = 6.0
 	var line_h: float = fs + 3.0
-	var bg_w: float = 160.0
+	var bg_w: float = 185.0
 	var bg_h: float = line_h * lines.size() + pad * 2.0
 	var ox: float = 8.0
 	var oy: float = 8.0
 	_game.draw_rect(Rect2(ox, oy, bg_w, bg_h), Color(0.0, 0.0, 0.0, 0.52))
 	for li in range(lines.size()):
+		var col := Color(1.0, 1.0, 1.0, 0.92)
+		if li == 4:  # セパレータ行
+			col = Color(0.7, 0.7, 0.7, 0.7)
+		elif li >= 5 and li <= 7:
+			# 重い処理は赤く表示（1ms = 1000μs 超えで警告）
+			if (li == 5 and phys_avg > 1000.0) or (li == 7 and isect_avg > 300.0):
+				col = Color(1.0, 0.4, 0.3, 1.0)
 		_game.draw_string(_game.font, Vector2(ox + pad, oy + pad + fs + line_h * li), lines[li],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 1.0, 1.0, 0.92))
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 func _draw_debug_ideal_points_overlay() -> void:

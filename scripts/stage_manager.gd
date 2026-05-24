@@ -29,6 +29,9 @@ const VERTEX_MIN_TURNING_DEG := 30.0
 
 ## 弧を _sample_arc に渡す分割数（num_samples）。全ステージ共通で 6 セグメント
 const ARC_OUTLINE_SAMPLES := 6
+## 弧を折れ線に展開するときの最大ピクセル誤差（画面スケール換算）。
+## 中心角ベースで N = ceil(θ / (2·arccos(1 − d/r))) セグメントに分割する。
+const ARC_FLATTEN_MAX_PIXEL_ERROR: float = 4.0
 ## 一致度計算時のみ: 弧としてサンプルした閉曲線の辺の距離に掛ける係数（<1 で厳しさ緩和）。直線辺は 1.0
 const ARC_SEGMENT_MATCH_LENIENCY_MUL := 0.6
 
@@ -776,6 +779,9 @@ func _generate_circle_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 
 	var verts: Array = get_circle_polygon_vertices()
 	var arc_ctrls: Dictionary = get_circle_arc_controls()
+	# 弧を折れ線に展開（中心角ベース、4px 誤差）
+	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
+	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -784,6 +790,9 @@ func _generate_circle_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 		max_d = maxf(max_d, (p - c).length())
 	for p in ideal_outline_points:
 		max_d = maxf(max_d, (p - c).length())
+	shape_corner_points = []
+	for v in verts:
+		shape_corner_points.append((v as Vector2 - c) / max_d)
 	var normalized_ideal: Array = []
 	for p in ideal_points:
 		normalized_ideal.append((p - c) / max_d)
@@ -1006,6 +1015,8 @@ func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Diction
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _get_cat_face_polygon_vertices()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
+	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
+	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	# 周長の重心で中心化し、同一スケールで正規化（製作中図形とガイドの中心一致用）
@@ -1187,6 +1198,8 @@ func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary)
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else get_fish_polygon_vertices()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_fish_arc_controls()
+	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
+	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -1221,6 +1234,8 @@ func _generate_heptagram_polygon_shape(center: Vector2, pts: Array[Vector2], cfg
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_polygon_vertices_embedded()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
+	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
+	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -1255,6 +1270,8 @@ func _generate_heptagram_silhouette_polygon_shape(center: Vector2, pts: Array[Ve
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_silhouette_polygon_vertices_embedded()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
+	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
+	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -1291,6 +1308,8 @@ func _generate_rugby_ball_polygon_shape(center: Vector2, pts: Array[Vector2], cf
 	var arc_ctrls: Dictionary = (
 		_cfg_shape_arc if not _cfg_shape_arc.is_empty() else rugby_ball_arc_controls_embedded()
 	)
+	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
+	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -1315,6 +1334,51 @@ func _generate_rugby_ball_polygon_shape(center: Vector2, pts: Array[Vector2], cf
 		var ideal: Vector2 = ideal_points[i]
 		var noise: Vector2 = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * variance_factor
 		pts.append(center + (ideal + noise) * base_r)
+
+
+## 弧を含む頂点リストを折れ線（弧なし）へ展開する。
+## 各弧辺を中心角ベースで N セグメントに分割し、中間頂点を挿入して返す。
+## max_err_norm: 正規化座標空間での最大許容誤差 = ARC_FLATTEN_MAX_PIXEL_ERROR / base_r
+func _expand_arcs_to_polyline_verts(verts: Array, arc_ctrls: Dictionary, max_err_norm: float) -> Array:
+	if arc_ctrls.is_empty():
+		return verts
+	var n_v: int = verts.size()
+	var result: Array = []
+	for i in range(n_v):
+		var p1: Vector2 = verts[i] as Vector2
+		result.append(p1)
+		if not arc_ctrls.has(i):
+			continue
+		var p2: Vector2 = verts[(i + 1) % n_v] as Vector2
+		var ac: Vector2 = arc_ctrls[i] as Vector2
+		# 外接円の中心・半径
+		var ctr: Vector2 = _circumcenter(p1, p2, ac)
+		if ctr.x != ctr.x:  # NaN（3点が共線）→ 直線のまま
+			continue
+		var r: float = p1.distance_to(ctr)
+		if r < 0.0001:
+			continue
+		# 弧の方向（ac を通らない方）と中心角 θ
+		var ang_a: float = atan2(p1.y - ctr.y, p1.x - ctr.x)
+		var ang_b: float = atan2(p2.y - ctr.y, p2.x - ctr.x)
+		var ang_ac: float = atan2(ac.y - ctr.y, ac.x - ctr.x)
+		var delta: float = ang_b - ang_a
+		while delta > PI:
+			delta -= TAU
+		while delta <= -PI:
+			delta += TAU
+		if _angle_between(ang_ac, ang_a, ang_a + delta):
+			delta = delta - TAU if delta > 0 else delta + TAU
+		var theta: float = absf(delta)
+		# N = ceil(θ / α_max),  α_max = 2·arccos(1 − d/r)
+		var alpha_max: float = 2.0 * acos(clampf(1.0 - max_err_norm / r, -1.0, 1.0))
+		var n_segs: int = maxi(1, ceili(theta / alpha_max))
+		# 中間頂点を挿入（終点 p2 は次ループの p1 として追加される）
+		for k in range(1, n_segs):
+			var t: float = float(k) / float(n_segs)
+			var ang: float = ang_a + delta * t
+			result.append(ctr + Vector2(cos(ang), sin(ang)) * r)
+	return result
 
 
 func _circumcenter(a: Vector2, b: Vector2, c: Vector2) -> Vector2:
