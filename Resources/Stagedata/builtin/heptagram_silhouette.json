@@ -1,6 +1,6 @@
-{
+﻿{
 	"config": {
-		"clear_pct": 99.0,
+		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 420.0,

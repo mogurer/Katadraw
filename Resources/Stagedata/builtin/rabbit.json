@@ -1,11 +1,11 @@
 ﻿{
 	"config": {
-		"clear_pct": 98.0,
+		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 500.0,
 		"min_radius": 300.0,
-		"num_points": 39.0,
+		"num_points": 36,
 		"shape_type": "fish",
 		"type": "rabbit",
 		"variance": 0.15
