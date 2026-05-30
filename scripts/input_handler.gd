@@ -1521,8 +1521,9 @@ func _step_drag_physics(delta: float) -> bool:
 			var fb_k: int = _find_first_foldback_vertex_index(FOLDBACK_DOT_THRESHOLD)
 			if fb_k >= 0:
 				# デバッグ: 折り返し頂点を記録・表示
-				var _fb_prev: int = fb_k - 1
-				var _fb_nxt: int = fb_k + 1
+				# ポイントはリング状のため、先頭・末尾でモジュロ折り返しが必要
+				var _fb_prev: int = (fb_k - 1 + _n_pts) % _n_pts
+				var _fb_nxt: int = (fb_k + 1) % _n_pts
 				var _d_in: Vector2 = _game.point_positions[fb_k] - _game.point_positions[_fb_prev]
 				var _d_out: Vector2 = _game.point_positions[_fb_nxt] - _game.point_positions[fb_k]
 				var _dot_v: float = _d_in.dot(_d_out) / maxf(_d_in.length() * _d_out.length(), 1e-6)
