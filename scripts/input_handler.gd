@@ -176,6 +176,8 @@ var _snap_point_corner_idx: PackedInt32Array = PackedInt32Array()
 ## ガイドデータのフレームキャッシュ（update_drag_physics で1回だけ更新）
 var _snap_cached_corner_world: Array = []
 var _snap_cached_guide_loops: Array = []
+## スナップ強度ランプアップ経過時間（秒）。playing 中のみ進行し、SNAP_RAMP_DURATION で上限
+var snap_ramp_elapsed: float = 0.0
 
 # --- 交差判定スロットル（3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減） ---
 var _isect_throttle: int = 0
@@ -256,6 +258,8 @@ const SNAP_APPROACH_SPRING: float = 8.0
 const SNAP_SEPARATION_DISTANCE: float = 18.0
 ## 未吸着ポイント間の分離力強度
 const SNAP_SEPARATION_STRENGTH: float = 2400.0
+## スナップ強度のランプアップ時間（秒）: ゲーム開始から SNAP_RAMP_DURATION 秒かけて通常強度に達する
+const SNAP_RAMP_DURATION: float = 120.0
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -450,6 +454,7 @@ func reset_for_stage() -> void:
 	_snap_point_corner_idx.clear()
 	_snap_cached_corner_world.clear()
 	_snap_cached_guide_loops.clear()
+	snap_ramp_elapsed = 0.0
 	_reset_player_position()
 
 
@@ -1332,10 +1337,13 @@ func _has_active_snap_state() -> bool:
 ## 吸着済みポイントのうち、まだターゲットに到達していないものがあるか確認
 func _snap_is_actively_pulling() -> bool:
 	var n: int = _snap_point_state.size()
+	var tn: int = _snap_point_target.size()
 	for i in range(n):
 		if _snap_point_state[i] == 0:
 			continue
 		if i >= _game.point_positions.size():
+			continue
+		if i >= tn:
 			continue
 		if _game.point_positions[i].distance_to(_snap_point_target[i]) > DRAG_POSITION_EPSILON:
 			return true
@@ -1356,12 +1364,19 @@ func _has_unsnapped_active_points() -> bool:
 
 func update_drag_physics(delta: float) -> void:
 	_ensure_drag_state_arrays()
+	# スナップ配列もここで同期し、_snap_is_actively_pulling() などが
+	# 古いサイズの配列を参照しないようにする
+	_snap_ensure_arrays()
 	if not player_position_initialized:
 		_reset_player_position()
 	if _ideal_drift_timer > 0.0:
 		_ideal_drift_timer -= delta
 		if _ideal_drift_timer < 0.0:
 			_ideal_drift_timer = 0.0
+
+	# スナップ強度ランプアップ: playing 中のみ経過時間を進める
+	if _game.game_state == "playing":
+		snap_ramp_elapsed = minf(snap_ramp_elapsed + delta, SNAP_RAMP_DURATION)
 
 	if (
 		not player_force_active
@@ -2868,12 +2883,14 @@ func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
 ## スナップ状態配列のサイズをポイント数に合わせる
 func _snap_ensure_arrays() -> void:
 	var n: int = _game.point_positions.size()
-	# PackedByteArray: resize は新要素を 0 で初期化
-	if _snap_point_state.size() != n:
-		_snap_point_state.resize(n)
-	# Array[Vector2]: resize は新要素を Vector2.ZERO で初期化
-	if _snap_point_target.size() != n:
-		_snap_point_target.resize(n)
+	# PackedByteArray: resize で増減どちらも確実に処理される
+	_snap_point_state.resize(n)
+	# Array[Vector2]: typed Array の resize 縮小が確実に動作しない場合に備え
+	# point_velocities と同様に while ループで確実に増減する
+	while _snap_point_target.size() > n:
+		_snap_point_target.pop_back()
+	while _snap_point_target.size() < n:
+		_snap_point_target.append(Vector2.ZERO)
 	# PackedInt32Array: resize は新要素を 0 で初期化 → -1 で埋め直す
 	if _snap_point_corner_idx.size() != n:
 		var old_cn: int = _snap_point_corner_idx.size()
@@ -2927,22 +2944,40 @@ func _snap_nearest_edge_point(pos: Vector2, guide_loops: Array) -> Vector2:
 ## キャッシュ済みの _snap_cached_corner_world / _snap_cached_guide_loops を使用。
 func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 	var n: int = _game.point_positions.size()
+	# forces のサイズが n と一致しない場合は安全に早期終了
+	if forces.size() != n:
+		push_error("[snap_approach] forces size mismatch: forces=%d n=%d" % [forces.size(), n])
+		return
 	var corner_world: Array = _snap_cached_corner_world
 	var guide_loops: Array = _snap_cached_guide_loops
 	var n_corners: int = corner_world.size()
 
+	# --- ランプアップ: 経過時間に応じてスナップ強度を 0 → 1 に線形増加 ---
+	var snap_t: float = clampf(snap_ramp_elapsed / SNAP_RAMP_DURATION, 0.0, 1.0)
+	var eff_corner_radius: float = SNAP_CORNER_RADIUS * snap_t
+	var eff_edge_radius: float = SNAP_EDGE_RADIUS * snap_t
+	var eff_approach_spring: float = SNAP_APPROACH_SPRING * snap_t
+
+	var tn: int = _snap_point_target.size()
 	for i in range(n):
 		if _is_locked(i):
 			continue
 		if _snap_point_state[i] != 0:
 			# 吸着済み: 解除条件チェック（遠すぎ or プレイヤー斥力）
-			var dist: float = _game.point_positions[i].distance_to(_snap_point_target[i])
-			if dist > SNAP_RELEASE_RADIUS or _is_player_repelling_this_snap_point(i):
+			if i < tn:
+				var dist: float = _game.point_positions[i].distance_to(_snap_point_target[i])
+				if dist > SNAP_RELEASE_RADIUS or _is_player_repelling_this_snap_point(i):
+					_snap_release_point(i)
+			else:
 				_snap_release_point(i)
 			continue
 
 		# B-2: プレイヤーが斥力を発動中のポイントはスナップしない
 		if _is_player_repelling_this_snap_point(i):
+			continue
+
+		# ランプが 0 のときはスナップ・アプローチ力ともにゼロ
+		if snap_t <= 0.0:
 			continue
 
 		var pos: Vector2 = _game.point_positions[i]
@@ -2963,7 +2998,7 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 
 		if best_ci >= 0:
 			var target: Vector2 = corner_world[best_ci] as Vector2
-			if best_cd <= SNAP_CORNER_RADIUS:
+			if best_cd <= eff_corner_radius:
 				# コーナー確定吸着
 				_snap_corner_occupant[best_ci] = i
 				_snap_point_state[i] = 1
@@ -2973,7 +3008,7 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 				point_velocities[i] = Vector2.ZERO
 			else:
 				# 常時アプローチバネ力（スムーズ移動）
-				forces[i] += (target - pos) * SNAP_APPROACH_SPRING
+				forces[i] += (target - pos) * eff_approach_spring
 			continue  # 辺スナップは不要
 
 		# === 全コーナー占有 → 辺スナップへフォールバック ===
@@ -2981,7 +3016,7 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 			continue
 		var edge_pt: Vector2 = _snap_nearest_edge_point(pos, guide_loops)
 		var edge_d: float = pos.distance_to(edge_pt)
-		if edge_d <= SNAP_EDGE_RADIUS:
+		if edge_d <= eff_edge_radius:
 			# 辺確定吸着
 			_snap_point_state[i] = 2
 			_snap_point_target[i] = edge_pt
@@ -2990,13 +3025,16 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 			point_velocities[i] = Vector2.ZERO
 		else:
 			# 常時アプローチバネ力（辺方向）
-			forces[i] += (edge_pt - pos) * SNAP_APPROACH_SPRING
+			forces[i] += (edge_pt - pos) * eff_approach_spring
 
 
 ## 未吸着ポイント同士が重ならないよう分離力を加える（Fix #3）。
 ## 吸着済みポイントは対象外（snap spring に任せる）。
 func _apply_snap_separation_forces(forces: Array[Vector2]) -> void:
 	var n: int = _game.point_positions.size()
+	if forces.size() != n:
+		push_error("[snap_sep] forces size mismatch: forces=%d n=%d" % [forces.size(), n])
+		return
 	var sn: int = _snap_point_state.size()
 	for i in range(n - 1):
 		if _is_locked(i):
@@ -3028,10 +3066,19 @@ func _apply_snap_spring_forces(forces: Array[Vector2]) -> void:
 	var n: int = _snap_point_state.size()
 	if n == 0:
 		return
+	# forces のサイズが point_positions と一致しない場合は安全に早期終了
+	var fn: int = forces.size()
+	if fn != _game.point_positions.size():
+		push_error("[snap_spring] forces size mismatch: forces=%d pts=%d" % [fn, _game.point_positions.size()])
+		return
+	var tn: int = _snap_point_target.size()
 	for i in range(mini(n, _game.point_positions.size())):
 		if _snap_point_state[i] == 0:
 			continue
 		if _is_locked(i):
+			_snap_release_point(i)
+			continue
+		if i >= tn:
 			_snap_release_point(i)
 			continue
 		var pos: Vector2 = _game.point_positions[i]
@@ -3047,16 +3094,21 @@ func _apply_snap_spring_forces(forces: Array[Vector2]) -> void:
 			point_velocities[i] = Vector2.ZERO
 			continue
 		# 弱いバネ力で引き戻す
-		forces[i] += (target - pos) * SNAP_SPRING
-		forces[i] -= point_velocities[i] * SNAP_DAMPING
+		if i < fn:
+			forces[i] += (target - pos) * SNAP_SPRING
+			forces[i] -= point_velocities[i] * SNAP_DAMPING
 
 
 ## 全吸着点を走査し、ターゲットから SNAP_RELEASE_RADIUS 以上離れていたら解除する
 ## （交差解消後の位置変化への対応）
 func _snap_release_far_points() -> void:
 	var n: int = _snap_point_state.size()
+	var tn: int = _snap_point_target.size()
 	for i in range(mini(n, _game.point_positions.size())):
 		if _snap_point_state[i] == 0:
+			continue
+		if i >= tn:
+			_snap_release_point(i)
 			continue
 		if _game.point_positions[i].distance_to(_snap_point_target[i]) > SNAP_RELEASE_RADIUS:
 			_snap_release_point(i)
@@ -3065,7 +3117,7 @@ func _snap_release_far_points() -> void:
 ## 2-opt 置換後にスナップ状態配列を同じ順序で並び替える
 func _snap_permute_after_reorder(ord: PackedInt32Array) -> void:
 	var n: int = ord.size()
-	if n == 0 or _snap_point_state.size() != n:
+	if n == 0 or _snap_point_state.size() != n or _snap_point_target.size() != n:
 		return
 	# 逆置換 (old_idx → new_idx)
 	var inv: PackedInt32Array = PackedInt32Array()

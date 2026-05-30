@@ -119,17 +119,36 @@ var _hud_layout_sc: Vector2 = Vector2.ZERO
 ## 画面フィット後の HUD ガイド半径に乗算（1=従来）。rules デモ等で目標円の見た目だけ縮小する。
 var hud_guide_layout_scale_mul: float = 1.0
 
+# --- スコア計算用: 辺ごとガイドデータ ---
+## 元の多角形頂点と弧制御点（正規化済み）。recompute_hud_guide_layout で hud_guide_edges_world に変換される。
+## 弧展開（_expand_arcs_to_polyline_verts）を行う図形では展開前の元定義を保存する。
+var _score_verts_norm: Array = []
+var _score_arcs_norm: Dictionary = {}
+## HUDガイドの辺ごと点列（ワールド座標）。calculate_metrics のスコア計算に使用。
+var hud_guide_edges_world: Array = []
+
 # --- 精度アルファキャッシュ ---
 ## calculate_metrics() 呼び出し時に全点分の精度アルファを事前計算してキャッシュする。
 ## 描画パスでの毎フレーム n×O(polyline) 距離計算をゼロにする。
 var _accuracy_alpha_cache: PackedFloat32Array = PackedFloat32Array()
 
-# --- Hausdorff 間引き ---
-## Hausdorff / HUD 距離計算は重いため、N 回に 1 回だけ実行してキャッシュを再利用する。
-const HAUSDORFF_THROTTLE_EVERY: int = 10
+# --- Hausdorff スロットル（案C: 可変間隔 + 案A: 静止確定トリガー）---
+## 案C: 移動量に応じたスロットル間隔（calculate_metrics 連続呼び出し時の間引き）
+const HAUSDORFF_THROTTLE_FAST: int = 10   # 激しく動いている（delta_max > SETTLE_FAST_PX）
+const HAUSDORFF_THROTTLE_MID: int = 5    # 減速中          （delta_max > SETTLE_MID_PX）
+const HAUSDORFF_THROTTLE_SLOW: int = 2   # ほぼ止まりかけ  （delta_max > SETTLE_DIST_PX）
+## 静止判定しきい値（px / 呼び出し間隔）
+const SETTLE_DIST_PX: float = 1.0   # これ以下の変位を「静止」とみなす
+const SETTLE_FAST_PX: float = 8.0   # FAST → MID の変位しきい値
+const SETTLE_MID_PX: float = 2.0    # MID → SLOW の変位しきい値
 var _hausdorff_call_counter: int = 0  # 0 のとき実行
 var _run_hausdorff_this_call: bool = true
 var _hausdorff_cached_err: float = 0.0
+## 案C: 前回 calculate_metrics 呼び出し時の座標（delta_max 計算用）
+var _prev_positions: PackedVector2Array = PackedVector2Array()
+## 案A: 前回 Hausdorff 計算時の座標スナップショット（静止確定後の強制再計算検知用）
+## 前回計算時からポイントが SETTLE_DIST_PX 以上動いた状態で静止した場合に再計算をトリガーする
+var _hausdorff_snapshot: PackedVector2Array = PackedVector2Array()
 
 
 ## 閉じた輪郭（末尾＝先頭とみなす）の幾何学的重心。面積ゼロに近いときは頂点の平均
@@ -191,6 +210,7 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_outline_world.clear()
 	hud_guide_query_world.clear()
 	hud_guide_segment_is_arc.clear()
+	hud_guide_edges_world.clear()
 	_hud_layout_vp = viewport_size
 	_hud_layout_sc = shape_center
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
@@ -209,6 +229,8 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 		hud_guide_spawn_ring_radius = maxf(hud_guide_scale, 1.0) * GameConfig.HUD_INITIAL_RING_SCALE_MUL
 		guide_center_1 = hud_guide_spawn_centroid
 		_apply_hud_correspondence_scale()
+		# スコア用辺ごとワールド座標（ideal_outline_points がなくても _score_verts_norm から構築）
+		hud_guide_edges_world = _build_hud_score_edges()
 		return
 
 	var rot: float = _hud_outline_rotation_for_layout()
@@ -249,6 +271,8 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_spawn_ring_radius = maxf(max_from_c * GameConfig.HUD_INITIAL_RING_SCALE_MUL, 12.0)
 	guide_center_1 = hud_guide_spawn_centroid
 	_apply_hud_correspondence_scale()
+	# スコア用辺ごとワールド座標を構築
+	hud_guide_edges_world = _build_hud_score_edges()
 
 
 func _hud_outline_rotation_for_layout() -> float:
@@ -670,6 +694,9 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 	point_positions.clear()
 	ideal_points.clear()
 	shape_corner_points.clear()
+	_score_verts_norm.clear()
+	_score_arcs_norm.clear()
+	hud_guide_edges_world.clear()
 	match stage_type:
 		"triangle":
 			var vr: Array = cfg["vertex_range"]
@@ -677,12 +704,17 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			_generate_polygon_group(shape_center, point_positions, num_points, n_verts, cfg["variance"], cfg["zigzag"], -PI / 2.0)
 			ideal_outline_points = _build_triangle_outline()
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
+			# スコア用: 正三角形の頂点（単位スケール、弧なし）
+			_score_verts_norm = [Vector2(0.0, -1.0), Vector2(-sqrt(3.0) / 2.0, 0.5), Vector2(sqrt(3.0) / 2.0, 0.5)]
+			_score_arcs_norm = {}
 		"circle":
 			_generate_circle_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
+			# _score_verts_norm / _score_arcs_norm は _generate_circle_shape 内で設定
 		"star":
 			_generate_star_polygon_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
+			# _score_verts_norm / _score_arcs_norm は _generate_star_polygon_shape 内で設定
 		"square":
 			_generate_square_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_square_outline()
@@ -690,6 +722,9 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			correspondence_scale = guide_radius_val
 			var _sq := 1.0 / sqrt(2.0)
 			shape_corner_points = [Vector2(-_sq,-_sq), Vector2(_sq,-_sq), Vector2(_sq,_sq), Vector2(-_sq,_sq)]
+			# スコア用: 正方形の頂点（単位スケール、弧なし）
+			_score_verts_norm = [Vector2(-_sq, -_sq), Vector2(_sq, -_sq), Vector2(_sq, _sq), Vector2(-_sq, _sq)]
+			_score_arcs_norm = {}
 		"rhombus":
 			_generate_rhombus_shape(shape_center, point_positions, cfg)
 			var b_rh: float = float(cfg.get("rhombus_vertical_half", 0.5))
@@ -697,12 +732,18 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
 			shape_corner_points = [Vector2(0.0,-b_rh), Vector2(1.0,0.0), Vector2(0.0,b_rh), Vector2(-1.0,0.0)]
+			# スコア用: ひし形の頂点（単位スケール、弧なし）
+			_score_verts_norm = [Vector2(0.0, -b_rh), Vector2(1.0, 0.0), Vector2(0.0, b_rh), Vector2(-1.0, 0.0)]
+			_score_arcs_norm = {}
 		"hexagon":
 			_generate_hexagon_shape(shape_center, point_positions, cfg)
 			ideal_outline_points = _build_hexagon_outline()
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
 			shape_corner_points = _regular_hexagon_unit_vertices()
+			# スコア用: 正六角形の頂点（単位スケール、弧なし）
+			_score_verts_norm = _regular_hexagon_unit_vertices()
+			_score_arcs_norm = {}
 		"cat_face":
 			_generate_cat_face_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
@@ -733,6 +774,8 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 	# ステージ切り替え時は前ステージのキャッシュを破棄し、必ずフル計算を行う
 	_hausdorff_call_counter = 0
 	_hausdorff_cached_err = 100.0
+	_prev_positions.clear()
+	_hausdorff_snapshot.clear()
 	calculate_metrics(point_positions)
 
 
@@ -779,6 +822,9 @@ func _generate_circle_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 
 	var verts: Array = get_circle_polygon_vertices()
 	var arc_ctrls: Dictionary = get_circle_arc_controls()
+	# スコア用: 弧展開前の元定義を保存（弧制御点は normalize 後に保存）
+	var verts_orig: Array = verts.duplicate()
+	var arcs_orig: Dictionary = arc_ctrls.duplicate()
 	# 弧を折れ線に展開（中心角ベース、4px 誤差）
 	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
 	arc_ctrls = {}
@@ -801,6 +847,13 @@ func _generate_circle_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存
+	_score_verts_norm.clear()
+	for v in verts_orig:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arcs_orig:
+		_score_arcs_norm[ci] = ((arcs_orig[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -816,6 +869,7 @@ func _generate_star_polygon_shape(center: Vector2, pts: Array[Vector2], cfg: Dic
 
 	var verts: Array = get_star_polygon_vertices()
 	var arc_ctrls: Dictionary = get_star_arc_controls()
+	# スコア用: 弧展開なし（star は直接使用）
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
 	ideal_outline_points = _build_cat_face_outline(verts, arc_ctrls, -1, ideal_outline_segment_is_arc)
 	var c := _perimeter_centroid(ideal_outline_points)
@@ -835,6 +889,13 @@ func _generate_star_polygon_shape(center: Vector2, pts: Array[Vector2], cfg: Dic
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存（弧展開なし）
+	_score_verts_norm.clear()
+	for v in verts:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arc_ctrls:
+		_score_arcs_norm[ci] = ((arc_ctrls[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -1015,6 +1076,9 @@ func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Diction
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _get_cat_face_polygon_vertices()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_cat_face_arc_controls()
+	# スコア用: 弧展開前の元定義を保存
+	var verts_orig: Array = verts.duplicate()
+	var arcs_orig: Dictionary = arc_ctrls.duplicate()
 	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
 	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
@@ -1037,6 +1101,13 @@ func _generate_cat_face_shape(center: Vector2, pts: Array[Vector2], cfg: Diction
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存
+	_score_verts_norm.clear()
+	for v in verts_orig:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arcs_orig:
+		_score_arcs_norm[ci] = ((arcs_orig[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -1198,6 +1269,9 @@ func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary)
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else get_fish_polygon_vertices()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else get_fish_arc_controls()
+	# スコア用: 弧展開前の元定義を保存
+	var verts_orig: Array = verts.duplicate()
+	var arcs_orig: Dictionary = arc_ctrls.duplicate()
 	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
 	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
@@ -1219,6 +1293,13 @@ func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary)
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存
+	_score_verts_norm.clear()
+	for v in verts_orig:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arcs_orig:
+		_score_arcs_norm[ci] = ((arcs_orig[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -1234,6 +1315,9 @@ func _generate_heptagram_polygon_shape(center: Vector2, pts: Array[Vector2], cfg
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_polygon_vertices_embedded()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
+	# スコア用: 弧展開前の元定義を保存
+	var verts_orig: Array = verts.duplicate()
+	var arcs_orig: Dictionary = arc_ctrls.duplicate()
 	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
 	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
@@ -1255,6 +1339,13 @@ func _generate_heptagram_polygon_shape(center: Vector2, pts: Array[Vector2], cfg
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存
+	_score_verts_norm.clear()
+	for v in verts_orig:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arcs_orig:
+		_score_arcs_norm[ci] = ((arcs_orig[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -1270,6 +1361,9 @@ func _generate_heptagram_silhouette_polygon_shape(center: Vector2, pts: Array[Ve
 
 	var verts: Array = _cfg_shape_polygon if _cfg_shape_polygon.size() >= 3 else _heptagram_silhouette_polygon_vertices_embedded()
 	var arc_ctrls: Dictionary = _cfg_shape_arc if not _cfg_shape_arc.is_empty() else {}
+	# スコア用: 弧展開前の元定義を保存
+	var verts_orig: Array = verts.duplicate()
+	var arcs_orig: Dictionary = arc_ctrls.duplicate()
 	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
 	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
@@ -1291,6 +1385,13 @@ func _generate_heptagram_silhouette_polygon_shape(center: Vector2, pts: Array[Ve
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存
+	_score_verts_norm.clear()
+	for v in verts_orig:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arcs_orig:
+		_score_arcs_norm[ci] = ((arcs_orig[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -1308,6 +1409,9 @@ func _generate_rugby_ball_polygon_shape(center: Vector2, pts: Array[Vector2], cf
 	var arc_ctrls: Dictionary = (
 		_cfg_shape_arc if not _cfg_shape_arc.is_empty() else rugby_ball_arc_controls_embedded()
 	)
+	# スコア用: 弧展開前の元定義を保存
+	var verts_orig: Array = verts.duplicate()
+	var arcs_orig: Dictionary = arc_ctrls.duplicate()
 	verts = _expand_arcs_to_polyline_verts(verts, arc_ctrls, ARC_FLATTEN_MAX_PIXEL_ERROR / base_r)
 	arc_ctrls = {}
 	ideal_points = _sample_points_on_polygon_with_arcs(verts, arc_ctrls, n)
@@ -1329,6 +1433,13 @@ func _generate_rugby_ball_polygon_shape(center: Vector2, pts: Array[Vector2], cf
 	for p in ideal_outline_points:
 		normalized_outline.append((p - c) / max_d)
 	ideal_outline_points = normalized_outline
+	# スコア用: 元の頂点・弧制御点を同じ正規化で保存
+	_score_verts_norm.clear()
+	for v in verts_orig:
+		_score_verts_norm.append(((v as Vector2) - c) / max_d)
+	_score_arcs_norm.clear()
+	for ci in arcs_orig:
+		_score_arcs_norm[ci] = ((arcs_orig[ci] as Vector2) - c) / max_d
 
 	for i in range(n):
 		var ideal: Vector2 = ideal_points[i]
@@ -1910,6 +2021,47 @@ func _eval_arc_error_per_edge_hausdorff(
 	return sum_h / float(edges.size()) / ref_size * 100.0
 
 
+func _build_hud_score_edges() -> Array:
+	"""_score_verts_norm と _score_arcs_norm から辺ごとのワールド座標点列を構築する。
+	弧辺は _sample_arc で ARC_OUTLINE_SAMPLES+1 点、直線辺は両端含む均等サンプル。"""
+	if _score_verts_norm.is_empty():
+		return []
+	var center: Vector2 = hud_guide_center
+	var s: float = hud_guide_scale
+	var n: int = _score_verts_norm.size()
+	var result: Array = []
+	for i in range(n):
+		var p1: Vector2 = _score_verts_norm[i] as Vector2
+		var p2: Vector2 = _score_verts_norm[(i + 1) % n] as Vector2
+		var pts_norm: Array = []
+		if _score_arcs_norm.has(i):
+			# 弧辺: 始点〜終点を ARC_OUTLINE_SAMPLES 分割（両端含む）
+			pts_norm = _sample_arc(p1, p2, _score_arcs_norm[i] as Vector2, ARC_OUTLINE_SAMPLES)
+		else:
+			# 直線辺: 始点〜終点を CAT_FACE_STRAIGHT_EDGE_SAMPLES 等分（両端含む）
+			for k in range(CAT_FACE_STRAIGHT_EDGE_SAMPLES + 1):
+				pts_norm.append(p1.lerp(p2, float(k) / float(CAT_FACE_STRAIGHT_EDGE_SAMPLES)))
+		var edge_world: Array = []
+		for pn in pts_norm:
+			edge_world.append(center + (pn as Vector2) * s)
+		result.append(edge_world)
+	return result
+
+
+func _eval_per_edge_score_world(point_positions: Array[Vector2]) -> float:
+	"""辺ごとに h(edge→user) を算出し、平均を hud_guide_ref_px で正規化して誤差率（%）を返す。"""
+	if hud_guide_edges_world.is_empty() or point_positions.is_empty():
+		return 100.0
+	var player_poly: Array = []
+	for p in point_positions:
+		player_poly.append(p)
+	var ref_px: float = maxf(hud_guide_ref_px, 1.0)
+	var total_h: float = 0.0
+	for edge in hud_guide_edges_world:
+		total_h += _hausdorff_edge_to_user(edge as Array, player_poly, HAUSDORFF_SAMPLE_STEP)
+	return total_h / float(hud_guide_edges_world.size()) / ref_px * 100.0
+
+
 func _distance_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 	"""点 p から線分 a-b への最短距離"""
 	var ab: Vector2 = b - a
@@ -2104,27 +2256,65 @@ func _set_correspondence_scale_from_outline() -> void:
 
 
 func calculate_metrics(point_positions: Array[Vector2]) -> void:
-	"""全図形で統一: 弧誤差のみ、回転非対応"""
+	"""全図形で統一: 辺ごとHausdorff、型分岐なし。案A（静止確定トリガー）+ 案C（可変スロットル）"""
+	var n_pts: int = point_positions.size()
+
+	# --- delta_max: 前回呼び出しからの最大変位（案C のスロットル判定に使用）---
+	var delta_max: float = 0.0
+	if _prev_positions.size() == n_pts:
+		for i in range(n_pts):
+			delta_max = maxf(delta_max, point_positions[i].distance_to(_prev_positions[i]))
+	_prev_positions.resize(n_pts)
+	for i in range(n_pts):
+		_prev_positions[i] = point_positions[i]
+
+	# --- 案C: 移動量に応じてスロットル間隔を決定 ---
+	var throttle_interval: int
+	if delta_max > SETTLE_FAST_PX:
+		throttle_interval = HAUSDORFF_THROTTLE_FAST
+	elif delta_max > SETTLE_MID_PX:
+		throttle_interval = HAUSDORFF_THROTTLE_MID
+	elif delta_max > SETTLE_DIST_PX:
+		throttle_interval = HAUSDORFF_THROTTLE_SLOW
+	else:
+		throttle_interval = HAUSDORFF_THROTTLE_FAST  # 静止中は案A が担当するので FAST でよい
+
 	_run_hausdorff_this_call = (_hausdorff_call_counter == 0)
-	_hausdorff_call_counter = (_hausdorff_call_counter + 1) % HAUSDORFF_THROTTLE_EVERY
-	match stage_type:
-		"triangle", "circle":
-			var m: Dictionary = _calc_unified_arc_metrics(point_positions, 0, point_positions.size())
-			current_centroid = m["centroid"]
-			current_avg_radius = m["avg_r"]
-			if GameConfig.USE_SCREEN_HUD_GUIDE:
-				ideal_display_radius = hud_guide_scale if stage_type == "triangle" else hud_guide_ref_px
-			else:
-				ideal_display_radius = guide_radius_val if GUIDE_USE_FIXED_SIZE else current_avg_radius
-			current_circularity_error = m["circ_err"]
-			current_circularity = m["circ"]
-			current_smoothness_error = 0.0
-			current_smoothness = 100.0
-			_set_correspondence_scale_from_outline()
-			if stage_type == "triangle":
-				polygon_rotation = -PI / 2.0  # 頂点上向きでガイド表示
-		"square", "rhombus", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
-			_calculate_unified_arc_metrics(point_positions)
+	_hausdorff_call_counter = (_hausdorff_call_counter + 1) % throttle_interval
+
+	# --- 案A: 静止かつ前回 Hausdorff 計算時から移動があれば強制再計算 ---
+	# game.gd の _metrics_settle_timer が一定時間後に calculate_metrics を発火させるため、
+	# 「静止して初めて呼ばれた」タイミングを検知するためにスナップショットと比較する。
+	if delta_max <= SETTLE_DIST_PX:
+		var snap_delta: float = 0.0
+		if _hausdorff_snapshot.size() == n_pts:
+			for i in range(n_pts):
+				snap_delta = maxf(snap_delta, point_positions[i].distance_to(_hausdorff_snapshot[i]))
+		else:
+			snap_delta = INF  # スナップショット未初期化 → 必ず再計算
+		if snap_delta > SETTLE_DIST_PX:
+			# 前回計算時から動いた後に静止 → スロットル無視で強制再計算
+			_run_hausdorff_this_call = true
+			_hausdorff_call_counter = 0
+
+	# --- 重心・代表半径（O(n)、毎呼び出し更新）---
+	var pts_arr: Array = []
+	for p in point_positions:
+		pts_arr.append(p)
+	current_centroid = _perimeter_centroid(pts_arr)
+	current_avg_radius = _percentile_distance_from_center(pts_arr, current_centroid, REF_R_PERCENTILE)
+	current_smoothness_error = 0.0
+	current_smoothness = 100.0
+
+	# --- 一致率（スロットル付き） ---
+	if _run_hausdorff_this_call:
+		_hausdorff_cached_err = _eval_per_edge_score_world(point_positions)
+		# スナップショットを更新（次回の静止検知の基準点）
+		_hausdorff_snapshot.resize(n_pts)
+		for i in range(n_pts):
+			_hausdorff_snapshot[i] = point_positions[i]
+	current_circularity_error = _hausdorff_cached_err
+	current_circularity = maxf(0.0, 100.0 - _hausdorff_cached_err)
 	_rebuild_accuracy_alpha_cache(point_positions)
 
 
@@ -2388,66 +2578,27 @@ func get_point_accuracy_alpha(idx: int, _point_positions: Array[Vector2]) -> flo
 
 
 func _compute_one_accuracy_alpha(idx: int, point_positions: Array[Vector2]) -> float:
-	"""全図形で統一: 理想輪郭への距離から精度を算出（キャッシュ再構築用の実計算）"""
+	"""全図形で統一: HUDガイド輪郭への距離から精度アルファを算出"""
 	if idx < 0 or idx >= point_positions.size():
 		return 1.0
 	var p: Vector2 = point_positions[idx]
-	if GameConfig.USE_SCREEN_HUD_GUIDE:
-		var ideal_dist_hud: float
-		if (
-			hud_guide_segment_is_arc.size() == hud_guide_outline_world.size()
-			and hud_guide_outline_world.size() >= 2
-			and ARC_SEGMENT_MATCH_LENIENCY_MUL < 0.9
-			and _segment_flags_include_arc(hud_guide_segment_is_arc)
-		):
-			ideal_dist_hud = _distance_to_polyline_with_arc_leniency(
-				p, hud_guide_outline_world, hud_guide_segment_is_arc, ARC_SEGMENT_MATCH_LENIENCY_MUL
-			)
-		else:
-			ideal_dist_hud = get_distance_to_hint_guide_outline(p)
-		var ref_r_hud: float = maxf(hud_guide_ref_px, 1.0)
-		var error_ratio_hud: float = clampf(ideal_dist_hud / ref_r_hud, 0.0, 1.0)
-		var accuracy_hud: float = 1.0 - error_ratio_hud
-		if accuracy_hud < 0.90:
-			return 0.25
-		if accuracy_hud < 0.95:
-			var t_mid: float = (accuracy_hud - 0.90) / 0.05
-			var step_mid: int = mini(int(t_mid * 4.0), 3)
-			return 0.35 + step_mid * 0.05
-		var t_hi: float = (accuracy_hud - 0.95) / 0.05
-		var step_hi: int = mini(int(t_hi * 4.0), 3)
-		return 0.65 + step_hi * 0.1167
-	var ideal_dist: float
-	var ref_r: float = maxf(guide_radius_val, 1.0)
-
-	match stage_type:
-		"triangle", "circle":
-			ideal_dist = get_distance_to_hint_guide_outline(p)
-		"square", "rhombus", "hexagon", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
-			if idx >= 0 and idx < ideal_points.size():
-				var ideal_pos: Vector2 = _fixed_guide_target_position_from_ideal(guide_center_1, ideal_points[idx])
-				ideal_dist = p.distance_to(ideal_pos)
-			else:
-				ideal_dist = get_distance_to_hint_guide_outline(p)
-		_:
-			return 1.0
-
-	ref_r = maxf(ref_r, 1.0)
-	var error_ratio: float = clampf(ideal_dist / ref_r, 0.0, 1.0)
-	var accuracy: float = 1.0 - error_ratio
-
-	var alpha: float
+	var d: float
+	if hud_guide_outline_world.size() >= 2:
+		d = _distance_to_polyline(p, hud_guide_outline_world)
+	else:
+		d = absf(p.distance_to(hud_guide_spawn_centroid) - hud_guide_scale)
+	var ref_r: float = maxf(hud_guide_ref_px, 1.0)
+	var accuracy: float = 1.0 - clampf(d / ref_r, 0.0, 1.0)
 	if accuracy < 0.90:
-		alpha = 0.25
+		return 0.25
 	elif accuracy < 0.95:
 		var t: float = (accuracy - 0.90) / 0.05
 		var step: int = mini(int(t * 4.0), 3)
-		alpha = 0.35 + step * 0.05
+		return 0.35 + step * 0.05
 	else:
 		var t: float = (accuracy - 0.95) / 0.05
 		var step: int = mini(int(t * 4.0), 3)
-		alpha = 0.65 + step * 0.1167
-	return alpha
+		return 0.65 + step * 0.1167
 
 
 func _hint_ideal_draw_scale(scale: float) -> float:
