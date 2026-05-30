@@ -597,6 +597,7 @@ func draw_clear_shapes(rect: Rect2) -> void:
 func draw_result_thumbnail(rect: Rect2, ideal_loops: Array, player_loops: Array) -> void:
 	if ideal_loops.is_empty() and player_loops.is_empty():
 		return
+	# --- 全点の合算（スケール計算用: 理想＋プレイヤー両方を収める）---
 	var all: Array[Vector2] = []
 	for loop in ideal_loops:
 		all.append_array(loop)
@@ -612,7 +613,20 @@ func draw_result_thumbnail(rect: Rect2, ideal_loops: Array, player_loops: Array)
 		max_p.x = maxf(max_p.x, p.x)
 		max_p.y = maxf(max_p.y, p.y)
 	var size: Vector2 = max_p - min_p
-	var center_src: Vector2 = (min_p + max_p) * 0.5
+	# --- center_src は理想図形の bbox 中心に固定する ---
+	# 合算 bbox 中心を使うと、プレイヤーが非対称にはみ出たとき
+	# ガイドが表示枠の中央からずれて見える問題が起きるため。
+	var ideal_all: Array[Vector2] = []
+	for loop in ideal_loops:
+		ideal_all.append_array(loop)
+	var ideal_min: Vector2 = ideal_all[0] if not ideal_all.is_empty() else all[0]
+	var ideal_max: Vector2 = ideal_all[0] if not ideal_all.is_empty() else all[0]
+	for p in ideal_all:
+		ideal_min.x = minf(ideal_min.x, p.x)
+		ideal_min.y = minf(ideal_min.y, p.y)
+		ideal_max.x = maxf(ideal_max.x, p.x)
+		ideal_max.y = maxf(ideal_max.y, p.y)
+	var center_src: Vector2 = (ideal_min + ideal_max) * 0.5
 	if size.x < 1.0:
 		size.x = 1.0
 	if size.y < 1.0:
