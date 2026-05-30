@@ -1,11 +1,11 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 600.0,
 		"min_radius": 400.0,
-		"num_points": 31,
+		"num_points": 44,
 		"shape_type": "fish",
 		"type": "butterfly",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち　後半ステージ向けかな",
-		"stage_name": "蝶",
-		"locale_key": "STAGE_BUTTERFLY"
+		"locale_key": "STAGE_BUTTERFLY",
+		"stage_name": "蝶"
 	},
 	"schema_version": 1.0,
 	"shape": {
