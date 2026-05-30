@@ -1,20 +1,20 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
+		"hud_guide_layout_scale_mul": 0.8,
 		"max_radius": 800.0,
 		"min_radius": 400.0,
-		"num_points": 17,
+		"num_points": 28.0,
 		"shape_type": "rugby_ball",
 		"type": "rugby_ball",
-		"variance": 0.15,
-		"hud_guide_layout_scale_mul": 0.8
+		"variance": 0.15
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
-		"stage_name": "ラグビーボール",
-		"locale_key": "STAGE_RUGBY_BALL"
+		"locale_key": "STAGE_RUGBY_BALL",
+		"stage_name": "ラグビーボール"
 	},
 	"schema_version": 1.0,
 	"shape": {

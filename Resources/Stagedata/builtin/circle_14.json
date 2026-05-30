@@ -1,22 +1,25 @@
-﻿{
-	"schema_version": 1,
+{
+	"config": {
+		"clear_pct": 98.5,
+		"display_rate_min_pct": 50.0,
+		"guide_follows_player_radius": 0.0,
+		"max_radius": 360.0,
+		"min_radius": 195.0,
+		"num_points": 20.0,
+		"shape_type": "circle",
+		"type": "circle_14",
+		"variance": 0.45,
+		"vertex_range": [
+			4.0,
+			6.0
+		],
+		"zigzag": 0.22
+	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "",
-		"stage_name": "円",
-		"locale_key": "STAGE_CIRCLE_14"
+		"locale_key": "STAGE_CIRCLE_14",
+		"stage_name": "円"
 	},
-	"config": {
-		"type": "circle_14",
-		"shape_type": "circle",
-		"num_points": 24,
-		"min_radius": 195.0,
-		"max_radius": 360.0,
-		"vertex_range": [4, 6],
-		"variance": 0.45,
-		"zigzag": 0.22,
-		"display_rate_min_pct": 50.0,
-		"guide_follows_player_radius": 0,
-		"clear_pct": 99.5
-	}
+	"schema_version": 1.0
 }

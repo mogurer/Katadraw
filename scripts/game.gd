@@ -357,6 +357,7 @@ var _stage_edit_return_to: String = "stage_debug"
 var _stage_edit_source_path: String = ""  # ファイルから開いた場合の元パス（保存先の決定に使用）
 var _stage_edit_source_raw: Dictionary = {}  # ビルトインファイルを開いた場合の元 raw データ（保存時に config 保持）
 var _pbd_return_after_test: bool = false
+var _pbd_entered_from_cleared: bool = false
 # --- Stage edit（カスタム JSON 保存 + fish/cat_face は正規化座標ポリゴンをキャンバス編集）---
 const STAGE_EDIT_TYPE_OPTIONS: Array[String] = [
 	"fish", "cat_face", "triangle", "square", "hexagon", "circle", "star", "rugby_ball",
@@ -1523,6 +1524,18 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "guide_info":
+		var is_guide_cancel: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
+		)
+		if (
+			is_guide_cancel
+			and not GameConfig.IS_DEMO
+			and not stage_session.debug_test_mode
+			and not _pbd_return_after_test
+		):
+			_return_to_stage_select_preserve_bgm()
+			return
 		# ボタンなし: 任意の箇所で クリック / Enter / A で次へ（目標図形を隠さない）
 		if is_confirm:
 			game_state = "guide_countdown"
@@ -1585,6 +1598,16 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "cleared":
+		# デバッグ用: [S] でバランス調整画面を開く
+		if (
+			_debug_tools_enabled()
+			and event is InputEventKey
+			and event.pressed
+			and not event.echo
+			and event.keycode == KEY_S
+		):
+			_enter_play_balance_debug()
+			return
 		# play_balance_debug の「テスト開始」経由でのクリアのみデバッグ用戻り先へ。
 		# 通常プレイ（debug_test_mode が true でもデバッグオーバーレイ目的の場合）はステージセレクトへ。
 		if _pbd_return_after_test:
@@ -2406,13 +2429,15 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 					pause_active = false
 					pause_confirm_title = false
 					pause_retry_elapsed = -1.0
-					BGMManager.stop()
-					_play_sfx(sfx_window_close)
 					if _pbd_return_after_test:
+						BGMManager.stop()
+						_play_sfx(sfx_window_close)
 						_return_to_title_or_stage_debug_from_test()
 					elif not GameConfig.IS_DEMO:
-						get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+						_return_to_stage_select_preserve_bgm()
 					else:
+						BGMManager.stop()
+						_play_sfx(sfx_window_close)
 						debug_mode = false
 						game_state = "title"
 						title_start_time = Time.get_ticks_msec() / 1000.0
@@ -2505,18 +2530,19 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 				pause_active = false
 				pause_confirm_title = false
 				pause_retry_elapsed = -1.0
-				BGMManager.stop()
-				_play_sfx(sfx_window_close)
 				# play_balance_debug のテスト開始経由のみデバッグ用戻り先へ。通常はステージセレクトへ。
 				if _pbd_return_after_test:
+					BGMManager.stop()
+					_play_sfx(sfx_window_close)
 					_return_to_title_or_stage_debug_from_test()
 				elif not GameConfig.IS_DEMO:
-					get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+					_return_to_stage_select_preserve_bgm()
 				else:
+					BGMManager.stop()
+					_play_sfx(sfx_window_close)
 					debug_mode = false
 					game_state = "title"
 					title_start_time = Time.get_ticks_msec() / 1000.0
-					queue_redraw()
 			else:  # いいえ
 				pause_confirm_title = false
 				_play_sfx(sfx_window_close)
@@ -2569,6 +2595,15 @@ func _start_game_from_stage_select() -> void:
 	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(sid)
+
+
+func _return_to_stage_select_preserve_bgm() -> void:
+	pause_active = false
+	pause_confirm_title = false
+	pause_retry_elapsed = -1.0
+	BGMManager.resume_stage_select()
+	_play_sfx(sfx_window_close)
+	get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
 
 
 func _advance_stage() -> void:
@@ -2630,7 +2665,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		title_start_time = Time.get_ticks_msec() / 1000.0
 		BGMManager.stop()  # BGMManager に移行
 	elif not GameConfig.IS_DEMO:
-		BGMManager.stop()
+		BGMManager.resume_stage_select()
 		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
 	else:
 		debug_mode = false
@@ -2655,6 +2690,7 @@ func _enter_stage_debug_screen() -> void:
 func _enter_play_balance_debug() -> void:
 	if not _debug_tools_enabled():
 		return
+	_pbd_entered_from_cleared = (game_state == "cleared")
 	is_dragging = false
 	input_handler.release_mouse_grab()
 	stage_debug_state.selected = current_stage
@@ -2821,7 +2857,10 @@ func _pbd_handle_button(btn_idx: int) -> void:
 			_pbd_open_shape_edit()
 		3:
 			stage_debug_state.field_focus_idx = -1
-			_pbd_exit_to_stage_select()
+			if _pbd_entered_from_cleared:
+				_pbd_exit_to_guide_info()
+			else:
+				_pbd_exit_to_stage_select()
 
 
 func _pbd_save_to_disk() -> void:
@@ -2880,13 +2919,29 @@ func _pbd_start_test() -> void:
 func _pbd_exit_to_stage_select() -> void:
 	stage_debug_state.field_focus_idx = -1
 	debug_mode = false
-	BGMManager.stop()
 	if not GameConfig.IS_DEMO:
+		BGMManager.resume_stage_select()
 		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
 	else:
 		game_state = "title"
 		title_start_time = Time.get_ticks_msec() / 1000.0
 		queue_redraw()
+
+
+func _pbd_exit_to_guide_info() -> void:
+	_pbd_entered_from_cleared = false
+	_pbd_return_after_test = false
+	stage_session.clear_debug_test()
+	input_recorder = null
+	debug_mode = false
+	var vp: Vector2 = get_viewport_rect().size
+	var all_stages: Array = GameConfig.get_play_stage_rows()
+	if current_stage < 0 or current_stage >= all_stages.size():
+		_pbd_exit_to_stage_select()
+		return
+	var cfg: Dictionary = all_stages[current_stage] as Dictionary
+	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(vp, current_stage), "guide_info")
+	BGMManager.begin_pre_countdown()
 
 
 func _pbd_open_shape_edit() -> void:
@@ -4330,7 +4385,7 @@ func _start_stage_debug_test() -> void:
 		input_recorder = DebugInputRecorder.new()
 		_begin_stage_with_config(idx, cfg, _default_stage_shape_center(get_viewport_rect().size, idx))
 		input_recorder.start_recording(stage_session.debug_test_seed, point_positions.duplicate() as Array[Vector2])
-		return
+		return 
 
 	var p: Dictionary = stage_debug_state.pending.get(idx, {})
 	var err: String = StageDebugOverrides.validate_partial_with_master(idx, p)
