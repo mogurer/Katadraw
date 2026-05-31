@@ -1369,23 +1369,14 @@ func update_drag_physics(delta: float) -> void:
 	_snap_ensure_arrays()
 	if not player_position_initialized:
 		_reset_player_position()
-	if _ideal_drift_timer > 0.0:
-		_ideal_drift_timer -= delta
-		if _ideal_drift_timer < 0.0:
-			_ideal_drift_timer = 0.0
-
-	# スナップ強度ランプアップ: playing 中のみ経過時間を進める
-	if _game.game_state == "playing":
-		snap_ramp_elapsed = minf(snap_ramp_elapsed + delta, SNAP_RAMP_DURATION)
+	# [DISABLED] Layer 4: _ideal_drift_timer
+	# [DISABLED] Layer 1: snap_ramp_elapsed
 
 	if (
 		not player_force_active
 		and not _has_points_within_player_force()
 		and not _has_active_point_velocity()
 		and not _ax_spacing_active
-		and _ideal_drift_timer <= 0.0
-		and not _snap_is_actively_pulling()
-		and not _has_unsnapped_active_points()
 	):
 		_perf_record(0.0, 0, 0.0)
 		return
@@ -1403,8 +1394,7 @@ func update_drag_physics(delta: float) -> void:
 	for _i in range(steps):
 		moved = _step_drag_physics(step_delta) or moved
 
-	if _prev_player_force_active and not player_force_active and not _ax_spacing_active:
-		_ideal_drift_timer = IDEAL_DRIFT_DURATION
+	# [DISABLED] Layer 4: _ideal_drift_timer = IDEAL_DRIFT_DURATION
 	_prev_player_force_active = player_force_active
 
 	var _t_frame_end: int = Time.get_ticks_usec()
@@ -1467,10 +1457,10 @@ func _step_drag_physics(delta: float) -> bool:
 					_apply_ax_spacing_equal_spacing_repulsion(forces)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 
-	# === スナップ力（アプローチ + 吸着後バネ + 未吸着分離）===
+	# === スナップ力（未吸着分離のみ有効）===
 	_snap_ensure_arrays()
-	_apply_snap_approach_forces(forces)
-	_apply_snap_spring_forces(forces)
+	# [DISABLED] Layer 1: _apply_snap_approach_forces(forces)
+	# [DISABLED] Layer 2: _apply_snap_spring_forces(forces)
 	_apply_snap_separation_forces(forces)
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
