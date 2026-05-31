@@ -1,10 +1,10 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 400.0,
 		"min_radius": 200.0,
-		"num_points": 15,
+		"num_points": 18,
 		"shape_type": "fish",
 		"type": "mushrooms",
 		"variance": 0.15
@@ -12,8 +12,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "きのこ",
-		"locale_key": "STAGE_MUSHROOMS"
+		"locale_key": "STAGE_MUSHROOMS",
+		"stage_name": "きのこ"
 	},
 	"schema_version": 1.0,
 	"shape": {

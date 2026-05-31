@@ -1119,6 +1119,7 @@ func _start_stage(idx: int) -> void:
 func _calculate_metrics() -> void:
 	stage_manager.calculate_metrics(point_positions)
 	_sync_stage_vars()
+	current_circularity = input_handler.get_snap_score() * 100.0
 
 
 func _point_accuracy_alpha(idx: int) -> float:
@@ -1142,7 +1143,7 @@ func _stage_display_number_text() -> String:
 func _check_clear() -> void:
 	if game_state != "playing":
 		return
-	if stage_manager.is_clear():
+	if input_handler.is_snap_clear():
 		is_dragging = false
 		game_state = "cleared"
 		input_handler.release_mouse_grab()
