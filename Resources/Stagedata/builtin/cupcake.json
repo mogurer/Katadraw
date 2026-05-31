@@ -1,11 +1,11 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 480.0,
 		"min_radius": 350.0,
-		"num_points": 26,
+		"num_points": 28,
 		"shape_type": "fish",
 		"type": "cupcake",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "カップケーキ",
-		"locale_key": "STAGE_CUPCAKE"
+		"locale_key": "STAGE_CUPCAKE",
+		"stage_name": "カップケーキ"
 	},
 	"schema_version": 1.0,
 	"shape": {
