@@ -2306,16 +2306,10 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 	current_smoothness_error = 0.0
 	current_smoothness = 100.0
 
-	# --- 一致率（スロットル付き） ---
-	if _run_hausdorff_this_call:
-		_hausdorff_cached_err = _eval_per_edge_score_world(point_positions)
-		# スナップショットを更新（次回の静止検知の基準点）
-		_hausdorff_snapshot.resize(n_pts)
-		for i in range(n_pts):
-			_hausdorff_snapshot[i] = point_positions[i]
-	current_circularity_error = _hausdorff_cached_err
-	current_circularity = maxf(0.0, 100.0 - _hausdorff_cached_err)
-	_rebuild_accuracy_alpha_cache(point_positions)
+	# --- Hausdorff 一致率: スナップ判定に切り替えたため無効化 ---
+	# _eval_per_edge_score_world は重いため呼ばない。current_circularity は game.gd で上書きされる。
+	current_circularity_error = 0.0
+	current_circularity = 100.0
 
 
 func _rebuild_accuracy_alpha_cache(point_positions: Array[Vector2]) -> void:

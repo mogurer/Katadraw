@@ -652,6 +652,7 @@ func _draw_title(vp: Vector2) -> void:
 	_draw_auto_button_with_shadow(btn_center, tr("TITLE_START"), BTN_FONT_SIZE, alpha, false, vp.x * 0.375)
 
 	_game.draw_string(_game.font, Vector2(0, vp.y - 30), tr("TITLE_COPYRIGHT"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 32, Color(0.45, 0.38, 0.45, bottom_alpha))
+	_game.draw_string(_game.font, Vector2(16, vp.y - 14), "v0.50.00", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.45, 0.38, 0.45, bottom_alpha))
 
 
 func get_menu_btn_cy(vp: Vector2, index: int, count: int) -> float:

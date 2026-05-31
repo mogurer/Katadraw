@@ -3139,13 +3139,17 @@ func is_snap_clear() -> bool:
 	return true
 
 
-## 最良サイクル一致数 / 全頂点数 (0.0〜1.0) を返す。部分スナップ中の進捗スコアとして使用
+## スコア (0.0〜1.0) = (A + B) / (2N)
+## A: 頂点に乗っているポイント数、B: 最良サイクル順で一致しているポイント数
 func get_snap_score() -> float:
 	var n_corners: int = _game.stage_manager.shape_corner_points.size()
 	var n: int = _game.point_positions.size()
 	if n_corners == 0 or n == 0 or n != n_corners:
 		return 0.0
-	var best: int = 0
+	# A: 占有されている頂点数
+	var a: int = _snap_corner_occupant.size()
+	# B: 最良サイクル一致数（全N通りのオフセットを正転・逆転で試す）
+	var b: int = 0
 	for k in range(n):
 		var cnt_fwd: int = 0
 		var cnt_rev: int = 0
@@ -3157,8 +3161,8 @@ func get_snap_score() -> float:
 				cnt_fwd += 1
 			if occ == (k - ci + n) % n:
 				cnt_rev += 1
-		best = maxi(best, maxi(cnt_fwd, cnt_rev))
-	return float(best) / float(n_corners)
+		b = maxi(b, maxi(cnt_fwd, cnt_rev))
+	return float(a + b) / float(2 * n_corners)
 
 
 ## 近接スナップシステム: 頂点への近接バネ吸着 + 占有頂点からの斥力
