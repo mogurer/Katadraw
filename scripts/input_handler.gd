@@ -260,6 +260,15 @@ const SNAP_SEPARATION_DISTANCE: float = 18.0
 const SNAP_SEPARATION_STRENGTH: float = 2400.0
 ## スナップ強度のランプアップ時間（秒）: ゲーム開始から SNAP_RAMP_DURATION 秒かけて通常強度に達する
 const SNAP_RAMP_DURATION: float = 120.0
+## ===== 近接スナップシステム =====
+## 未吸着時にバネ引力が始まる距離（px）
+const SNAP_VERTEX_ATTRACT_RADIUS: float = 80.0
+## 未吸着時のアプローチバネ係数
+const SNAP_VERTEX_APPROACH_SPRING: float = 30.0
+## 占有済み頂点からの斥力が始まる距離（px）
+const SNAP_REPEL_RADIUS: float = 60.0
+## 占有済み頂点斥力の最大強度（二次減衰）
+const SNAP_REPEL_STRENGTH: float = 1500.0
 
 # --- Callbacks set by game ---
 var on_points_changed: Callable
@@ -1457,10 +1466,10 @@ func _step_drag_physics(delta: float) -> bool:
 					_apply_ax_spacing_equal_spacing_repulsion(forces)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 
-	# === スナップ力（未吸着分離のみ有効）===
+	# === スナップ力（頂点近接吸着 + 確定保持バネ + 未吸着分離）===
 	_snap_ensure_arrays()
-	# [DISABLED] Layer 1: _apply_snap_approach_forces(forces)
-	# [DISABLED] Layer 2: _apply_snap_spring_forces(forces)
+	_apply_snap_vertex_forces(forces)
+	_apply_snap_spring_forces(forces)
 	_apply_snap_separation_forces(forces)
 
 	var damping: float = exp(-DRAG_VELOCITY_DAMPING * delta)
@@ -3103,6 +3112,70 @@ func _snap_release_far_points() -> void:
 			continue
 		if _game.point_positions[i].distance_to(_snap_point_target[i]) > SNAP_RELEASE_RADIUS:
 			_snap_release_point(i)
+
+
+## 近接スナップシステム: 頂点への近接バネ吸着 + 占有頂点からの斥力
+## - 未吸着ポイントが SNAP_VERTEX_ATTRACT_RADIUS 以内の空き頂点に近づくとバネ引力
+## - SNAP_CORNER_RADIUS 以内で確定吸着（1頂点1ポイント）
+## - 占有済み頂点の SNAP_REPEL_RADIUS 以内では二次減衰斥力
+## - 吸着後の保持・解除は _apply_snap_spring_forces が担当
+func _apply_snap_vertex_forces(forces: Array[Vector2]) -> void:
+	var n: int = _game.point_positions.size()
+	if forces.size() != n:
+		return
+	var corners: Array = _snap_cached_corner_world
+	var n_corners: int = corners.size()
+	if n_corners == 0:
+		return
+
+	for i in range(n):
+		if _is_locked(i):
+			continue
+		if _snap_point_state[i] != 0:
+			continue  # 吸着済みは _apply_snap_spring_forces に委ねる
+		if _is_player_repelling_this_snap_point(i):
+			continue
+
+		var pos: Vector2 = _game.point_positions[i]
+
+		# --- 空き頂点への近接バネ + 確定吸着 ---
+		var best_ci: int = -1
+		var best_cd: float = SNAP_VERTEX_ATTRACT_RADIUS  # この距離以内のみ対象
+
+		for ci in range(n_corners):
+			var occupant: int = int(_snap_corner_occupant.get(ci, -1))
+			if occupant >= 0 and occupant != i:
+				continue  # 他のポイントが占有済み
+			var d: float = pos.distance_to(corners[ci] as Vector2)
+			if d < best_cd:
+				best_cd = d
+				best_ci = ci
+
+		if best_ci >= 0:
+			var target: Vector2 = corners[best_ci] as Vector2
+			if best_cd <= SNAP_CORNER_RADIUS:
+				# 確定吸着: 頂点へ瞬着・占有登録
+				_snap_corner_occupant[best_ci] = i
+				_snap_point_state[i] = 1
+				_snap_point_target[i] = target
+				_snap_point_corner_idx[i] = best_ci
+				_game.point_positions[i] = target
+				point_velocities[i] = Vector2.ZERO
+			else:
+				# 近接バネ力
+				forces[i] += (target - pos) * SNAP_VERTEX_APPROACH_SPRING
+
+		# --- 占有済み頂点からの斥力（範囲制限あり・二次減衰）---
+		for ci in range(n_corners):
+			var occupant: int = int(_snap_corner_occupant.get(ci, -1))
+			if occupant < 0 or occupant == i:
+				continue
+			var corner_pos: Vector2 = corners[ci] as Vector2
+			var d: float = pos.distance_to(corner_pos)
+			if d < SNAP_REPEL_RADIUS and d > 0.1:
+				var dir: Vector2 = (pos - corner_pos) / d
+				var t: float = 1.0 - d / SNAP_REPEL_RADIUS
+				forces[i] += dir * (SNAP_REPEL_STRENGTH * t * t)
 
 
 ## 2-opt 置換後にスナップ状態配列を同じ順序で並び替える
