@@ -516,6 +516,8 @@ var sfx_stageclear02: AudioStreamPlayer
 var sfx_point: AudioStreamPlayer
 var sfx_motion: AudioStreamPlayer
 var sfx_stagestart: AudioStreamPlayer
+var sfx_pin_on: AudioStreamPlayer
+var sfx_pin_off: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 
 # --- Debug ---
@@ -871,6 +873,16 @@ func _setup_audio() -> void:
 	sfx_stagestart.stream = _load_audio("res://assets/sounds/katadraw_stagestart.wav")
 	sfx_stagestart.volume_db = -14.5
 	add_child(sfx_stagestart)
+
+	sfx_pin_on = AudioStreamPlayer.new()
+	sfx_pin_on.stream = _load_audio("res://assets/sounds/pinon.wav")
+	sfx_pin_on.volume_db = -14.5
+	add_child(sfx_pin_on)
+
+	sfx_pin_off = AudioStreamPlayer.new()
+	sfx_pin_off.stream = _load_audio("res://assets/sounds/pinoff.wav")
+	sfx_pin_off.volume_db = -14.5
+	add_child(sfx_pin_off)
 
 	sfx_click = AudioStreamPlayer.new()
 	sfx_click.stream = _load_audio("res://assets/sounds/se_click.wav")

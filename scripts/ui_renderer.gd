@@ -57,6 +57,7 @@ const SPORE_GLOW_LAYERS: Array[Array] = [
 ]
 
 # --- 選択していないポイント・線 ---
+const APP_VERSION: String = "v0.50.01"
 const LINE_COLOR := Color(0.26, 0.21, 0.28)
 const LINE_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_COLOR := Color(0.26, 0.21, 0.28)
@@ -441,6 +442,10 @@ func draw(state: String, vp: Vector2) -> void:
 		"play_balance_debug":
 			_draw_play_balance_debug(vp)
 
+	# ピン止めチャージ円アニメーション（playing 中のみ）
+	if state == "playing":
+		_draw_pin_charge_effect()
+
 	# 画面遷移フェードオーバーレイ
 	if _transition_alpha < 1.0:
 		var fade_a: float = 1.0 - _transition_alpha
@@ -456,6 +461,10 @@ func draw(state: String, vp: Vector2) -> void:
 			_show_avatar = (_t - GameConfig.TITLE_FADE_IN - 0.3) > 0.0
 		if _show_avatar:
 			_draw_player_avatar()
+
+	# デバッグ起動時: バージョン番号を全画面で常時表示
+	if _game._debug_tools_enabled():
+		_game.draw_string(_game.font, Vector2(16, vp.y - 14), APP_VERSION, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.45, 0.38, 0.45, 0.8))
 
 
 func draw_pause_overlay(vp: Vector2) -> void:
@@ -628,6 +637,16 @@ func is_title_intro_skip_done() -> bool:
 	return title_intro.is_skip_done()
 
 
+func _draw_pin_charge_effect() -> void:
+	var progress: float = _game.input_handler.get_pin_charge_progress()
+	if progress <= 0.0:
+		return
+	var center: Vector2 = _game.input_handler.player_position
+	var max_r: float = _game.input_handler.get_pin_charge_radius()
+	var r: float = max_r * progress
+	_game.draw_arc(center, r, 0.0, TAU, 48, Color(0.55, 0.55, 0.55, 0.65), 3.0, true)
+
+
 func _draw_title(vp: Vector2) -> void:
 	_draw_bg(vp)
 
@@ -652,7 +671,7 @@ func _draw_title(vp: Vector2) -> void:
 	_draw_auto_button_with_shadow(btn_center, tr("TITLE_START"), BTN_FONT_SIZE, alpha, false, vp.x * 0.375)
 
 	_game.draw_string(_game.font, Vector2(0, vp.y - 30), tr("TITLE_COPYRIGHT"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 32, Color(0.45, 0.38, 0.45, bottom_alpha))
-	_game.draw_string(_game.font, Vector2(16, vp.y - 14), "v0.50.00", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.45, 0.38, 0.45, bottom_alpha))
+	_game.draw_string(_game.font, Vector2(16, vp.y - 14), APP_VERSION, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.45, 0.38, 0.45, bottom_alpha))
 
 
 func get_menu_btn_cy(vp: Vector2, index: int, count: int) -> float:
@@ -1800,9 +1819,13 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var r: float = _point_radius_by_guide(i)
-		var base_c: Color = POINT_COLOR
-		var alpha: float = _game._point_accuracy_alpha(i)
-		_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
+		if _game.input_handler.is_pinned(i):
+			_game.draw_circle(pos, r * 1.5, Color.WHITE)
+			_game.draw_arc(pos, r * 1.5, 0.0, TAU, 32, Color(0.15, 0.12, 0.18, 0.85), 2.0, true)
+		else:
+			var base_c: Color = POINT_COLOR
+			var alpha: float = _game._point_accuracy_alpha(i)
+			_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
 		# デバッグ: 再接続発火ポイントを赤円でハイライト
 		if _dbg_hl.has(i):
 			var _exp: int = _dbg_hl[i] as int

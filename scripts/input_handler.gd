@@ -169,6 +169,15 @@ var _stabilize_skip_frame: bool = false  # フレームスロットル用フラ�
 var _snap_corner_occupant: Dictionary = {}
 ## 各ポイントのスナップ状態: 0=未吸着, 1=コーナー吸着中, 2=辺吸着中
 var _snap_point_state: PackedByteArray = PackedByteArray()
+# --- ピン止めシステム ---
+## 各ポイントのピン状態: 0=解除, 1=ピン止め中（A+X 1秒ホールドで範囲内の吸着済みポイントをトグル）
+var _pin_state: PackedByteArray = PackedByteArray()
+## A+X ホールド経過時間（ms）。PIN_HOLD_DURATION_MS に達したら発火
+var _pin_ax_hold_ms: float = 0.0
+## 今回の A+X ホールドで既に発火済みか（離すまで再発火しない）
+var _pin_ax_triggered: bool = false
+## A+X ホールドで発火するまでの時間（ms）
+const PIN_HOLD_DURATION_MS: float = 1000.0
 ## スナップ先のワールド座標（吸着確定後の引き戻し先）
 var _snap_point_target: Array[Vector2] = []
 ## スナップ先のコーナーインデックス（-1 = 辺スナップ）
@@ -388,7 +397,7 @@ func is_bb_dragging() -> bool:
 func is_pad_grabbing_modifier_now() -> bool:
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		return false
-	return player_force_attracting or player_force_repelling or player_force_active or _ax_spacing_active
+	return player_force_attracting or player_force_repelling or player_force_active
 
 
 func update_grab_state_for_mouse() -> void:
@@ -462,6 +471,9 @@ func reset_for_stage() -> void:
 	_snap_point_target.clear()
 	_snap_point_corner_idx.clear()
 	_snap_cached_corner_world.clear()
+	_pin_state.clear()
+	_pin_ax_hold_ms = 0.0
+	_pin_ax_triggered = false
 	_snap_cached_guide_loops.clear()
 	snap_ramp_elapsed = 0.0
 	_reset_player_position()
@@ -1176,8 +1188,12 @@ func process_pad(delta: float) -> void:
 		and not pad_b
 		and ((pad_a and pad_x) or (mouse_left and mouse_right))
 	):
-		# A+X 同時（またはマウス左右同時）: 自キャラ引力・斥力はオフにし、頂点間斥力のみ
-		_ax_spacing_active = true
+		# A+X 同時（またはマウス左右同時）: 1秒ホールドでピン止めトグル
+		if not _pin_ax_triggered:
+			_pin_ax_hold_ms = minf(_pin_ax_hold_ms + delta * 1000.0, PIN_HOLD_DURATION_MS)
+			if _pin_ax_hold_ms >= PIN_HOLD_DURATION_MS:
+				_toggle_pin_in_range()
+				_pin_ax_triggered = true
 		player_force_repelling = false
 		player_force_attracting = false
 	else:
@@ -1195,12 +1211,16 @@ func process_pad(delta: float) -> void:
 	if pad_b:
 		player_force_repelling = false
 		player_force_attracting = false
-		_ax_spacing_active = false
 
-	if _ax_spacing_active:
-		_ax_spacing_hold_ms = minf(_ax_spacing_hold_ms + delta * 1000.0, AX_SPACING_HOLD_CAP_MS)
-	else:
-		_ax_spacing_hold_ms = 0.0
+	# A+X を離したらホールドタイマーをリセット
+	var _ax_held_now: bool = (
+		_game.game_state == "playing"
+		and not pad_b
+		and ((pad_a and pad_x) or (mouse_left and mouse_right))
+	)
+	if not _ax_held_now:
+		_pin_ax_hold_ms = 0.0
+		_pin_ax_triggered = false
 
 	mouse_force_pressed = mouse_left or mouse_right
 
@@ -1428,7 +1448,6 @@ func _step_drag_physics(delta: float) -> bool:
 	var before: Array[Vector2] = _game.point_positions.duplicate()
 
 	_ensure_drag_state_arrays()
-	_update_ax_spacing_vertex_dwell(delta)
 
 	var forces: Array[Vector2] = []
 	forces.resize(_game.point_positions.size())
@@ -1449,21 +1468,12 @@ func _step_drag_physics(delta: float) -> bool:
 	grab_input_active = (
 		player_force_active
 		or _get_player_force_mode() != 0
-		or _ax_spacing_active
 	)
 
-	# ガイド・ペア関連の力はすべて無効化。自キャラ操作（引力・斥力・A+X均等化）のみ有効。
-	if player_force_active or _ax_spacing_active:
-		if player_force_active:
-			var _ar: float = _get_effective_player_force_limit() + POINT_PAIR_REPULSE_DISTANCE
-			_build_phys_active_mask(player_position, _ar * _ar)
-		else:
-			_phys_mask_enabled = false
+	if player_force_active:
+		var _ar: float = _get_effective_player_force_limit() + POINT_PAIR_REPULSE_DISTANCE
+		_build_phys_active_mask(player_position, _ar * _ar)
 		_stabilize_skip_frame = not _stabilize_skip_frame
-		if not _stabilize_skip_frame or _ax_spacing_active:
-			if player_force_active or _ax_spacing_active:
-				if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
-					_apply_ax_spacing_equal_spacing_repulsion(forces)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 
 	# === スナップ力（頂点近接吸着 + 確定保持バネ + 未吸着分離）===
@@ -1482,6 +1492,19 @@ func _step_drag_physics(delta: float) -> bool:
 		point_velocities[i] *= damping
 		_game.point_positions[i] += point_velocities[i] * delta
 		_clamp_point_to_viewport(i, lo, hi)
+
+	# ピン止め後処理: snap が外れていたら pin を自動クリア、正常なら頂点位置に強制固定
+	var pn: int = mini(_pin_state.size(), _game.point_positions.size())
+	for i in range(pn):
+		if _pin_state[i] == 0:
+			continue
+		if i >= _snap_point_state.size() or _snap_point_state[i] != 1:
+			_pin_state[i] = 0  # snap が外れたまま pin が残っている異常状態を解除
+			continue
+		# 頂点へ強制固定（万一の位置ずれを毎フレーム補正）
+		if i < _snap_point_target.size():
+			_game.point_positions[i] = _snap_point_target[i]
+		point_velocities[i] = Vector2.ZERO
 
 	# 交差判定: 3フレームに1回、空間グリッドで O(N²)→O(N×k) に削減
 	# 案A: 実交差がなくても鋭角折り返し（ヘアピン）を検出して再接続を試みる
@@ -2897,6 +2920,9 @@ func _snap_ensure_arrays() -> void:
 		_snap_point_corner_idx.resize(n)
 		for i in range(old_cn, n):
 			_snap_point_corner_idx[i] = -1
+	# ピン状態（新要素は 0=未ピンで初期化される）
+	if _pin_state.size() != n:
+		_pin_state.resize(n)
 
 
 ## ポイント i のスナップを解除し、コーナー占有も解放する
@@ -2909,6 +2935,9 @@ func _snap_release_point(i: int) -> void:
 			_snap_corner_occupant.erase(ci)
 	_snap_point_state[i] = 0
 	_snap_point_corner_idx[i] = -1
+	# スナップ解除時はピン止めも自動解除
+	if i < _pin_state.size():
+		_pin_state[i] = 0
 
 
 ## プレイヤーが斥力を point i に向けて発動中かどうか
@@ -3076,7 +3105,8 @@ func _apply_snap_spring_forces(forces: Array[Vector2]) -> void:
 		if _snap_point_state[i] == 0:
 			continue
 		if _is_locked(i):
-			_snap_release_point(i)
+			if not is_pinned(i):
+				_snap_release_point(i)  # ステージロックは解除、ピン止めは保持
 			continue
 		if i >= tn:
 			_snap_release_point(i)
@@ -3107,6 +3137,8 @@ func _snap_release_far_points() -> void:
 	for i in range(mini(n, _game.point_positions.size())):
 		if _snap_point_state[i] == 0:
 			continue
+		if is_pinned(i):
+			continue  # ピン止め中は距離解除しない
 		if i >= tn:
 			_snap_release_point(i)
 			continue
@@ -3551,7 +3583,59 @@ func _is_selected(idx: int) -> bool:
 
 
 func _is_locked(idx: int) -> bool:
+	if idx < _pin_state.size() and _pin_state[idx] == 1:
+		return true
 	return _game.stage_manager.is_locked(idx)
+
+
+## 外部（描画）向けピン状態公開
+func is_pinned(idx: int) -> bool:
+	return idx < _pin_state.size() and _pin_state[idx] == 1
+
+## A+X チャージ進捗 (0.0〜1.0)。発火後・非押下時は 0.0
+func get_pin_charge_progress() -> float:
+	if _pin_ax_triggered:
+		return 0.0
+	return clampf(_pin_ax_hold_ms / PIN_HOLD_DURATION_MS, 0.0, 1.0)
+
+## ピン判定の最大半径（チャージ円アニメーションの外縁）
+func get_pin_charge_radius() -> float:
+	return PLAYER_FORCE_RADIUS + _empty_repulse_radius_bonus
+
+
+## A+X 押し始め時: 自キャラ範囲内の吸着済みポイントをピン止め/解除
+## 全員ピン済み → 全員解除（pinoff）、それ以外 → 全員ピン（pinon）
+func _toggle_pin_in_range() -> void:
+	var n: int = _game.point_positions.size()
+	if n == 0:
+		return
+	_snap_ensure_arrays()
+	var r: float = PLAYER_FORCE_RADIUS + _empty_repulse_radius_bonus
+	var rsq: float = r * r
+	# 対象ポイントを収集
+	var targets: Array[int] = []
+	for i in range(n):
+		if _snap_point_state[i] != 1:
+			continue
+		if player_position.distance_squared_to(_game.point_positions[i]) > rsq:
+			continue
+		targets.append(i)
+	if targets.is_empty():
+		return
+	# 全員ピン済みなら解除、未ピンが1つでもあれば全員ピン
+	var all_pinned: bool = true
+	for i in targets:
+		if _pin_state[i] == 0:
+			all_pinned = false
+			break
+	if all_pinned:
+		for i in targets:
+			_pin_state[i] = 0
+		_game._play_sfx(_game.sfx_pin_off)
+	else:
+		for i in targets:
+			_pin_state[i] = 1
+		_game._play_sfx(_game.sfx_pin_on)
 
 
 func _notify_points_changed() -> void:
