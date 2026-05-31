@@ -3114,6 +3114,53 @@ func _snap_release_far_points() -> void:
 			_snap_release_point(i)
 
 
+## 全頂点が占有され、かつKATAポイントの結合順がガイド頂点順と一致（正転・逆転どちらも可）するか
+func is_snap_clear() -> bool:
+	var n_corners: int = _game.stage_manager.shape_corner_points.size()
+	var n: int = _game.point_positions.size()
+	if n_corners == 0 or n == 0 or n != n_corners:
+		return false
+	for ci in range(n_corners):
+		if not _snap_corner_occupant.has(ci):
+			return false
+	var k: int = int(_snap_corner_occupant[0])
+	# 正転チェック: snap[ci] == (ci + k) % n
+	var forward_ok: bool = true
+	for ci in range(n_corners):
+		if int(_snap_corner_occupant[ci]) != (ci + k) % n:
+			forward_ok = false
+			break
+	if forward_ok:
+		return true
+	# 逆転チェック: snap[ci] == (k - ci + n) % n
+	for ci in range(n_corners):
+		if int(_snap_corner_occupant[ci]) != (k - ci + n) % n:
+			return false
+	return true
+
+
+## 最良サイクル一致数 / 全頂点数 (0.0〜1.0) を返す。部分スナップ中の進捗スコアとして使用
+func get_snap_score() -> float:
+	var n_corners: int = _game.stage_manager.shape_corner_points.size()
+	var n: int = _game.point_positions.size()
+	if n_corners == 0 or n == 0 or n != n_corners:
+		return 0.0
+	var best: int = 0
+	for k in range(n):
+		var cnt_fwd: int = 0
+		var cnt_rev: int = 0
+		for ci in range(n_corners):
+			var occ: int = int(_snap_corner_occupant.get(ci, -1))
+			if occ < 0:
+				continue
+			if occ == (ci + k) % n:
+				cnt_fwd += 1
+			if occ == (k - ci + n) % n:
+				cnt_rev += 1
+		best = maxi(best, maxi(cnt_fwd, cnt_rev))
+	return float(best) / float(n_corners)
+
+
 ## 近接スナップシステム: 頂点への近接バネ吸着 + 占有頂点からの斥力
 ## - 未吸着ポイントが SNAP_VERTEX_ATTRACT_RADIUS 以内の空き頂点に近づくとバネ引力
 ## - SNAP_CORNER_RADIUS 以内で確定吸着（1頂点1ポイント）
