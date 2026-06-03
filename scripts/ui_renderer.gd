@@ -649,6 +649,8 @@ func _draw_pin_charge_effect() -> void:
 
 func _draw_title(vp: Vector2) -> void:
 	_draw_bg(vp)
+	# 背景に50%黒を乗算（純黒の乗算50% = 通常合成50%黒、result = base × 0.5）
+	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.0, 0.0, 0.0, 0.5))
 
 	var fade: float = clampf((Time.get_ticks_msec() / 1000.0 - _game.title_start_time) / GameConfig.TITLE_FADE_IN, 0.0, 1.0)
 	var cy: float = vp.y * 0.38 * 0.8  # 20%上へ
