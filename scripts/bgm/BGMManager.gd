@@ -14,7 +14,7 @@ extends Node
 # ---------- Track data ----------
 
 const TRACKS: Array[Dictionary] = [
-	{  # 0: ingame
+	{  # 0: ingame – 01-05
 		"intro": "res://assets/sounds/01-05/01-05_0000.ogg",
 		"motifs": [
 			"res://assets/sounds/01-05/01-05_0010.ogg",
@@ -34,7 +34,72 @@ const TRACKS: Array[Dictionary] = [
 			"res://assets/sounds/01-05/01-05_0150.ogg",
 		]
 	},
-	{  # 1: title
+	{  # 1: ingame – 01-06
+		"intro": "res://assets/sounds/01-06/01-06_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/01-06/01-06_0009.ogg",
+			"res://assets/sounds/01-06/01-06_0017.ogg",
+			"res://assets/sounds/01-06/01-06_0025.ogg",
+			"res://assets/sounds/01-06/01-06_0033.ogg",
+			"res://assets/sounds/01-06/01-06_0041.ogg",
+			"res://assets/sounds/01-06/01-06_0049.ogg",
+			"res://assets/sounds/01-06/01-06_0057.ogg",
+			"res://assets/sounds/01-06/01-06_0065.ogg",
+			"res://assets/sounds/01-06/01-06_0073.ogg",
+			"res://assets/sounds/01-06/01-06_0081.ogg",
+			"res://assets/sounds/01-06/01-06_0089.ogg",
+			"res://assets/sounds/01-06/01-06_0097.ogg",
+			"res://assets/sounds/01-06/01-06_0105.ogg",
+			"res://assets/sounds/01-06/01-06_0113.ogg",
+		]
+	},
+	{  # 2: ingame – 01-08
+		"intro": "res://assets/sounds/01-08/01-08_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/01-08/01-08_0009.ogg",
+			"res://assets/sounds/01-08/01-08_0017.ogg",
+			"res://assets/sounds/01-08/01-08_0025.ogg",
+			"res://assets/sounds/01-08/01-08_0033.ogg",
+			"res://assets/sounds/01-08/01-08_0041.ogg",
+			"res://assets/sounds/01-08/01-08_0049.ogg",
+			"res://assets/sounds/01-08/01-08_0057.ogg",
+			"res://assets/sounds/01-08/01-08_0065.ogg",
+			"res://assets/sounds/01-08/01-08_0073.ogg",
+			"res://assets/sounds/01-08/01-08_0081.ogg",
+			"res://assets/sounds/01-08/01-08_0089.ogg",
+			"res://assets/sounds/01-08/01-08_0097.ogg",
+			"res://assets/sounds/01-08/01-08_0105.ogg",
+			"res://assets/sounds/01-08/01-08_0113.ogg",
+			"res://assets/sounds/01-08/01-08_0121.ogg",
+		]
+	},
+	{  # 3: ingame – 02-03
+		"intro": "res://assets/sounds/02-03/02-03_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/02-03/02-03_0010.ogg",
+			"res://assets/sounds/02-03/02-03_0020.ogg",
+			"res://assets/sounds/02-03/02-03_0030.ogg",
+			"res://assets/sounds/02-03/02-03_0040.ogg",
+			"res://assets/sounds/02-03/02-03_0050.ogg",
+			"res://assets/sounds/02-03/02-03_0060.ogg",
+			"res://assets/sounds/02-03/02-03_0070.ogg",
+			"res://assets/sounds/02-03/02-03_0080.ogg",
+			"res://assets/sounds/02-03/02-03_0085.ogg",
+			"res://assets/sounds/02-03/02-03_0095.ogg",
+			"res://assets/sounds/02-03/02-03_0105.ogg",
+			"res://assets/sounds/02-03/02-03_0115.ogg",
+		]
+	},
+	{  # 4: ingame – 02-09
+		"intro": "res://assets/sounds/02-09/02-09_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/02-09/02-09_0010.ogg",
+			"res://assets/sounds/02-09/02-09_0020.ogg",
+			"res://assets/sounds/02-09/02-09_0030.ogg",
+			"res://assets/sounds/02-09/02-09_0040.ogg",
+		]
+	},
+	{  # 5: title
 		"intro": "res://assets/sounds/Title/KATADRAW_Title_0000.ogg",
 		"motifs": [
 			"res://assets/sounds/Title/KATADRAW_Title_0010.ogg",
@@ -46,6 +111,8 @@ const TRACKS: Array[Dictionary] = [
 	},
 ]
 
+const _INGAME_TRACK_COUNT: int = 5
+
 # ---------- Constants ----------
 
 const _BASE_VOLUME_DB: float = -8.5
@@ -55,6 +122,7 @@ const _COUNTDOWN_VOLUME_REDUCE_DB: float = -3.0  # カウントダウン中の�
 
 # ---------- State ----------
 
+var _ingame_track_idx: int = 0  # 現在選択中のインゲームBGM（0〜_INGAME_TRACK_COUNT-1）
 var _track_idx: int = 0
 var _motif_idx: int = 0
 var _in_intro: bool = false
@@ -141,7 +209,7 @@ func _process(delta: float) -> void:
 func play_title() -> void:
 	_stop_all()
 	_active_player = 0
-	_track_idx = 1
+	_track_idx = _INGAME_TRACK_COUNT  # title は末尾インデックス
 	_motif_idx = 0
 	_in_intro = true
 	_in_pre_countdown = false
@@ -155,11 +223,11 @@ func play_title() -> void:
 	_play_on_active(TRACKS[_track_idx]["intro"])
 
 
-## インゲームBGM開始（イントロ先頭から）。
+## インゲームBGM開始（イントロ先頭から）。選択中の _ingame_track_idx を使用。
 func play_ingame() -> void:
 	_stop_all()
 	_active_player = 0
-	_track_idx = 0
+	_track_idx = _ingame_track_idx
 	_motif_idx = 0
 	_in_intro = true
 	_in_pre_countdown = false
@@ -177,7 +245,7 @@ func play_ingame() -> void:
 ## resume_ingame() から1秒後に play_ingame() が呼ばれてイントロ再生が始まる。
 func start_first_stage() -> void:
 	_stop_all()
-	_track_idx = 0
+	_track_idx = _ingame_track_idx
 	_motif_idx = 0
 	_in_intro = false
 	_in_pre_countdown = false
@@ -281,6 +349,18 @@ func resume_stage_select() -> void:
 	_in_pre_countdown = false
 	_countdown_active = false
 	_sync_volume()
+
+
+## ステージセレクト: 次のインゲームBGMへ切り替え（先頭から再生）。
+func select_next_bgm() -> void:
+	_ingame_track_idx = (_ingame_track_idx + 1) % _INGAME_TRACK_COUNT
+	play_ingame()
+
+
+## ステージセレクト: 前のインゲームBGMへ切り替え（先頭から再生）。
+func select_prev_bgm() -> void:
+	_ingame_track_idx = (_ingame_track_idx - 1 + _INGAME_TRACK_COUNT) % _INGAME_TRACK_COUNT
+	play_ingame()
 
 
 ## 全停止・状態リセット。

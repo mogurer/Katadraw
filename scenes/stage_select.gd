@@ -171,6 +171,13 @@ func _input(event: InputEvent) -> void:
 		_esc_popup_no_hovered = false
 		queue_redraw()
 
+	# L/R ボタンでBGM切り替え（ポップアップ非表示中のみ）
+	if event is InputEventJoypadButton and event.pressed:
+		if event.button_index == JOY_BUTTON_LEFT_SHOULDER:
+			BGMManager.select_prev_bgm()
+		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			BGMManager.select_next_bgm()
+
 
 func _draw() -> void:
 	var vp: Vector2 = get_viewport_rect().size
