@@ -1,11 +1,11 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 400.0,
 		"min_radius": 300.0,
-		"num_points": 15,
+		"num_points": 24,
 		"shape_type": "fish",
 		"type": "onion",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "玉ねぎ",
-		"locale_key": "STAGE_ONION"
+		"locale_key": "STAGE_ONION",
+		"stage_name": "玉ねぎ"
 	},
 	"schema_version": 1.0,
 	"shape": {

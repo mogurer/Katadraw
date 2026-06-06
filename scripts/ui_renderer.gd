@@ -57,7 +57,7 @@ const SPORE_GLOW_LAYERS: Array[Array] = [
 ]
 
 # --- 選択していないポイント・線 ---
-const APP_VERSION: String = "v0.50.01"
+const APP_VERSION: String = "v0.50.02"
 const LINE_COLOR := Color(0.26, 0.21, 0.28)
 const LINE_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_COLOR := Color(0.26, 0.21, 0.28)

@@ -1,19 +1,19 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 400.0,
 		"min_radius": 200.0,
-		"num_points": 22,
+		"num_points": 25,
 		"shape_type": "fish",
 		"type": "keitora",
 		"variance": 0.15
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
-		"stage_name": "軽トラ",
-		"locale_key": "STAGE_KEITORA"
+		"locale_key": "STAGE_KEITORA",
+		"stage_name": "軽トラ"
 	},
 	"schema_version": 1.0,
 	"shape": {
