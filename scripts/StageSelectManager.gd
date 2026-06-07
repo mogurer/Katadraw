@@ -43,6 +43,7 @@ var tutorial_shown: bool = false
 var tutorial_return_to: String = ""
 
 var _states: Array[int] = []
+var _stage_names: Array[String] = []
 
 
 func _ready() -> void:
@@ -50,6 +51,21 @@ func _ready() -> void:
 	_states.fill(StageState.LOCKED)
 	_states[0] = StageState.UNLOCKED
 	_load_states()
+	_load_stage_names()
+
+
+func _load_stage_names() -> void:
+	_stage_names.resize(STAGE_COUNT)
+	_stage_names.fill("")
+	var stages: Array = StageData.get_stages()
+	for i in range(mini(stages.size(), STAGE_COUNT)):
+		_stage_names[i] = str(stages[i].get("guide_type_label", ""))
+
+
+func get_stage_name(stage_id: int) -> String:
+	if stage_id < 0 or stage_id >= _stage_names.size():
+		return ""
+	return _stage_names[stage_id]
 
 
 func get_state(stage_id: int) -> int:

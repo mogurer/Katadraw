@@ -31,6 +31,7 @@ const _CHAR_RADIUS     := 14.0
 const _PROX_DIST       := 140.0   # 吹き出し表示する距離（px）
 const _BUBBLE_R        := 60.0    # 吹き出し内の図形半径
 const _BUBBLE_PAD      := 18.0
+const _BUBBLE_NAME_H   := 34.0    # ステージ名ラベルの高さ
 const _POPUP_W         := 520.0
 const _POPUP_H         := 260.0
 
@@ -233,7 +234,7 @@ func _draw() -> void:
 func _draw_bubble(stage_id: int) -> void:
 	var dot: Vector2 = _dot_pos(stage_id)
 	var bw: float = (_BUBBLE_R + _BUBBLE_PAD) * 2.0
-	var bh: float = bw
+	var bh: float = bw + _BUBBLE_NAME_H
 	# 吹き出し位置: ドットの右上（画面端に応じて調整）
 	var vp: Vector2 = get_viewport_rect().size
 	var bx: float = dot.x + _DOT_RADIUS + 8.0
@@ -244,9 +245,15 @@ func _draw_bubble(stage_id: int) -> void:
 	# 背景
 	draw_rect(br, _BUBBLE_BORDER)
 	draw_rect(br.grow(-3.0), _BUBBLE_BG)
-	# ミニ図形
-	var center := Vector2(bx + bw * 0.5, by + bh * 0.5)
+	# ミニ図形（上部 bw×bw エリアの中央）
+	var center := Vector2(bx + bw * 0.5, by + bw * 0.5)
 	_draw_mini_shape(stage_id, center, _BUBBLE_R - _BUBBLE_PAD)
+	# ステージ名（下部ラベルエリア）
+	var name_str: String = StageSelectManager.get_stage_name(stage_id)
+	if not name_str.is_empty():
+		var name_y: float = by + bw + _BUBBLE_NAME_H * 0.72
+		draw_string(_font, Vector2(bx, name_y), name_str,
+			HORIZONTAL_ALIGNMENT_CENTER, bw, 18, _BUBBLE_BORDER)
 	# しっぽ（ドットへ向かう小三角）
 	var tail_tip: Vector2 = dot + Vector2(-_DOT_RADIUS * 0.5, -_DOT_RADIUS * 0.5)
 	var tail_base_x: float = clampf(tail_tip.x, bx + 8.0, bx + bw - 8.0)
@@ -302,7 +309,11 @@ func _draw_popup(vp: Vector2) -> void:
 	draw_string(_font, Vector2(pr.position.x, text_y), "このステージをプレイしますか？",
 		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 28, Color(0.26, 0.21, 0.28))
 	var sub_y: float = text_y + 40.0
-	draw_string(_font, Vector2(pr.position.x, sub_y), "ステージ %d" % (_popup_stage + 1),
+	var stage_label: String = "ステージ %d" % (_popup_stage + 1)
+	var stage_name: String = StageSelectManager.get_stage_name(_popup_stage)
+	if not stage_name.is_empty():
+		stage_label += "　" + stage_name
+	draw_string(_font, Vector2(pr.position.x, sub_y), stage_label,
 		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 22, Color(0.50, 0.30, 0.30))
 
 	# [はい] ボタン
