@@ -572,6 +572,18 @@ func _rebuild_initial_points_hud_hex_ring_outward(point_positions: Array[Vector2
 
 
 ## 正方形・4 点: 各理想角に対応する位置を、角から重心へ HUD_SPAWN_SQUARE_CORNER_INWARD だけ内側に固定
+## 正三角形: 下辺2点をコーナー位置に置いて事前スナップ対象とし、頂上は中心からスタート。
+## コーナー順は shape_corner_points と揃える: 0=頂上, 1=右下, 2=左下
+func _rebuild_initial_points_hud_triangle_bottom_snap(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
+	var center: Vector2 = hud_guide_center
+	var r: float = hud_guide_scale  # guide_radius_val ではなく HUD スケール（recompute_hud_guide_layout 後）
+	var sq3: float = sqrt(3.0) / 2.0
+	point_positions.append(center)                           # KATA 0: 頂上（自由）
+	point_positions.append(center + Vector2(sq3,  0.5) * r) # KATA 1: 右下（事前スナップ）
+	point_positions.append(center + Vector2(-sq3, 0.5) * r) # KATA 2: 左下（事前スナップ）
+	return true
+
+
 func _rebuild_initial_points_hud_square_attract_friendly(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
 	var corners: Array[Vector2] = _hud_square_corner_world_positions()
 	if corners.size() != 4:
@@ -614,6 +626,11 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
 		return
 	point_positions.clear()
+
+	# 正三角形: 下辺2点をコーナー位置に配置（事前スナップ）、頂上は中心からスタート
+	if stage_type == "triangle" and num_points == 3:
+		if _rebuild_initial_points_hud_triangle_bottom_snap(point_positions, viewport_size):
+			return
 
 	# 正方形: 4 角を理想対応に合わせ、角からわずかに内側（引力ですぐガイドへ）
 	if stage_type == "square" and num_points == 4:
@@ -707,6 +724,15 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			# スコア用: 正三角形の頂点（単位スケール、弧なし）
 			_score_verts_norm = [Vector2(0.0, -1.0), Vector2(-sqrt(3.0) / 2.0, 0.5), Vector2(sqrt(3.0) / 2.0, 0.5)]
 			_score_arcs_norm = {}
+			# スナップ用: 頂点を時計回りで定義（square/hexagon と同様）
+			# corner 0=頂上, 1=右下, 2=左下 — KATA点の結合順と対応
+			correspondence_scale = guide_radius_val
+			var _sq3: float = sqrt(3.0) / 2.0
+			shape_corner_points = [
+				Vector2(0.0, -1.0),
+				Vector2(_sq3,  0.5),
+				Vector2(-_sq3, 0.5),
+			]
 		"circle":
 			_generate_circle_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val

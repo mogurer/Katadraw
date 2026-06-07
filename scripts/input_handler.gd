@@ -477,6 +477,7 @@ func reset_for_stage() -> void:
 	_snap_cached_guide_loops.clear()
 	snap_ramp_elapsed = 0.0
 	_reset_player_position()
+	_presnap_at_corners()
 
 
 func _reset_player_position() -> void:
@@ -2902,6 +2903,29 @@ func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
 
 
 ## ===== 新スナップシステム（アリジゴク型）=====
+
+## ステージ開始時に、コーナー位置に一致するポイントを即座にスナップ確定させる。
+## 正三角形の下辺2点など、あらかじめコーナー位置に配置されたポイント向け。
+func _presnap_at_corners() -> void:
+	var corners: Array = _game.stage_manager.get_corner_positions_world()
+	if corners.is_empty():
+		return
+	_snap_ensure_arrays()
+	var n: int = _game.point_positions.size()
+	for i in range(n):
+		if _snap_point_state[i] != 0:
+			continue
+		var pos: Vector2 = _game.point_positions[i]
+		for ci in range(corners.size()):
+			if _snap_corner_occupant.has(ci):
+				continue
+			if pos.distance_to(corners[ci]) <= SNAP_CORNER_RADIUS:
+				_snap_point_state[i] = 1
+				_snap_point_target[i] = corners[ci]
+				_snap_point_corner_idx[i] = ci
+				_snap_corner_occupant[ci] = i
+				break
+
 
 ## スナップ状態配列のサイズをポイント数に合わせる
 func _snap_ensure_arrays() -> void:
