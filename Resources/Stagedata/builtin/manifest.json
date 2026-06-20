@@ -36,11 +36,11 @@
 		"key.json",
 		"king.json",
 		"milk_carton.json",
-		"three_storied_pagoda.json",
 		"mount_fuji.json",
 		"mushrooms.json",
 		"television.json",
 		"one_quarter.json",
+		"three_storied_pagoda.json",
 		"treasure_chest.json",
 		"paramecium.json",
 		"tulip.json",
@@ -60,6 +60,7 @@
 		"onion.json",
 		"pen.json",
 		"pentagon.json",
+		"zou.json",
 		"hexagon.json"
 	]
 }

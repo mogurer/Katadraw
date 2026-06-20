@@ -24,6 +24,10 @@ const _POPUP_BORDER    := Color(0.95, 0.19, 0.32)
 const _BTN_YES_COLOR   := Color(0.95, 0.19, 0.32)
 const _BTN_NO_COLOR    := Color(0.26, 0.21, 0.28)
 
+# --- [DEBUG] ゾウステージ起動ドット ---
+const _ZOU_DOT_POS := Vector2(40.0, 80.0)
+const _ZOU_DOT_R   := 16.0
+
 # --- [DEBUG] SE選択パネル ---
 const _DBG_PANEL_X   := 310.0
 const _DBG_PANEL_Y   := 12.0
@@ -74,6 +78,7 @@ var _esc_popup_no_hovered: bool = false
 
 var _font: Font
 var _dbg_preview: AudioStreamPlayer = null
+var _zou_stage_idx: int = -1  # [DEBUG] zou.json の StageData インデックス（-1=未発見）
 
 
 func _ready() -> void:
@@ -90,6 +95,7 @@ func _ready() -> void:
 		DebugSFXConfig.ensure_counted()
 		_dbg_preview = AudioStreamPlayer.new()
 		add_child(_dbg_preview)
+		_zou_stage_idx = _find_zou_stage_idx()
 
 
 func _process(delta: float) -> void:
@@ -129,9 +135,13 @@ func _input(event: InputEvent) -> void:
 		elif _popup_stage >= 0:
 			_update_popup_hover(event.position)
 
-	# [DEBUG] SE選択パネルのクリック（他のUIより先に処理）
+	# [DEBUG] デバッグクリック処理（他のUIより先に処理）
 	if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if _handle_dbg_sfx_click(event.position):
+			return
+		if _zou_stage_idx >= 0 and event.position.distance_to(_ZOU_DOT_POS) <= _ZOU_DOT_R:
+			StageSelectManager.pending_stage_id = _zou_stage_idx
+			get_tree().change_scene_to_file(_GAME_SCENE)
 			return
 
 	# タイトル戻り確認ポップアップ
@@ -246,6 +256,10 @@ func _draw() -> void:
 	# タイトル戻り確認ポップアップ
 	if _esc_popup:
 		_draw_esc_popup(vp)
+
+	# [DEBUG] ゾウステージ起動ドット
+	if _is_debug() and _zou_stage_idx >= 0:
+		draw_circle(_ZOU_DOT_POS, _ZOU_DOT_R, Color(0.15, 0.10, 0.20))
 
 	# [DEBUG] SE選択パネル
 	if _is_debug() and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
@@ -468,6 +482,16 @@ func _handle_esc_popup_confirm(yes: bool) -> void:
 
 func _is_debug() -> bool:
 	return OS.has_feature("editor") or Engine.is_editor_hint()
+
+
+func _find_zou_stage_idx() -> int:
+	# [DEBUG] キャッシュを強制リセットしてマニフェスト変更を反映させる
+	StageData._stages_cache_ready = false
+	var stages: Array = StageData.get_stages()
+	for i in range(stages.size()):
+		if str(stages[i].get("_source_file", "")) == "zou.json":
+			return i
+	return -1
 
 
 func _dbg_panel_rect() -> Rect2:

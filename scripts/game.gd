@@ -525,8 +525,8 @@ var _sfx_ui_in_active: bool = false         # [DEBUG] 引力SE 繰り返し継�
 var _sfx_ui_out_active: bool = false        # [DEBUG] 斥力SE 繰り返し継続フラグ
 var _sfx_ui_in_timer: Timer = null          # [DEBUG] 引力SE 折り返しタイマー
 var _sfx_ui_out_timer: Timer = null         # [DEBUG] 斥力SE 折り返しタイマー
-const _DBG_SE_IN_LOOP_SEC  := 0.25          # [DEBUG] 引力SE 折り返し間隔（秒）
-const _DBG_SE_OUT_LOOP_SEC := 0.25          # [DEBUG] 斥力SE 折り返し間隔（秒）
+const _DBG_SE_IN_LOOP_SEC  := 0.5           # [DEBUG] 引力SE 折り返し間隔（秒）
+const _DBG_SE_OUT_LOOP_SEC := 0.5           # [DEBUG] 斥力SE 折り返し間隔（秒）
 
 # --- Debug ---
 ## F2 から入る STAGE DEBUG 系でのみ有効にするデバッグフラグ
