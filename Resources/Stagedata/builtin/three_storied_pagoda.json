@@ -1,11 +1,11 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 80.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 500.0,
 		"min_radius": 350.0,
-		"num_points": 40,
+		"num_points": 35,
 		"shape_type": "fish",
 		"type": "three_storied_pagoda",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "three-storied pagodaというらしい　ひばち",
-		"stage_name": "三重塔",
-		"locale_key": "STAGE_THREE_STORIED_PAGODA"
+		"locale_key": "STAGE_THREE_STORIED_PAGODA",
+		"stage_name": "三重塔"
 	},
 	"schema_version": 1.0,
 	"shape": {

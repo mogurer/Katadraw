@@ -24,6 +24,19 @@ const _POPUP_BORDER    := Color(0.95, 0.19, 0.32)
 const _BTN_YES_COLOR   := Color(0.95, 0.19, 0.32)
 const _BTN_NO_COLOR    := Color(0.26, 0.21, 0.28)
 
+# --- [DEBUG] SE選択パネル ---
+const _DBG_PANEL_X   := 310.0
+const _DBG_PANEL_Y   := 12.0
+const _DBG_COL_W     := 108.0
+const _DBG_COL_GAP   := 16.0
+const _DBG_HEADER_H  := 26.0
+const _DBG_ITEM_H    := 22.0
+const _DBG_PAD       := 10.0
+const _DBG_BG        := Color(0.92, 0.97, 0.98, 0.93)
+const _DBG_BD        := Color(0.45, 0.72, 0.80)
+const _DBG_SEL       := Color(0.18, 0.55, 0.70)
+const _DBG_TXT       := Color(0.25, 0.35, 0.40)
+
 # --- サイズ ---
 const _DOT_RADIUS      := 20.0
 const _LINE_WIDTH      := 2.0
@@ -60,6 +73,7 @@ var _esc_popup_yes_hovered: bool = false
 var _esc_popup_no_hovered: bool = false
 
 var _font: Font
+var _dbg_preview: AudioStreamPlayer = null
 
 
 func _ready() -> void:
@@ -72,6 +86,10 @@ func _ready() -> void:
 		_anim_freq.append(rng.randf_range(0.5, 1.2))
 		_anim_phase.append(rng.randf_range(0.0, TAU))
 		_anim_amp.append(rng.randf_range(4.0, 9.0))
+	if _is_debug():
+		DebugSFXConfig.ensure_counted()
+		_dbg_preview = AudioStreamPlayer.new()
+		add_child(_dbg_preview)
 
 
 func _process(delta: float) -> void:
@@ -110,6 +128,11 @@ func _input(event: InputEvent) -> void:
 			_update_esc_popup_hover(event.position)
 		elif _popup_stage >= 0:
 			_update_popup_hover(event.position)
+
+	# [DEBUG] SE選択パネルのクリック（他のUIより先に処理）
+	if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if _handle_dbg_sfx_click(event.position):
+			return
 
 	# タイトル戻り確認ポップアップ
 	if _esc_popup:
@@ -223,6 +246,10 @@ func _draw() -> void:
 	# タイトル戻り確認ポップアップ
 	if _esc_popup:
 		_draw_esc_popup(vp)
+
+	# [DEBUG] SE選択パネル
+	if _is_debug() and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
+		_draw_dbg_sfx_panel()
 
 	# 自キャラ（ポップアップより前面）
 	draw_circle(_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
@@ -435,3 +462,78 @@ func _handle_esc_popup_confirm(yes: bool) -> void:
 	else:
 		_esc_popup = false
 		queue_redraw()
+
+
+# ---------- [DEBUG] SE選択パネル ----------
+
+func _is_debug() -> bool:
+	return OS.has_feature("editor") or Engine.is_editor_hint()
+
+
+func _dbg_panel_rect() -> Rect2:
+	var rows: int = maxi(DebugSFXConfig.in_count, DebugSFXConfig.out_count)
+	var pw: float = _DBG_COL_W * 2.0 + _DBG_COL_GAP + _DBG_PAD * 2.0
+	var ph: float = _DBG_HEADER_H + rows * _DBG_ITEM_H + _DBG_PAD
+	return Rect2(_DBG_PANEL_X, _DBG_PANEL_Y, pw, ph)
+
+
+func _dbg_item_rect(col: int, row: int) -> Rect2:
+	var pr: Rect2 = _dbg_panel_rect()
+	var cx: float = pr.position.x + _DBG_PAD + col * (_DBG_COL_W + _DBG_COL_GAP)
+	var cy: float = pr.position.y + _DBG_HEADER_H + row * _DBG_ITEM_H
+	return Rect2(cx, cy, _DBG_COL_W, _DBG_ITEM_H)
+
+
+func _draw_dbg_sfx_panel() -> void:
+	var pr: Rect2 = _dbg_panel_rect()
+	draw_rect(pr.grow(2.0), _DBG_BD)
+	draw_rect(pr, _DBG_BG)
+	var in_x: float = pr.position.x + _DBG_PAD
+	var out_x: float = in_x + _DBG_COL_W + _DBG_COL_GAP
+	var hy: float = pr.position.y + _DBG_HEADER_H * 0.78
+	draw_string(_font, Vector2(in_x, hy), "in",
+		HORIZONTAL_ALIGNMENT_CENTER, _DBG_COL_W, 15, _DBG_SEL)
+	draw_string(_font, Vector2(out_x, hy), "out",
+		HORIZONTAL_ALIGNMENT_CENTER, _DBG_COL_W, 15, _DBG_TXT)
+	for row in range(DebugSFXConfig.in_count):
+		_draw_dbg_item(0, row, row == DebugSFXConfig.in_idx)
+	for row in range(DebugSFXConfig.out_count):
+		_draw_dbg_item(1, row, row == DebugSFXConfig.out_idx)
+
+
+func _draw_dbg_item(col: int, row: int, selected: bool) -> void:
+	var r: Rect2 = _dbg_item_rect(col, row)
+	var cy: float = r.position.y + r.size.y * 0.5
+	var cx: float = r.position.x + 10.0
+	var cr: float = 5.5
+	var c: Color = _DBG_SEL if selected else _DBG_TXT
+	if selected:
+		draw_circle(Vector2(cx, cy), cr, c)
+		draw_circle(Vector2(cx, cy), cr * 0.38, _DBG_BG)
+	else:
+		draw_circle(Vector2(cx, cy), cr, Color(c, 0.20))
+		draw_arc(Vector2(cx, cy), cr, 0.0, TAU, 16, c, 1.2)
+	draw_string(_font, Vector2(cx + cr + 5.0, r.position.y + r.size.y * 0.78),
+		"%02d" % (row + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, c)
+
+
+func _handle_dbg_sfx_click(pos: Vector2) -> bool:
+	if DebugSFXConfig.in_count == 0 and DebugSFXConfig.out_count == 0:
+		return false
+	for row in range(DebugSFXConfig.in_count):
+		if _dbg_item_rect(0, row).has_point(pos):
+			DebugSFXConfig.in_idx = row
+			if _dbg_preview:
+				_dbg_preview.stream = load(DebugSFXConfig.in_path(row))
+				_dbg_preview.play()
+			queue_redraw()
+			return true
+	for row in range(DebugSFXConfig.out_count):
+		if _dbg_item_rect(1, row).has_point(pos):
+			DebugSFXConfig.out_idx = row
+			if _dbg_preview:
+				_dbg_preview.stream = load(DebugSFXConfig.out_path(row))
+				_dbg_preview.play()
+			queue_redraw()
+			return true
+	return false

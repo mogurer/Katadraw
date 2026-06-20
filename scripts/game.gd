@@ -519,6 +519,14 @@ var sfx_stagestart: AudioStreamPlayer
 var sfx_pin_on: AudioStreamPlayer
 var sfx_pin_off: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
+var _sfx_ui_in: AudioStreamPlayer = null    # [DEBUG] 引力SE
+var _sfx_ui_out: AudioStreamPlayer = null   # [DEBUG] 斥力SE
+var _sfx_ui_in_active: bool = false         # [DEBUG] 引力SE 繰り返し継続フラグ
+var _sfx_ui_out_active: bool = false        # [DEBUG] 斥力SE 繰り返し継続フラグ
+var _sfx_ui_in_timer: Timer = null          # [DEBUG] 引力SE 折り返しタイマー
+var _sfx_ui_out_timer: Timer = null         # [DEBUG] 斥力SE 折り返しタイマー
+const _DBG_SE_IN_LOOP_SEC  := 0.25          # [DEBUG] 引力SE 折り返し間隔（秒）
+const _DBG_SE_OUT_LOOP_SEC := 0.25          # [DEBUG] 斥力SE 折り返し間隔（秒）
 
 # --- Debug ---
 ## F2 から入る STAGE DEBUG 系でのみ有効にするデバッグフラグ
@@ -715,6 +723,29 @@ func _cursor_register_pad_activity() -> void:
 	_cursor_mouse_motion_accum = Vector2.ZERO
 	if game_state == "playing":
 		playing_mouse_steers_player = false
+		input_handler.notify_pad_steering_active()
+
+
+## マウス移動を input_handler へ渡すか（誤反応対策 B + C）。
+## reveal_threshold_reached: 本イベントで累積 36px に達した（リセット前の判定結果）
+func _should_forward_mouse_motion_to_handler(reveal_threshold_reached: bool = false) -> bool:
+	var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
+	var accum_ok: bool = reveal_threshold_reached or _cursor_mouse_motion_accum.length_squared() >= thr_sq
+	var already_mouse: bool = input_handler.get_last_input_method() == "mouse"
+	# B: カーソル表示と同じ累積 36px 以上、または既にマウス操作モード
+	if not accum_ok and not already_mouse:
+		return false
+	# C: プレイ中はクリックまたは一定量のマウス操作で制御を移す
+	if game_state == "playing" and not playing_mouse_steers_player:
+		var mouse_engaged: bool = (
+			Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+			or accum_ok
+		)
+		if not mouse_engaged:
+			return false
+		playing_mouse_steers_player = true
+	return true
 
 
 func _cursor_visible_mode() -> Input.MouseMode:
@@ -909,6 +940,23 @@ func _setup_audio() -> void:
 	sfx_move.volume_db = -14.5
 	add_child(sfx_move)
 
+	if _debug_tools_enabled():
+		DebugSFXConfig.ensure_counted()
+		_sfx_ui_in = AudioStreamPlayer.new()
+		_sfx_ui_in.volume_db = -10.0
+		add_child(_sfx_ui_in)
+		_sfx_ui_in_timer = Timer.new()
+		_sfx_ui_in_timer.one_shot = true
+		add_child(_sfx_ui_in_timer)
+		_sfx_ui_in_timer.timeout.connect(_on_sfx_ui_in_timer_timeout)
+		_sfx_ui_out = AudioStreamPlayer.new()
+		_sfx_ui_out.volume_db = -10.0
+		add_child(_sfx_ui_out)
+		_sfx_ui_out_timer = Timer.new()
+		_sfx_ui_out_timer.one_shot = true
+		add_child(_sfx_ui_out_timer)
+		_sfx_ui_out_timer.timeout.connect(_on_sfx_ui_out_timer_timeout)
+
 	sfx_stageclear = AudioStreamPlayer.new()
 	sfx_stageclear.stream = _load_audio("res://assets/sounds/se_stageclear.wav")
 	sfx_stageclear.volume_db = -14.5
@@ -933,10 +981,82 @@ func _play_sfx(player: AudioStreamPlayer) -> void:
 		player.play()
 
 func _start_sfx_move() -> void:
+	if _debug_tools_enabled() and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
+		return
 	if sfx_move and sfx_move.stream:
 		if not sfx_move.playing:
 			sfx_move.play()
 		_sfx_move_playing = true
+
+
+func play_sfx_ui_in() -> void:
+	if not _sfx_ui_in:
+		return
+	# 斥力SEが鳴っていれば即停止（切り替え）
+	_sfx_ui_out_active = false
+	if _sfx_ui_out_timer:
+		_sfx_ui_out_timer.stop()
+	if _sfx_ui_out and _sfx_ui_out.playing:
+		_sfx_ui_out.stop()
+	# 引力SE 開始 + タイマー起動
+	var path := DebugSFXConfig.in_path(DebugSFXConfig.in_idx)
+	if _sfx_ui_in.stream == null or _sfx_ui_in.stream.resource_path != path:
+		_sfx_ui_in.stream = load(path) if FileAccess.file_exists(path) else null
+	if _sfx_ui_in.stream:
+		_sfx_ui_in_active = true
+		_sfx_ui_in.stop()
+		_sfx_ui_in.play()
+		_sfx_ui_in_timer.start(_DBG_SE_IN_LOOP_SEC)
+
+
+func stop_sfx_ui_in() -> void:
+	# ボタン離し：タイマー停止のみ。オーディオは最後まで自然再生させる
+	_sfx_ui_in_active = false
+	if _sfx_ui_in_timer:
+		_sfx_ui_in_timer.stop()
+
+
+func _on_sfx_ui_in_timer_timeout() -> void:
+	if not _sfx_ui_in_active or not _sfx_ui_in or not _sfx_ui_in.stream:
+		return
+	_sfx_ui_in.stop()
+	_sfx_ui_in.play()
+	_sfx_ui_in_timer.start(_DBG_SE_IN_LOOP_SEC)
+
+
+func play_sfx_ui_out() -> void:
+	if not _sfx_ui_out:
+		return
+	# 引力SEが鳴っていれば即停止（切り替え）
+	_sfx_ui_in_active = false
+	if _sfx_ui_in_timer:
+		_sfx_ui_in_timer.stop()
+	if _sfx_ui_in and _sfx_ui_in.playing:
+		_sfx_ui_in.stop()
+	# 斥力SE 開始 + タイマー起動
+	var path := DebugSFXConfig.out_path(DebugSFXConfig.out_idx)
+	if _sfx_ui_out.stream == null or _sfx_ui_out.stream.resource_path != path:
+		_sfx_ui_out.stream = load(path) if FileAccess.file_exists(path) else null
+	if _sfx_ui_out.stream:
+		_sfx_ui_out_active = true
+		_sfx_ui_out.stop()
+		_sfx_ui_out.play()
+		_sfx_ui_out_timer.start(_DBG_SE_OUT_LOOP_SEC)
+
+
+func stop_sfx_ui_out() -> void:
+	# ボタン離し：タイマー停止のみ。オーディオは最後まで自然再生させる
+	_sfx_ui_out_active = false
+	if _sfx_ui_out_timer:
+		_sfx_ui_out_timer.stop()
+
+
+func _on_sfx_ui_out_timer_timeout() -> void:
+	if not _sfx_ui_out_active or not _sfx_ui_out or not _sfx_ui_out.stream:
+		return
+	_sfx_ui_out.stop()
+	_sfx_ui_out.play()
+	_sfx_ui_out_timer.start(_DBG_SE_OUT_LOOP_SEC)
 
 func _stop_sfx_move() -> void:
 	# _sfx_move_playing と実再生がずれた場合でも確実に止める（クリア直後など）
@@ -1470,13 +1590,18 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton:
 		_cursor_register_mouse_activity()
+		if game_state == "playing" and event.pressed:
+			if event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT:
+				playing_mouse_steers_player = true
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event as InputEventMouseMotion
 		_cursor_mouse_motion_accum += mm.relative
 		var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
-		if _cursor_mouse_motion_accum.length_squared() >= thr_sq:
+		var reveal_threshold_reached: bool = _cursor_mouse_motion_accum.length_squared() >= thr_sq
+		if reveal_threshold_reached:
 			_cursor_register_mouse_activity()
-		input_handler.handle_mouse_motion(mm.position, mm.relative)
+		if _should_forward_mouse_motion_to_handler(reveal_threshold_reached):
+			input_handler.handle_mouse_motion(mm.position, mm.relative)
 	elif _cursor_event_should_hide_for_pad(event):
 		_cursor_register_pad_activity()
 

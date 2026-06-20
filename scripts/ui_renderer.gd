@@ -1989,7 +1989,8 @@ func _draw_game(vp: Vector2) -> void:
 	_draw_hud(vp)
 
 	_draw_debug_circularity_overlay(vp)
-	_draw_debug_ideal_points_overlay()
+	# 近接角マーカー検証用: 全角オレンジ（C0〜Cn）の常時描画はオフ
+	# _draw_debug_corner_points_overlay()
 
 	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
@@ -2484,7 +2485,7 @@ func _draw_debug_circularity_overlay(vp: Vector2) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
-func _draw_debug_ideal_points_overlay() -> void:
+func _draw_debug_corner_points_overlay() -> void:
 	if not _game.stage_session.debug_test_mode:
 		return
 	if _game.game_state != "playing":
@@ -2498,20 +2499,7 @@ func _draw_debug_ideal_points_overlay() -> void:
 	var cos_r: float = cos(sm.correspondence_rotation)
 	var sin_r: float = sin(sm.correspondence_rotation)
 
-	# ideal_points: 水色の丸 + 十字 + インデックス番号
-	var ideal_color := Color(0.0, 0.85, 0.95, 0.9)
-	for i in range(sm.ideal_points.size()):
-		var n: Vector2 = sm.ideal_points[i] as Vector2
-		var wx: float = (n.x * cos_r - n.y * sin_r) * scale
-		var wy: float = (n.x * sin_r + n.y * cos_r) * scale
-		var p: Vector2 = center + Vector2(wx, wy)
-		_game.draw_circle(p, 4.0, ideal_color)
-		_game.draw_line(p + Vector2(-8, 0), p + Vector2(8, 0), ideal_color, 1.5)
-		_game.draw_line(p + Vector2(0, -8), p + Vector2(0, 8), ideal_color, 1.5)
-		_game.draw_string(_game.font, p + Vector2(5, -4), str(i),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.0, 0.85, 0.95, 1.0))
-
-	# shape_corner_points: オレンジの丸 + 十字 + "C" + インデックス番号
+	# shape_corner_points: オレンジの丸 + 十字 + "C" + インデックス番号（スナップ先の角）
 	var corner_color := Color(1.0, 0.50, 0.05, 0.95)
 	for i in range(sm.shape_corner_points.size()):
 		var n: Vector2 = sm.shape_corner_points[i] as Vector2

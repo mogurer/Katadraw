@@ -1,19 +1,19 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 85.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 360.0,
 		"min_radius": 160.0,
-		"num_points": 15,
+		"num_points": 12,
 		"shape_type": "fish",
 		"type": "bottle_s"
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "hibachi",
-		"stage_name": "ビン",
-		"locale_key": "STAGE_BOTTLE_S"
+		"locale_key": "STAGE_BOTTLE_S",
+		"stage_name": "ビン"
 	},
 	"schema_version": 1.0,
 	"shape": {

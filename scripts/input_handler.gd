@@ -176,6 +176,8 @@ var _pin_state: PackedByteArray = PackedByteArray()
 var _pin_ax_hold_ms: float = 0.0
 ## 今回の A+X ホールドで既に発火済みか（離すまで再発火しない）
 var _pin_ax_triggered: bool = false
+## playing 中に A+X（またはマウス左右）同時押し中（ガイド近接表示用）
+var ax_combo_held: bool = false
 ## A+X ホールドで発火するまでの時間（ms）
 const PIN_HOLD_DURATION_MS: float = 1000.0
 ## スナップ先のワールド座標（吸着確定後の引き戻し先）
@@ -336,6 +338,8 @@ var player_position: Vector2 = Vector2.ZERO
 var player_position_initialized: bool = false
 var player_force_attracting: bool = false
 var player_force_repelling: bool = false
+var _prev_force_attracting: bool = false  # [DEBUG] SE遷移検出用
+var _prev_force_repelling: bool = false   # [DEBUG] SE遷移検出用
 var player_has_motion_input: bool = false
 var player_force_active: bool = false
 var player_influenced_point_count: int = 0
@@ -1087,10 +1091,25 @@ func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> boo
 	return true
 
 
+func get_last_input_method() -> String:
+	return _last_input_method
+
+
+func sync_mouse_target_to_player() -> void:
+	_mouse_target = player_position
+
+
+func notify_pad_steering_active() -> void:
+	_last_input_method = "pad"
+	sync_mouse_target_to_player()
+
+
 ## マウス入力時の自キャラ lerp 追従。毎フレーム _process から呼ぶ。
 ## 最後の入力がマウスの場合のみ player_position を _mouse_target へ近づける。
 func process_mouse_lerp(delta: float) -> void:
 	if _last_input_method != "mouse":
+		return
+	if _game.game_state == "playing" and not _game.playing_mouse_steers_player:
 		return
 	if not player_position_initialized:
 		return
@@ -1102,6 +1121,7 @@ func process_mouse_lerp(delta: float) -> void:
 
 func process_pad(delta: float) -> void:
 	if _game.game_state != "playing" and _game.game_state != "rules":
+		ax_combo_held = false
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
@@ -1117,6 +1137,7 @@ func process_pad(delta: float) -> void:
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
+		ax_combo_held = false
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
@@ -1132,6 +1153,7 @@ func process_pad(delta: float) -> void:
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
+		ax_combo_held = false
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
@@ -1171,6 +1193,11 @@ func process_pad(delta: float) -> void:
 	var pad_b: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_B)
 	var mouse_left: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var mouse_right: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	ax_combo_held = (
+		_game.game_state == "playing"
+		and not pad_b
+		and ((pad_a and pad_x) or (mouse_left and mouse_right))
+	)
 	_ax_spacing_active = false
 
 	if pad_b:
@@ -1334,6 +1361,7 @@ func process_pad(delta: float) -> void:
 	if moved:
 		_clamp_player_to_viewport()
 		_last_input_method = "pad"
+		notify_pad_steering_active()
 		_game.queue_redraw()
 	_refresh_hovered_point()
 	grab_input_active = (
@@ -1399,6 +1427,20 @@ func update_drag_physics(delta: float) -> void:
 	_snap_ensure_arrays()
 	if not player_position_initialized:
 		_reset_player_position()
+
+	# [DEBUG] 引力・斥力の遷移を検出してSEを制御
+	if OS.has_feature("editor") or Engine.is_editor_hint():
+		if player_force_attracting and not _prev_force_attracting:
+			_game.play_sfx_ui_in()
+		elif not player_force_attracting and _prev_force_attracting:
+			_game.stop_sfx_ui_in()
+		if player_force_repelling and not _prev_force_repelling:
+			_game.play_sfx_ui_out()
+		elif not player_force_repelling and _prev_force_repelling:
+			_game.stop_sfx_ui_out()
+	_prev_force_attracting = player_force_attracting
+	_prev_force_repelling = player_force_repelling
+
 	# [DISABLED] Layer 4: _ideal_drift_timer
 	# [DISABLED] Layer 1: snap_ramp_elapsed
 
@@ -3615,6 +3657,21 @@ func _is_locked(idx: int) -> bool:
 ## 外部（描画）向けピン状態公開
 func is_pinned(idx: int) -> bool:
 	return idx < _pin_state.size() and _pin_state[idx] == 1
+
+
+func is_ax_combo_held() -> bool:
+	return ax_combo_held
+
+
+## コーナー吸着確定（_snap_point_state == 1）か
+func is_point_corner_snapped(idx: int) -> bool:
+	return idx < _snap_point_state.size() and _snap_point_state[idx] == 1
+
+
+func get_point_snap_corner_index(idx: int) -> int:
+	if idx < 0 or idx >= _snap_point_corner_idx.size():
+		return -1
+	return _snap_point_corner_idx[idx]
 
 ## A+X チャージ進捗 (0.0〜1.0)。発火後・非押下時は 0.0
 func get_pin_charge_progress() -> float:
