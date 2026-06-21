@@ -56,6 +56,20 @@ const _POPUP_H         := 260.0
 const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
 const _PAD_SPEED       := 600.0   # ゲームパッド移動速度（px/sec）
 
+# --- BGM 曲名表示 ---
+const _BGM_TRACK_KEYS: Array[String] = [
+	"BGM_01-05",
+	"BGM_01-06",
+	"BGM_01-08",
+	"BGM_02-03",
+	"BGM_02-09",
+]
+const _BGM_LABEL_FONT_SIZE := 20
+const _BGM_LABEL_COLOR     := Color(0.5, 0.3, 0.3)
+const _BGM_TYPEWRITER_SEC  := 1.0
+const _BGM_HOLD_SEC        := 5.0
+const _BGM_DISMISS_SEC     := 2.0
+
 var _char_pos: Vector2 = Vector2(960, 540)
 var _char_target: Vector2 = Vector2(960, 540)
 var _char_moved_by_user: bool = false
@@ -80,6 +94,15 @@ var _font: Font
 var _dbg_preview: AudioStreamPlayer = null
 var _zou_stage_idx: int = -1  # [DEBUG] zou.json の StageData インデックス（-1=未発見）
 
+# --- BGM 曲名表示 ---
+var _bgm_canvas: CanvasLayer = null
+var _bgm_container: HBoxContainer = null
+var _btn_prev: Button = null
+var _btn_next: Button = null
+var _bgm_label: Label = null
+var _bgm_text: String = ""
+var _bgm_tween: Tween = null
+
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
@@ -96,6 +119,9 @@ func _ready() -> void:
 		_dbg_preview = AudioStreamPlayer.new()
 		add_child(_dbg_preview)
 		_zou_stage_idx = _find_zou_stage_idx()
+	_bgm_canvas = $BgmUI
+	_setup_bgm_ui()
+	_start_bgm_label_anim.call_deferred()
 
 
 func _process(delta: float) -> void:
@@ -121,6 +147,12 @@ func _process(delta: float) -> void:
 	if _char_moved_by_user and _popup_stage < 0:
 		_char_moved_by_user = false
 		_nearest = _find_nearest_accessible()
+
+	# BGM ボタンはポップアップ表示中に無効化
+	if _btn_prev:
+		var popup_open := _popup_stage >= 0 or _esc_popup
+		_btn_prev.disabled = popup_open
+		_btn_next.disabled = popup_open
 
 	queue_redraw()
 
@@ -209,8 +241,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton and event.pressed:
 		if event.button_index == JOY_BUTTON_LEFT_SHOULDER:
 			BGMManager.select_prev_bgm()
+			_start_bgm_label_anim()
 		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			BGMManager.select_next_bgm()
+			_start_bgm_label_anim()
 
 
 func _draw() -> void:
@@ -561,3 +595,150 @@ func _handle_dbg_sfx_click(pos: Vector2) -> bool:
 			queue_redraw()
 			return true
 	return false
+
+
+# ---------- BGM 曲名表示 ----------
+
+func _mk_bgm_btn(label_text: String) -> Button:
+	var b := Button.new()
+	b.text = label_text
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+	b.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	b.add_theme_color_override("font_hover_color", _BGM_LABEL_COLOR.lightened(0.25))
+	b.add_theme_color_override("font_pressed_color", _BGM_LABEL_COLOR.darkened(0.20))
+	b.add_theme_color_override("font_disabled_color",
+		Color(_BGM_LABEL_COLOR.r, _BGM_LABEL_COLOR.g, _BGM_LABEL_COLOR.b, 0.35))
+	return b
+
+
+func _mk_note_label() -> Label:
+	var l := Label.new()
+	l.text = "♪"
+	l.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+	l.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return l
+
+
+func _setup_bgm_ui() -> void:
+	# フルスクリーン基準コントロール（CanvasLayer 内でアンカー基準を確保）
+	var anchor := Control.new()
+	anchor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_bgm_canvas.add_child(anchor)
+
+	# HBoxContainer: 右下アンカー・コンテンツ量に合わせて左方向へ伸張
+	_bgm_container = HBoxContainer.new()
+	_bgm_container.anchor_left   = 1.0
+	_bgm_container.anchor_right  = 1.0
+	_bgm_container.anchor_top    = 1.0
+	_bgm_container.anchor_bottom = 1.0
+	_bgm_container.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_bgm_container.grow_vertical   = Control.GROW_DIRECTION_BEGIN
+	_bgm_container.offset_right  = -20.0
+	_bgm_container.offset_bottom = -14.0
+	_bgm_container.add_theme_constant_override("separation", 8)
+	anchor.add_child(_bgm_container)
+
+	_btn_prev = _mk_bgm_btn("◀[L]")
+	_bgm_container.add_child(_btn_prev)
+	_bgm_container.add_child(_mk_note_label())
+
+	_bgm_label = Label.new()
+	_bgm_label.name = "BgmNameLabel"
+	_bgm_label.visible_characters = 0
+	_bgm_label.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+	_bgm_label.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	_bgm_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_bgm_label.hide()
+	_bgm_container.add_child(_bgm_label)
+
+	_bgm_container.add_child(_mk_note_label())
+
+	_btn_next = _mk_bgm_btn("[R]▶")
+	_bgm_container.add_child(_btn_next)
+
+	_btn_prev.pressed.connect(_on_bgm_btn_prev)
+	_btn_next.pressed.connect(_on_bgm_btn_next)
+
+
+func _start_bgm_label_anim() -> void:
+	if _bgm_tween:
+		_bgm_tween.kill()
+		_bgm_tween = null
+
+	var idx := BGMManager.get_ingame_track_idx()
+	if idx < 0 or idx >= _BGM_TRACK_KEYS.size():
+		return
+
+	_bgm_text = tr(_BGM_TRACK_KEYS[idx])
+	_bgm_label.text = _bgm_text
+	_bgm_label.visible_characters = 0
+	_bgm_label.show()
+
+	_bgm_tween = create_tween()
+	(_bgm_tween
+		.tween_property(_bgm_label, "visible_characters", len(_bgm_text), _BGM_TYPEWRITER_SEC)
+		.set_trans(Tween.TRANS_LINEAR))
+	_bgm_tween.tween_interval(_BGM_HOLD_SEC)
+	_bgm_tween.tween_callback(_begin_dismiss)
+
+
+func _begin_dismiss() -> void:
+	if _bgm_tween:
+		_bgm_tween.kill()
+		_bgm_tween = null
+
+	var n := len(_bgm_text)
+	if n == 0:
+		_bgm_label.hide()
+		return
+
+	_bgm_tween = create_tween()
+	var step := _BGM_DISMISS_SEC / float(n)
+	for i in range(n):
+		_bgm_tween.tween_interval(step)
+		_bgm_tween.tween_callback(_dismiss_step.bind(i + 1))
+	_bgm_tween.tween_callback(func() -> void:
+		_bgm_label.hide()
+		_bgm_text = ""
+	)
+
+
+func _dismiss_step(skip: int) -> void:
+	var rect := _bgm_label.get_global_rect()
+	_spawn_bgm_particle(Vector2(rect.position.x + 2.0, rect.get_center().y))
+	_bgm_label.text = _bgm_text.substr(skip)
+
+
+func _spawn_bgm_particle(pos: Vector2) -> void:
+	var p := CPUParticles2D.new()
+	_bgm_canvas.add_child(p)
+	p.position = pos
+	p.emitting = true
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.amount = 6
+	p.lifetime = 0.6
+	p.spread = 180.0
+	p.gravity = Vector2(0.0, 150.0)
+	p.initial_velocity_min = 40.0
+	p.initial_velocity_max = 100.0
+	p.scale_amount_min = 2.0
+	p.scale_amount_max = 4.0
+	p.color = Color(0.8, 0.5, 0.5, 1.0)
+	get_tree().create_timer(1.2).timeout.connect(func() -> void:
+		if is_instance_valid(p):
+			p.queue_free()
+	)
+
+
+func _on_bgm_btn_prev() -> void:
+	BGMManager.select_prev_bgm()
+	_start_bgm_label_anim()
+
+
+func _on_bgm_btn_next() -> void:
+	BGMManager.select_next_bgm()
+	_start_bgm_label_anim()

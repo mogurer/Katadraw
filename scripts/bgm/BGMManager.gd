@@ -363,6 +363,11 @@ func select_prev_bgm() -> void:
 	play_ingame()
 
 
+## 現在のインゲームBGMインデックスを返す（0〜_INGAME_TRACK_COUNT-1）。
+func get_ingame_track_idx() -> int:
+	return _ingame_track_idx
+
+
 ## 全停止・状態リセット。
 func stop() -> void:
 	_stop_all()

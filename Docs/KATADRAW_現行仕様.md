@@ -306,6 +306,7 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 - クリア時: 自身を `CLEARED` + 上下左右隣接を `UNLOCKED`
 - 自キャラ接近 **140 px** で吹き出しプレビュー
 - 決定で確認ポップアップ → `pending_stage_id` 設定 → `game.tscn` へ
+- **コントローラ L/R ボタン**（左ショルダー / 右ショルダー）でインゲーム BGM を切り替え（**5 曲**を循環、先頭から再生）。ステージ選択確認・タイトル戻り確認のポップアップ表示中は無効。キーボード・マウスでの切り替え操作はなし（`scenes/stage_select.gd` → `BGMManager.select_prev_bgm()` / `select_next_bgm()`）
 
 ### 5.5 組み込みステージ一覧（manifest 順）
 
@@ -400,8 +401,8 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 
 | トラック | 内容 |
 |----------|------|
-| 0 ingame | intro `01-05_0000.ogg` + モチーフ 15 本（0010〜0150） |
-| 1 title | intro `KATADRAW_Title_0000.ogg` + モチーフ 5 本 |
+| 0〜4 ingame | 5 曲（`01-05` / `01-06` / `01-08` / `02-03` / `02-09`）。各曲イントロ + モチーフ複数本。ステージセレクトで L/R 切り替え |
+| 5 title | intro `KATADRAW_Title_0000.ogg` + モチーフ 5 本 |
 
 | 定数 | 値 |
 |------|-----|
