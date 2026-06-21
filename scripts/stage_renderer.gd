@@ -560,6 +560,44 @@ func draw_clear_shapes(rect: Rect2) -> void:
 	draw_result_thumbnail(rect, _get_ideal_vertex_loops(), _get_player_vertex_loops())
 
 
+func draw_ideal_only(rect: Rect2, color: Color = Color(0.9490, 0.1882, 0.3216), line_width: float = 4.0) -> void:
+	"""見本の図形のみを rect 内に大きく描画（クリア画面右パネル用）"""
+	var ideal_loops: Array = _get_ideal_vertex_loops()
+	if ideal_loops.is_empty():
+		return
+	var all: Array[Vector2] = []
+	for loop in ideal_loops:
+		all.append_array(loop)
+	if all.is_empty():
+		return
+	var min_p: Vector2 = all[0]
+	var max_p: Vector2 = all[0]
+	for p in all:
+		min_p.x = minf(min_p.x, p.x)
+		min_p.y = minf(min_p.y, p.y)
+		max_p.x = maxf(max_p.x, p.x)
+		max_p.y = maxf(max_p.y, p.y)
+	var size: Vector2 = max_p - min_p
+	var center_src: Vector2 = (min_p + max_p) * 0.5
+	if size.x < 1.0:
+		size.x = 1.0
+	if size.y < 1.0:
+		size.y = 1.0
+	var margin: float = 24.0
+	var avail_w: float = rect.size.x - margin * 2.0
+	var avail_h: float = rect.size.y - margin * 2.0
+	if avail_w < 1.0 or avail_h < 1.0:
+		return
+	var scale: float = minf(avail_w / size.x, avail_h / size.y)
+	var center_dst: Vector2 = rect.position + rect.size * 0.5
+	for loop in ideal_loops:
+		var verts: Array = loop
+		for i in range(verts.size()):
+			var a: Vector2 = (verts[i] - center_src) * scale + center_dst
+			var b: Vector2 = (verts[(i + 1) % verts.size()] - center_src) * scale + center_dst
+			_game.draw_line(a, b, color, line_width, true)
+
+
 ## 保存済みループを rect 内にスケールして重ね描き（リザルト一覧サムネイル用）
 func draw_result_thumbnail(rect: Rect2, ideal_loops: Array, player_loops: Array) -> void:
 	if ideal_loops.is_empty() and player_loops.is_empty():
