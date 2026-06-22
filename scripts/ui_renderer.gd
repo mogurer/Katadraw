@@ -2739,19 +2739,33 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 	var rect := Rect2(center.x - draw_w / 2.0, center.y - draw_h / 2.0, draw_w, draw_h)
 	var shadow_offset := Vector2(12.5 + shadow_extra, 12.5 + shadow_extra)
 	_game.draw_rect(Rect2(rect.position + shadow_offset, rect.size), Color(0.26, 0.21, 0.28, 0.30 * alpha))
+	var border_c := Color(0.26, 0.21, 0.28, alpha)
+	const BTN_BW: float = 5.75
+	var text_color: Color
 	if is_off:
 		_game.draw_rect(rect, Color(1.0, 0.937, 0.89, alpha))
+		_draw_rect_border_with_corners(rect, border_c, BTN_BW)
+		text_color = Color(0.26, 0.21, 0.28, alpha)
 	else:
-		_game.draw_rect(rect, Color(0.95, 0.19, 0.32, 0.9 * alpha))
-	_draw_rect_border_with_corners(rect, Color(0.26, 0.21, 0.28, alpha), 5.75)
+		# ONボタン：四隅が時刻ベースのサイン波でゆっくり動き続ける（OFFで正矩形に戻る）
+		var t: float = Time.get_ticks_msec() / 1000.0
+		var mo: float = 5.0
+		var pts := PackedVector2Array([
+			Vector2(rect.position.x + sin(t * 0.71 + 0.00) * mo, rect.position.y + sin(t * 0.53 + 1.10) * mo),
+			Vector2(rect.end.x      + sin(t * 0.63 + 2.30) * mo, rect.position.y + sin(t * 0.79 + 3.50) * mo),
+			Vector2(rect.end.x      + sin(t * 0.58 + 4.70) * mo, rect.end.y      + sin(t * 0.67 + 5.90) * mo),
+			Vector2(rect.position.x + sin(t * 0.82 + 7.10) * mo, rect.end.y      + sin(t * 0.61 + 8.30) * mo),
+		])
+		_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.9 * alpha))
+		var dot_r: float = BTN_BW * 1.25
+		for i in range(4):
+			_game.draw_line(pts[i], pts[(i + 1) % 4], border_c, BTN_BW, true)
+		for c in pts:
+			_game.draw_circle(c, dot_r, border_c)
+		text_color = Color(1.0, 0.937, 0.89, alpha)
 	var ascent: float = _game.font.get_ascent(fs)
 	var descent: float = _game.font.get_descent(fs)
 	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5
-	var text_color: Color
-	if is_off:
-		text_color = Color(0.26, 0.21, 0.28, alpha)
-	else:
-		text_color = Color(1.0, 0.937, 0.89, alpha)
 	_game.draw_string(_game.font, Vector2(rect.position.x, baseline_y), text, HORIZONTAL_ALIGNMENT_CENTER, draw_w, fs, text_color)
 	# ヒット判定用に元サイズのrectを返す
 	return Rect2(center.x - btn_w / 2.0, center.y - btn_h / 2.0, btn_w, btn_h)
