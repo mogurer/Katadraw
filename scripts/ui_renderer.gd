@@ -197,6 +197,8 @@ var title_intro: TitleIntroAnimator
 # --- game 参照 (Node2D/CanvasItem) ---
 var _game: Node2D
 var _stage_renderer: StageRenderer
+var _font_din_tight: FontVariation = null  # font_din の字間詰めバリアント（spacing_glyph = -5）
+var _font_stage: FontVariation = null      # STAGE 専用: CLEAR 幅に合わせて字間を自動調整
 
 
 func _init(game: Node2D) -> void:
@@ -730,7 +732,7 @@ func _draw_menu_quit_confirm(vp: Vector2) -> void:
 	var dlg_shadow := Vector2(15.0, 15.0)
 	_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(0.26, 0.21, 0.28, 0.25))
 	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
-	_game.draw_rect(dlg_rect, Color(0.26, 0.21, 0.28), false, 5.75)
+	_draw_rect_border_with_corners(dlg_rect, Color(0.26, 0.21, 0.28), 5.75)
 	# テキスト
 	_game.draw_string(_game.font_bold, Vector2(cx - dlg_w / 2.0, dlg_cy - 45.0), tr("MENU_QUIT_CONFIRM"), HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 42, Color(0.95, 0.19, 0.32))
 	# ボタン
@@ -1318,7 +1320,7 @@ func _draw_config(vp: Vector2) -> void:
 		var shadow_offset := Vector2(12.5 + shadow_extra, 12.5 + shadow_extra)
 		_game.draw_rect(Rect2(box_rect.position + shadow_offset, box_rect.size), Color(0.26, 0.21, 0.28, 0.30))
 		_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
-		_game.draw_rect(box_rect, Color(0.26, 0.21, 0.28), false, 5.75)
+		_draw_rect_border_with_corners(box_rect, Color(0.26, 0.21, 0.28), 5.75)
 		var val_font: Font = _game.font_din if (i == 3 or i == 4) else _game.font
 		var val_fs: int = 50 if (i == 3 or i == 4) else 34
 		var val_baseline_y: float = box_rect.position.y + (bh + val_font.get_ascent(val_fs) - val_font.get_descent(val_fs)) * 0.5
@@ -1349,7 +1351,7 @@ func _draw_config(vp: Vector2) -> void:
 	# --- RESET ボタン（右下固定） ---
 	var reset_rect: Rect2 = _game.get_config_reset_button_rect(vp)
 	var reset_center := Vector2(reset_rect.position.x + reset_rect.size.x * 0.5,
-	                            reset_rect.position.y + reset_rect.size.y * 0.5)
+								reset_rect.position.y + reset_rect.size.y * 0.5)
 	var is_reset_off: bool = not _game.config_reset_hovered
 	_draw_auto_button_with_shadow(reset_center, "RESET", _game.CONFIG_RESET_BTN_FS, 1.0, is_reset_off, _game.CONFIG_RESET_BTN_W)
 
@@ -2703,6 +2705,15 @@ func _draw_ui_panel(vp: Vector2) -> void:
 
 
 
+func _draw_rect_border_with_corners(rect: Rect2, color: Color, border_w: float) -> void:
+	var dot_r: float = border_w * 1.25
+	_game.draw_rect(rect, color, false, border_w)
+	_game.draw_circle(rect.position, dot_r, color)
+	_game.draw_circle(Vector2(rect.end.x, rect.position.y), dot_r, color)
+	_game.draw_circle(Vector2(rect.position.x, rect.end.y), dot_r, color)
+	_game.draw_circle(rect.end, dot_r, color)
+
+
 func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_FONT_SIZE, alpha: float = 1.0, is_off: bool = false, fixed_w: float = -1.0) -> Rect2:
 	"""ボタンを描画。選択(is_off=false)時はホバーアニメーション付き"""
 	var btn_w: float = fixed_w if fixed_w > 0.0 else _game.font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * 1.5
@@ -2732,7 +2743,7 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 		_game.draw_rect(rect, Color(1.0, 0.937, 0.89, alpha))
 	else:
 		_game.draw_rect(rect, Color(0.95, 0.19, 0.32, 0.9 * alpha))
-	_game.draw_rect(rect, Color(0.26, 0.21, 0.28, alpha), false, 5.75)
+	_draw_rect_border_with_corners(rect, Color(0.26, 0.21, 0.28, alpha), 5.75)
 	var ascent: float = _game.font.get_ascent(fs)
 	var descent: float = _game.font.get_descent(fs)
 	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5
@@ -3001,25 +3012,26 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 
 	# ─── 各部寸法 ───
 	var stripe_w: float = card_w * 0.046   # 左ストライプ幅
-	var left_w: float   = card_w * 0.44    # 左テキストエリア幅（ストライプ含む）
-	var bar_h: float    = card_h * 0.094   # 下部赤バー高さ
-	var pad: float      = stripe_w * 0.55  # 内側パディング
+	var left_w: float   = card_w * 0.50    # 左テキストエリア幅（ストライプ含む）
+	var bar_h: float    = card_h * 0.1734  # 下部赤バー高さ（ボタン2倍化×85%）
+	var pad: float      = stripe_w * 0.40  # 内側パディング
 
 	# ─── 左ストライプ ───
 	var red_h: float = card_h * 0.375
 	_game.draw_rect(Rect2(card_x, card_y, stripe_w, card_h), c_dark)
 	_game.draw_rect(Rect2(card_x, card_y, stripe_w, red_h), c_red)
 
-	# ストライプ下部の斜め平行四辺形パターン
+	# ストライプ下部の斜め平行四辺形パターン（5個・下詰め）
 	var diag_top: float = card_y + red_h
 	var diag_bot: float = card_y + card_h - bar_h
 	var stripe_right: float = card_x + stripe_w
 	var repeat: float = card_h * 0.044
 	var para_h: float = repeat * 0.80
 	var skew: float   = stripe_w * 0.41
-	var para_i: int = 0
-	while diag_top + float(para_i) * repeat < diag_bot + repeat:
-		var yr: float = diag_top + float(para_i) * repeat
+	var para_count: int = 5
+	var group_start: float = diag_bot - float(para_count) * repeat + 120.0
+	for para_i in range(para_count):
+		var yr: float = group_start + float(para_i) * repeat
 		var pts: PackedVector2Array = PackedVector2Array([
 			Vector2(stripe_right, yr),
 			Vector2(card_x,       yr + skew),
@@ -3027,99 +3039,118 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 			Vector2(stripe_right, yr + para_h),
 		])
 		_game.draw_colored_polygon(pts, c_red)
-		para_i += 1
 
-	# 「KATA-DRAW」縦書きテキスト（ストライプ中央、上から下へ）
+	# 「KATA-DRAW」縦書きテキスト（字間詰め・黒帯左上端）
+	# FontVariation で font_din の extra 5px を打ち消す（FontFile プロパティは Godot 4.7 では不可）
+	if _font_din_tight == null:
+		_font_din_tight = FontVariation.new()
+		_font_din_tight.base_font = _game.font_din
+		_font_din_tight.spacing_glyph = 0
+	var fdt: FontVariation = _font_din_tight
 	var kata_str: String = "KATA-DRAW"
 	var kata_fs: int = maxi(8, int(stripe_w * 0.37))
-	var kata_cx: float = card_x + stripe_w * 0.5
-	var kata_cy: float = (diag_top + diag_bot) * 0.5
-	var kata_w: float = _game.font_din.get_string_size(kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs).x
-	var kata_asc: float = _game.font_din.get_ascent(kata_fs)
-	var kata_dsc: float = _game.font_din.get_descent(kata_fs)
+	var kata_w: float = fdt.get_string_size(kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs).x
+	var kata_asc: float = fdt.get_ascent(kata_fs)
+	var kata_dsc: float = fdt.get_descent(kata_fs)
+	var kata_cx: float = card_x + (kata_asc + kata_dsc) * 0.55
+	var kata_cy: float = diag_top + stripe_w * 0.25 + kata_w * 0.5
 	var kata_pivot := Vector2(kata_cx, kata_cy)
 	var kata_xf: Transform2D = Transform2D(0.0, kata_pivot) * Transform2D(PI * 0.5, Vector2.ZERO) * Transform2D(0.0, -kata_pivot)
 	_game.draw_set_transform_matrix(kata_xf)
-	_game.draw_string(_game.font_din, Vector2(kata_cx - kata_w * 0.5, kata_cy + (kata_asc - kata_dsc) * 0.5), kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs, Color(1.0, 1.0, 1.0, a * 0.85))
+	_game.draw_string(fdt, Vector2(kata_cx - kata_w * 0.5, kata_cy + (kata_asc - kata_dsc) * 0.5), kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs, Color(1.0, 1.0, 1.0, a * 0.85))
 	_game.draw_set_transform_matrix(Transform2D())
 
-	# ─── 左テキストコンテンツ ───
+	# ─── 左テキストコンテンツ（fdt = 字間詰め font_din）───
 	var tx: float = card_x + stripe_w + pad
 	var tw: float = left_w - stripe_w - pad * 2.0
 
-	# "STAGE" / "CLEAR" 大文字
-	var stage_fs: int = int(card_h * 0.168)
-	var stage_asc: float = _game.font_din.get_ascent(stage_fs)
-	var stage_dsc: float = _game.font_din.get_descent(stage_fs)
-	var stage_base_y: float = card_y + card_h * 0.065 + stage_asc
-	_game.draw_string(_game.font_din, Vector2(tx, stage_base_y), "STAGE", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
-	var clear_base_y: float = stage_base_y + stage_dsc + card_h * 0.012 + stage_asc
-	_game.draw_string(_game.font_din, Vector2(tx, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
+	# STAGE: CLEAR の自然幅に合わせて字間を自動調整（右端を揃える）
+	var stage_fs: int = int(card_h * 0.219)
+	var clear_str_w: float = fdt.get_string_size("CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
+	var stage_str_w_base: float = fdt.get_string_size("STAGE", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
+	var stage_extra: int = maxi(0, roundi((clear_str_w - stage_str_w_base) / 4.0))
+	if _font_stage == null:
+		_font_stage = FontVariation.new()
+		_font_stage.base_font = _game.font_din
+	_font_stage.spacing_glyph = -5 + stage_extra
+	var stage_str_w: float = _font_stage.get_string_size("STAGE", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
+	var stage_right: float = tx + maxf(stage_str_w, clear_str_w) - 8.0
+	var stage_base_y: float = card_y + card_h * 0.185
+	_game.draw_string(_font_stage, Vector2(tx, stage_base_y), "STAGE", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
+	var clear_base_y: float = card_y + card_h * 0.358
+	_game.draw_string(fdt, Vector2(tx - 5.0, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
 
-	# ステージ番号 "#XX" と "RESULT" ラベル
-	var num_fs: int = int(stage_fs * 0.50)
-	var num_asc: float = _game.font_din.get_ascent(num_fs)
-	var num_dsc: float = _game.font_din.get_descent(num_fs)
-	var num_base_y: float = clear_base_y + stage_dsc + card_h * 0.058 + num_asc
+	# "#XX" 左詰 ／ "RESULT" 右詰（右端を STAGE/CLEAR 共通右端に揃え）
+	var num_fs: int = int(card_h * 0.1203)
+	var num_base_y: float = card_y + card_h * 0.498
 	var stage_num_str: String = "#%d" % (_game.current_stage + 1)
-	var num_str_w: float = _game.font_din.get_string_size(stage_num_str, HORIZONTAL_ALIGNMENT_LEFT, -1, num_fs).x
-	_game.draw_string(_game.font_din, Vector2(tx, num_base_y), stage_num_str, HORIZONTAL_ALIGNMENT_LEFT, -1, num_fs, c_dark)
-	_game.draw_string(_game.font_din, Vector2(tx + num_str_w + pad * 1.5, num_base_y), "RESULT", HORIZONTAL_ALIGNMENT_LEFT, tw - num_str_w - pad * 1.5, num_fs, c_dark)
+	_game.draw_string(fdt, Vector2(tx, num_base_y), stage_num_str, HORIZONTAL_ALIGNMENT_LEFT,  stage_right - tx - 16.0, num_fs, c_dark)
+	_game.draw_string(fdt, Vector2(tx, num_base_y), "RESULT",      HORIZONTAL_ALIGNMENT_RIGHT, stage_right - tx - 16.0, num_fs, c_dark)
 
-	# ─── ラベルボックス + 数値 ───
-	var box_w: float = left_w * 0.185
-	var box_h: float = card_h * 0.105
-	var lbl_fs: int = maxi(10, int(box_h * 0.295))
-	var val_fs: int = int(card_h * 0.114)
-	var val_asc: float = _game.font_din.get_ascent(val_fs)
-	var val_dsc: float = _game.font_din.get_descent(val_fs)
-	var lbl_asc: float = _game.font_din.get_ascent(lbl_fs)
-	var lbl_dsc: float = _game.font_din.get_descent(lbl_fs)
-	# 2行テキストをボックス内に縦中央揃え
-	var lbl_2line_h: float = lbl_asc + lbl_dsc * 2.0 + lbl_asc  # 1行目＋行間＋2行目
-	var lbl_top: float = (box_h - lbl_2line_h) * 0.5
-	var lbl_line1_off: float = lbl_top + lbl_asc   # 1行目ベースライン（ボックス相対）
-	var lbl_line2_off: float = lbl_line1_off + lbl_dsc * 2.0 + lbl_asc  # 2行目ベースライン
-	var ct_val_x: float = tx + box_w + pad * 1.2
-	var ct_val_w: float = tw - box_w - pad * 1.2
+	# ─── ラベルボックス + 数値（別オブジェクト行間・右端を STAGE/CLEAR 共通右端に揃え） ───
+	var box_w: float = left_w * 0.155
+	var box_h: float = card_h * 0.113
+	var lbl_fs: int = maxi(8, int(box_h * 0.290))
+	var val_fs: int = int(card_h * 0.155)
+	var val_asc: float = fdt.get_ascent(val_fs)
+	var val_dsc: float = fdt.get_descent(val_fs)
+	var lbl_asc: float = fdt.get_ascent(lbl_fs)
+	var lbl_dsc: float = fdt.get_descent(lbl_fs)
+	# 行間：左上端ぴったり、行間は極限まで詰める
+	var lbl_top_pad: float = 0.0
+	var lbl_l1_off: float = lbl_top_pad + lbl_asc
+	var lbl_l2_off: float = lbl_l1_off + lbl_asc * 0.85
+	var lbl_inner_pad: float = box_w * 0.08
+	var ct_val_x: float = tx + box_w + pad
+	var ct_val_w: float = maxf(0.0, stage_right - ct_val_x - 16.0)
 
-	# CLEAR TIME ボックス
-	var ct_box_y: float = num_base_y + num_dsc + card_h * 0.048
+	# CLEAR TIME ボックス（54.2%）
+	var ct_box_y: float = card_y + card_h * 0.542
 	_game.draw_rect(Rect2(tx, ct_box_y, box_w, box_h), c_dark)
-	_game.draw_string(_game.font_din, Vector2(tx, ct_box_y + lbl_line1_off), "CLEAR", HORIZONTAL_ALIGNMENT_CENTER, box_w, lbl_fs, c_white)
-	_game.draw_string(_game.font_din, Vector2(tx, ct_box_y + lbl_line2_off), "TIME", HORIZONTAL_ALIGNMENT_CENTER, box_w, lbl_fs, c_white)
-	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5
-	_game.draw_string(_game.font_din, Vector2(ct_val_x, ct_val_base), "%.2f" % _game.clear_time, HORIZONTAL_ALIGNMENT_LEFT, ct_val_w, val_fs, c_dark)
+	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l1_off), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l2_off), "TIME",  HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
+	_game.draw_string(fdt, Vector2(ct_val_x, ct_val_base), "%.2f" % _game.clear_time, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
-	# TRY COUNT ボックス
-	var tc_box_y: float = ct_box_y + box_h + card_h * 0.018
+	# TRY COUNT ボックス（67.6%）
+	var tc_box_y: float = card_y + card_h * 0.676
 	_game.draw_rect(Rect2(tx, tc_box_y, box_w, box_h), c_dark)
-	_game.draw_string(_game.font_din, Vector2(tx, tc_box_y + lbl_line1_off), "TRY", HORIZONTAL_ALIGNMENT_CENTER, box_w, lbl_fs, c_white)
-	_game.draw_string(_game.font_din, Vector2(tx, tc_box_y + lbl_line2_off), "COUNT", HORIZONTAL_ALIGNMENT_CENTER, box_w, lbl_fs, c_white)
-	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5
-	_game.draw_string(_game.font_din, Vector2(ct_val_x, tc_val_base), "%d" % _game.stage_move_count, HORIZONTAL_ALIGNMENT_LEFT, ct_val_w, val_fs, c_dark)
+	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l1_off), "TRY",   HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
+	_game.draw_string(fdt, Vector2(ct_val_x, tc_val_base), "%d" % _game.stage_move_count, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
-	# ─── 右：見本の図形（大表示） ───
+	# ─── 右：見本の図形（85%縮小表示） ───
 	var shape_x: float = card_x + left_w
 	var shape_w: float = card_w - left_w
-	var shape_rect := Rect2(shape_x, card_y, shape_w, card_h - bar_h)
+	var shape_full_h: float = card_h - bar_h
+	var shape_mx: float = shape_w * 0.075
+	var shape_my: float = shape_full_h * 0.075
+	var shape_rect := Rect2(shape_x + shape_mx - 13.0, card_y + shape_my + 10.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
 	_stage_renderer.draw_ideal_only(shape_rect, c_red, maxf(2.5, shape_w * 0.006))
 
-	# ─── 下部赤バー（つぎへボタン） ───
-	var bar_y: float = card_y + card_h - bar_h
-	_game.draw_rect(Rect2(card_x, bar_y, card_w, bar_h), c_red)
+	# ─── 下部ボタン（縦帯と重ならず、左右・下に余白あり、マージン ×3） ───
+	var bar_y: float = card_y + card_h - bar_h + 40.0
+	var btn_h_pad: float = card_w * 0.042        # 横マージン（旧 0.014 の ×3）
+	var btn_v_top: float = bar_h * 0.08          # 上は小さく
+	var btn_v_bottom: float = bar_h * 0.429      # 下マージン ×3（旧 bar_h*0.143 の ×3）
+	var btn_x: float = card_x + stripe_w + btn_h_pad
+	var btn_w_draw: float = card_w - stripe_w - btn_h_pad * 2.0
+	var btn_y: float = bar_y + btn_v_top
+	var btn_draw_h: float = bar_h - btn_v_top - btn_v_bottom
+	_game.draw_rect(Rect2(btn_x, btn_y, btn_w_draw, btn_draw_h), c_red)
 	var btn_id: String = tr("BTN_NEXT")
 	set_btn_hover(btn_id)
 	var btn_alpha: float = a
 	if _btn_press_timers.has(btn_id) and _btn_press_timers[btn_id] >= 0.0:
 		btn_alpha *= (1.0 - _ease_in_out_cubic(_btn_press_timers[btn_id]))
-	var btn_fs: int = maxi(1, int(bar_h * 0.50 * get_btn_scale(btn_id)))
+	var btn_fs: int = maxi(1, int(btn_draw_h * 0.52 * get_btn_scale(btn_id)))
 	var btn_asc: float = _game.font_bold.get_ascent(btn_fs)
 	var btn_dsc: float = _game.font_bold.get_descent(btn_fs)
-	_game.draw_string(_game.font_bold, Vector2(card_x, bar_y + (bar_h + btn_asc - btn_dsc) * 0.5), btn_id, HORIZONTAL_ALIGNMENT_CENTER, card_w, btn_fs, Color(c_cream.r, c_cream.g, c_cream.b, btn_alpha))
+	_game.draw_string(_game.font_bold, Vector2(btn_x, btn_y + (btn_draw_h + btn_asc - btn_dsc) * 0.5), btn_id, HORIZONTAL_ALIGNMENT_CENTER, btn_w_draw, btn_fs, Color(c_cream.r, c_cream.g, c_cream.b, btn_alpha))
 
 	# カード外枠
-	_game.draw_rect(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_dark, false, 5.75)
+	_draw_rect_border_with_corners(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_dark, 5.75)
 
 
 func _draw_results_sidebar_title_fallback(vp: Vector2, bar_w: float, a: float) -> void:
@@ -3520,7 +3551,7 @@ func _draw_results(vp: Vector2) -> void:
 	_game.draw_string(_game.font_bold, Vector2(tot_area_x + half_val, bl_tot), tot_move_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_mov, c_red)
 
 	# 枠線（コンテンツより上レイヤー・白5px）
-	_game.draw_rect(lp_rect, Color(1.0, 1.0, 1.0, a), false, 5.0)
+	_draw_rect_border_with_corners(lp_rect, Color(1.0, 1.0, 1.0, a), 5.0)
 
 	# ─── NEXTボタン（アイコングループ右端） ───
 	_draw_results_next_button(Vector2(next_cx_new, ig_cy), tr("RESULT_BTN_NEXT"), 35, a, NEXT_BTN_S, res_act == 2)
@@ -3589,29 +3620,17 @@ func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: fl
 	# _draw_results のタイトル赤・グリッド文字色と揃える
 	var c_accent_red: Color = Color(0.9490, 0.1882, 0.3216, alpha)
 	var c_cream: Color = Color(1.0, 0.99, 0.97, alpha)
-	var c_muted_line: Color = Color(0.12, 0.12, 0.14, alpha)
 	var c_body_dark: Color = Color(0.2627, 0.2118, 0.2784, alpha)
 	var c_fill: Color
-	var c_outline: Color
 	var c_text: Color
 	if hovered:
 		c_fill = c_accent_red
-		c_outline = c_cream
 		c_text = c_cream
 	else:
 		c_fill = c_cream
-		c_outline = c_muted_line
 		c_text = c_body_dark
-	const LINE_W: float = 2.0 * 3.0
 	_game.draw_rect(rect, c_fill)
-	_game.draw_rect(rect, c_outline, false, LINE_W)
-	# 枠線は rect の辺を中心に描かれるため、● の中心も同じ周辺（rect の周長）上に乗せる
-	var per: float = 2.0 * rect.size.x + 2.0 * rect.size.y
-	var t_sec: float = Time.get_ticks_msec() / 1000.0
-	var dist: float = fmod(t_sec * 88.0, per)
-	var dot_center: Vector2 = _results_rect_perimeter_point(rect, dist)
-	var dot_r: float = LINE_W * 2.0
-	_game.draw_circle(dot_center, dot_r, c_outline)
+	_draw_rect_border_with_corners(rect, Color(0.26, 0.21, 0.28, alpha), 5.75)
 	var ascent: float = _game.font_bold.get_ascent(fs)
 	var descent: float = _game.font_bold.get_descent(fs)
 	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5
@@ -3645,7 +3664,7 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 		var dlg_shadow := Vector2(15.0, 15.0)
 		_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(0.26, 0.21, 0.28, 0.25))
 		_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
-		_game.draw_rect(dlg_rect, Color(0.26, 0.21, 0.28), false, 5.75)
+		_draw_rect_border_with_corners(dlg_rect, Color(0.26, 0.21, 0.28), 5.75)
 		# テキスト（Bold、大きめ）
 		_game.draw_string(_game.font_bold, Vector2(play_cx - dlg_w / 2.0, play_cy - 45.0), tr("PAUSE_CONFIRM_MSG"), HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 42, Color(0.95, 0.19, 0.32))
 		# ボタン（幅広、間隔広め）

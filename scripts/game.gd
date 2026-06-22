@@ -2368,10 +2368,19 @@ func _hit_cleared_button(pos: Vector2) -> bool:
 	var card_w: float = vp.x * 0.745
 	var card_h: float = vp.y * 0.77
 	var card_x: float = (vp.x - card_w) * 0.5
-	var card_y: float = (vp.y - card_h) * 0.5
-	var bar_h: float = card_h * 0.094
-	var bar_rect := Rect2(card_x, card_y + card_h - bar_h, card_w, bar_h)
-	return bar_rect.has_point(pos)
+	var stripe_w: float = card_w * 0.046
+	var bar_h: float = card_h * 0.1734
+	var bar_y: float = (vp.y - card_h) * 0.5 + card_h - bar_h + 40.0
+	var btn_h_pad: float = card_w * 0.042
+	var btn_v_top: float = bar_h * 0.08
+	var btn_v_bottom: float = bar_h * 0.429
+	var btn_rect := Rect2(
+		card_x + stripe_w + btn_h_pad,
+		bar_y + btn_v_top,
+		card_w - stripe_w - btn_h_pad * 2.0,
+		bar_h - btn_v_top - btn_v_bottom
+	)
+	return btn_rect.has_point(pos)
 
 
 func _hit_results_button(pos: Vector2) -> bool:
