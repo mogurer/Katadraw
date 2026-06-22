@@ -197,8 +197,9 @@ var title_intro: TitleIntroAnimator
 # --- game 参照 (Node2D/CanvasItem) ---
 var _game: Node2D
 var _stage_renderer: StageRenderer
-var _font_din_tight: FontVariation = null  # font_din の字間詰めバリアント（spacing_glyph = -5）
+var _font_din_tight: FontVariation = null  # font_din の字間詰めバリアント（spacing_glyph = 0、net +5px）
 var _font_stage: FontVariation = null      # STAGE 専用: CLEAR 幅に合わせて字間を自動調整
+var _font_clear: FontVariation = null      # CLEAR 専用: spacing_glyph = -2（net +3px）
 
 
 func _init(game: Node2D) -> void:
@@ -3078,9 +3079,15 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var tx: float = card_x + stripe_w + pad
 	var tw: float = left_w - stripe_w - pad * 2.0
 
+	# CLEAR 専用フォント（spacing_glyph = -2、net +3px）
+	if _font_clear == null:
+		_font_clear = FontVariation.new()
+		_font_clear.base_font = _game.font_din
+		_font_clear.spacing_glyph = -2
+
 	# STAGE: CLEAR の自然幅に合わせて字間を自動調整（右端を揃える）
 	var stage_fs: int = int(card_h * 0.219)
-	var clear_str_w: float = fdt.get_string_size("CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
+	var clear_str_w: float = _font_clear.get_string_size("CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
 	var stage_str_w_base: float = fdt.get_string_size("STAGE", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
 	var stage_extra: int = maxi(0, roundi((clear_str_w - stage_str_w_base) / 4.0))
 	if _font_stage == null:
@@ -3092,7 +3099,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var stage_base_y: float = card_y + card_h * 0.185
 	_game.draw_string(_font_stage, Vector2(tx, stage_base_y), "STAGE", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
 	var clear_base_y: float = card_y + card_h * 0.358
-	_game.draw_string(fdt, Vector2(tx - 5.0, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
+	_game.draw_string(_font_clear, Vector2(tx - 5.0, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
 
 	# "#XX" 左詰 ／ "RESULT" 右詰（右端を STAGE/CLEAR 共通右端に揃え）
 	var num_fs: int = int(card_h * 0.1203)
@@ -3123,7 +3130,11 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_rect(Rect2(tx, ct_box_y, box_w, box_h), c_dark)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l1_off), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l2_off), "TIME",  HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	var val_bg: Color = Color(0.87, 0.87, 0.87, a)
+	var val_bg_x: float = tx + box_w          # 黒ボックスに接着
+	var val_bg_w: float = ct_val_w + pad      # pad 分広げて隙間を埋める
 	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
+	_game.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w, box_h), val_bg)
 	_game.draw_string(fdt, Vector2(ct_val_x, ct_val_base), "%.2f" % _game.clear_time, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# TRY COUNT ボックス（67.6%）
@@ -3132,6 +3143,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l1_off), "TRY",   HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
+	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w, box_h), val_bg)
 	_game.draw_string(fdt, Vector2(ct_val_x, tc_val_base), "%d" % _game.stage_move_count, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# ─── 右：見本の図形（85%縮小表示） ───
@@ -3144,7 +3156,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_stage_renderer.draw_ideal_only(shape_rect, c_red, maxf(2.5, shape_w * 0.006))
 
 	# ─── 下部ボタン（縦帯と重ならず、左右・下に余白あり、マージン ×3） ───
-	var bar_y: float = card_y + card_h - bar_h + 40.0
+	var bar_y: float = card_y + card_h - bar_h + 25.0
 	var btn_h_pad: float = card_w * 0.042        # 横マージン（旧 0.014 の ×3）
 	var btn_v_top: float = bar_h * 0.08          # 上は小さく
 	var btn_v_bottom: float = bar_h * 0.429      # 下マージン ×3（旧 bar_h*0.143 の ×3）

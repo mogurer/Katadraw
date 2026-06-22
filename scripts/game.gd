@@ -2370,7 +2370,7 @@ func _hit_cleared_button(pos: Vector2) -> bool:
 	var card_x: float = (vp.x - card_w) * 0.5
 	var stripe_w: float = card_w * 0.046
 	var bar_h: float = card_h * 0.1734
-	var bar_y: float = (vp.y - card_h) * 0.5 + card_h - bar_h + 40.0
+	var bar_y: float = (vp.y - card_h) * 0.5 + card_h - bar_h + 25.0
 	var btn_h_pad: float = card_w * 0.042
 	var btn_v_top: float = bar_h * 0.08
 	var btn_v_bottom: float = bar_h * 0.429
