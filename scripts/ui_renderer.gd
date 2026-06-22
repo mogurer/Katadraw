@@ -3130,12 +3130,28 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_rect(Rect2(tx, ct_box_y, box_w, box_h), c_dark)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l1_off), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l2_off), "TIME",  HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	# ── スロット演出：クリアから0.5秒間、数値が高速回転してから着地 ──
+	const SLOT_DUR: float = 0.5
+	var ct_display: String
+	var mc_display: String
+	if clear_elapsed < SLOT_DUR:
+		var slot_t: float = clear_elapsed / SLOT_DUR
+		# 周波数: 30Hz→3Hz に二乗カーブで減速
+		var freq: float = lerp(30.0, 3.0, slot_t * slot_t)
+		var ct_range: float = maxf(_game.clear_time * 1.5, 15.0)
+		var mc_range: float = float(maxi(_game.stage_move_count * 2, 9))
+		ct_display = "%.2f" % (absf(sin(clear_elapsed * freq * TAU)) * ct_range)
+		mc_display = "%d"   % int(absf(sin(clear_elapsed * freq * TAU * 1.37)) * mc_range)
+	else:
+		ct_display = "%.2f" % _game.clear_time
+		mc_display = "%d"   % _game.stage_move_count
+
 	var val_bg: Color = Color(0.87, 0.87, 0.87, a)
 	var val_bg_x: float = tx + box_w          # 黒ボックスに接着
 	var val_bg_w: float = ct_val_w + pad      # pad 分広げて隙間を埋める
 	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
 	_game.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w, box_h), val_bg)
-	_game.draw_string(fdt, Vector2(ct_val_x, ct_val_base), "%.2f" % _game.clear_time, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+	_game.draw_string(fdt, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# TRY COUNT ボックス（67.6%）
 	var tc_box_y: float = card_y + card_h * 0.676
@@ -3144,7 +3160,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
 	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w, box_h), val_bg)
-	_game.draw_string(fdt, Vector2(ct_val_x, tc_val_base), "%d" % _game.stage_move_count, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+	_game.draw_string(fdt, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# ─── 右：見本の図形（85%縮小表示） ───
 	var shape_x: float = card_x + left_w
