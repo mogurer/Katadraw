@@ -1,11 +1,11 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"display_rate_min_pct": 85.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 400.0,
 		"min_radius": 200.0,
-		"num_points": 30,
+		"num_points": 27,
 		"shape_type": "fish",
 		"type": "tulip",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "hibachi",
-		"stage_name": "チューリップ",
-		"locale_key": "STAGE_TULIP"
+		"locale_key": "STAGE_TULIP",
+		"stage_name": "チューリップ"
 	},
 	"schema_version": 1.0,
 	"shape": {
