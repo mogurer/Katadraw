@@ -3187,7 +3187,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var shape_full_h: float = card_h - bar_h
 	var shape_mx: float = shape_w * 0.075
 	var shape_my: float = shape_full_h * 0.075
-	var shape_rect := Rect2(shape_x + shape_mx - 28.0, card_y + shape_my + 10.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
+	var shape_rect := Rect2(shape_x + shape_mx - 53.0, card_y + shape_my + 20.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
 	var fill_c := Color(c_red.r, c_red.g, c_red.b, c_red.a * 0.22)
 	_stage_renderer.draw_ideal_filled(shape_rect, fill_c, c_red, maxf(2.5, shape_w * 0.006), shape_w * 0.013)
 
