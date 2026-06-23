@@ -2739,24 +2739,31 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 
 	var rect := Rect2(center.x - draw_w / 2.0, center.y - draw_h / 2.0, draw_w, draw_h)
 	var shadow_offset := Vector2(12.5 + shadow_extra, 12.5 + shadow_extra)
-	_game.draw_rect(Rect2(rect.position + shadow_offset, rect.size), Color(0.26, 0.21, 0.28, 0.30 * alpha))
 	var border_c := Color(0.26, 0.21, 0.28, alpha)
 	const BTN_BW: float = 5.75
 	var text_color: Color
 	if is_off:
+		_game.draw_rect(Rect2(rect.position + shadow_offset, rect.size), Color(0.26, 0.21, 0.28, 0.30 * alpha))
 		_game.draw_rect(rect, Color(1.0, 0.937, 0.89, alpha))
 		_draw_rect_border_with_corners(rect, border_c, BTN_BW)
 		text_color = Color(0.26, 0.21, 0.28, alpha)
 	else:
 		# ONボタン：四隅が時刻ベースのサイン波でゆっくり動き続ける（OFFで正矩形に戻る）
 		var t: float = Time.get_ticks_msec() / 1000.0
-		var mo: float = 5.0
+		# mo をボタンサイズの 45% に制限: 頂点が交差して triangulation failed になるのを防ぐ
+		var mo: float = minf(5.0, minf(draw_w, draw_h) * 0.45)
 		var pts := PackedVector2Array([
 			Vector2(rect.position.x + sin(t * 0.71 + 0.00) * mo, rect.position.y + sin(t * 0.53 + 1.10) * mo),
 			Vector2(rect.end.x      + sin(t * 0.63 + 2.30) * mo, rect.position.y + sin(t * 0.79 + 3.50) * mo),
 			Vector2(rect.end.x      + sin(t * 0.58 + 4.70) * mo, rect.end.y      + sin(t * 0.67 + 5.90) * mo),
 			Vector2(rect.position.x + sin(t * 0.82 + 7.10) * mo, rect.end.y      + sin(t * 0.61 + 8.30) * mo),
 		])
+		# シャドウも同じ変形ポリゴンをオフセットして描画
+		var pts_shadow := PackedVector2Array([
+			pts[0] + shadow_offset, pts[1] + shadow_offset,
+			pts[2] + shadow_offset, pts[3] + shadow_offset,
+		])
+		_game.draw_colored_polygon(pts_shadow, Color(0.26, 0.21, 0.28, 0.30 * alpha))
 		_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.9 * alpha))
 		var dot_r: float = BTN_BW * 1.25
 		for i in range(4):
@@ -3009,8 +3016,8 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.35 * a))
 
 	# カードサイズ（スケールアニメーション適用）
-	var base_w: float = vp.x * 0.745
-	var base_h: float = vp.y * 0.77
+	var base_w: float = vp.x * 0.745 * 0.85
+	var base_h: float = vp.y * 0.77 * 0.85
 	var card_w: float = base_w * clear_scale
 	var card_h: float = base_h * clear_scale
 	var card_x: float = (vp.x - card_w) * 0.5
@@ -3044,7 +3051,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var para_h: float = repeat * 0.80
 	var skew: float   = stripe_w * 0.41
 	var para_count: int = 5
-	var group_start: float = diag_bot - float(para_count) * repeat + 120.0
+	var group_start: float = diag_bot - float(para_count) * repeat + 105.0
 	for para_i in range(para_count):
 		var yr: float = group_start + float(para_i) * repeat
 		var pts: PackedVector2Array = PackedVector2Array([
@@ -3146,11 +3153,13 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 		ct_display = "%.2f" % _game.clear_time
 		mc_display = "%d"   % _game.stage_move_count
 
+	# グレー帯：スロット中は棒グラフのように左→右へ伸びるアニメーション
+	var bar_progress: float = clampf(clear_elapsed / SLOT_DUR, 0.0, 1.0)
 	var val_bg: Color = Color(0.87, 0.87, 0.87, a)
 	var val_bg_x: float = tx + box_w          # 黒ボックスに接着
 	var val_bg_w: float = ct_val_w + pad      # pad 分広げて隙間を埋める
 	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
-	_game.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w, box_h), val_bg)
+	_game.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w * bar_progress, box_h), val_bg)
 	_game.draw_string(fdt, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# TRY COUNT ボックス（67.6%）
@@ -3159,7 +3168,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l1_off), "TRY",   HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
-	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w, box_h), val_bg)
+	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w * bar_progress, box_h), val_bg)
 	_game.draw_string(fdt, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# ─── 右：見本の図形（85%縮小表示） ───
@@ -3169,7 +3178,8 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var shape_mx: float = shape_w * 0.075
 	var shape_my: float = shape_full_h * 0.075
 	var shape_rect := Rect2(shape_x + shape_mx - 13.0, card_y + shape_my + 10.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
-	_stage_renderer.draw_ideal_only(shape_rect, c_red, maxf(2.5, shape_w * 0.006))
+	var fill_c := Color(c_red.r, c_red.g, c_red.b, c_red.a * 0.22)
+	_stage_renderer.draw_ideal_filled(shape_rect, fill_c, c_red, maxf(2.5, shape_w * 0.006), shape_w * 0.013)
 
 	# ─── 下部ボタン（縦帯と重ならず、左右・下に余白あり、マージン ×3） ───
 	var bar_y: float = card_y + card_h - bar_h + 25.0

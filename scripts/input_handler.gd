@@ -3555,6 +3555,8 @@ func _clamp_points_to_viewport() -> void:
 
 
 func _clamp_player_to_viewport() -> void:
+	if not _game.is_inside_tree():
+		return
 	var vp: Vector2 = _game.get_viewport_rect().size
 	var margin: float = PLAYER_RADIUS
 	player_position = player_position.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))

@@ -598,6 +598,55 @@ func draw_ideal_only(rect: Rect2, color: Color = Color(0.9490, 0.1882, 0.3216), 
 			_game.draw_line(a, b, color, line_width, true)
 
 
+func draw_ideal_filled(rect: Rect2, fill_color: Color, line_color: Color, line_width: float = 4.0, dot_radius: float = 6.0) -> void:
+	"""塗りつぶし＋頂点ドット付きで見本図形を描画（クリア画面の完成系表示用）"""
+	var ideal_loops: Array = _get_ideal_vertex_loops()
+	if ideal_loops.is_empty():
+		return
+	var all: Array[Vector2] = []
+	for loop in ideal_loops:
+		all.append_array(loop)
+	if all.is_empty():
+		return
+	var min_p: Vector2 = all[0]
+	var max_p: Vector2 = all[0]
+	for p in all:
+		min_p.x = minf(min_p.x, p.x)
+		min_p.y = minf(min_p.y, p.y)
+		max_p.x = maxf(max_p.x, p.x)
+		max_p.y = maxf(max_p.y, p.y)
+	var size: Vector2 = max_p - min_p
+	var center_src: Vector2 = (min_p + max_p) * 0.5
+	if size.x < 1.0: size.x = 1.0
+	if size.y < 1.0: size.y = 1.0
+	var margin: float = 24.0
+	var avail_w: float = rect.size.x - margin * 2.0
+	var avail_h: float = rect.size.y - margin * 2.0
+	if avail_w < 1.0 or avail_h < 1.0:
+		return
+	var scale: float = minf(avail_w / size.x, avail_h / size.y)
+	var center_dst: Vector2 = rect.position + rect.size * 0.5
+	# 頂点を変換
+	var transformed_loops: Array = []
+	for loop in ideal_loops:
+		var pts := PackedVector2Array()
+		for v in loop:
+			pts.append((v - center_src) * scale + center_dst)
+		transformed_loops.append(pts)
+	# 塗りつぶし
+	for pts in transformed_loops:
+		_game.draw_colored_polygon(pts, fill_color)
+	# 輪郭線
+	for pts in transformed_loops:
+		for i in range(pts.size()):
+			_game.draw_line(pts[i], pts[(i + 1) % pts.size()], line_color, line_width, true)
+	# 頂点ドット: 実際の角頂点のみ（補間点を除く）
+	var key_world: Array = _game.stage_manager.get_corner_positions_world()
+	for w in key_world:
+		var dp: Vector2 = (w - center_src) * scale + center_dst
+		_game.draw_circle(dp, dot_radius, line_color)
+
+
 ## 保存済みループを rect 内にスケールして重ね描き（リザルト一覧サムネイル用）
 func draw_result_thumbnail(rect: Rect2, ideal_loops: Array, player_loops: Array) -> void:
 	if ideal_loops.is_empty() and player_loops.is_empty():

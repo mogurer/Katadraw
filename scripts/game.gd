@@ -778,6 +778,8 @@ func _update_player_hover() -> void:
 		return
 	if not input_handler.player_position_initialized:
 		return
+	if not is_inside_tree():
+		return
 	var pos: Vector2 = input_handler.player_position
 	var vp: Vector2 = get_viewport_rect().size
 
@@ -2365,8 +2367,8 @@ func _hit_rules_button(pos: Vector2) -> bool:
 
 func _hit_cleared_button(pos: Vector2) -> bool:
 	var vp: Vector2 = get_viewport_rect().size
-	var card_w: float = vp.x * 0.745
-	var card_h: float = vp.y * 0.77
+	var card_w: float = vp.x * 0.745 * 0.85
+	var card_h: float = vp.y * 0.77 * 0.85
 	var card_x: float = (vp.x - card_w) * 0.5
 	var stripe_w: float = card_w * 0.046
 	var bar_h: float = card_h * 0.1734
