@@ -197,9 +197,11 @@ var title_intro: TitleIntroAnimator
 # --- game 参照 (Node2D/CanvasItem) ---
 var _game: Node2D
 var _stage_renderer: StageRenderer
-var _font_din_tight: FontVariation = null  # font_din の字間詰めバリアント（spacing_glyph = 0、net +5px）
+var _font_din_tight: FontVariation = null  # font_din の字間詰めバリアント（spacing_glyph = 0、net +5px）KATA-DRAW用
+var _font_din_num: FontVariation = null    # 数値表示専用（spacing_glyph = -1、net +4px）
+var _font_din_result: FontVariation = null # #N/RESULT 専用（spacing_glyph = -2、net +3px）
 var _font_stage: FontVariation = null      # STAGE 専用: CLEAR 幅に合わせて字間を自動調整
-var _font_clear: FontVariation = null      # CLEAR 専用: spacing_glyph = -2（net +3px）
+var _font_clear: FontVariation = null      # CLEAR 専用: spacing_glyph = -7（net -2px）
 
 
 func _init(game: Node2D) -> void:
@@ -3069,6 +3071,14 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 		_font_din_tight.base_font = _game.font_din
 		_font_din_tight.spacing_glyph = 0
 	var fdt: FontVariation = _font_din_tight
+	if _font_din_num == null:
+		_font_din_num = FontVariation.new()
+		_font_din_num.base_font = _game.font_din
+		_font_din_num.spacing_glyph = -1
+	if _font_din_result == null:
+		_font_din_result = FontVariation.new()
+		_font_din_result.base_font = _game.font_din
+		_font_din_result.spacing_glyph = -2
 	var kata_str: String = "KATA-DRAW"
 	var kata_fs: int = maxi(8, int(stripe_w * 0.37))
 	var kata_w: float = fdt.get_string_size(kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs).x
@@ -3090,7 +3100,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	if _font_clear == null:
 		_font_clear = FontVariation.new()
 		_font_clear.base_font = _game.font_din
-		_font_clear.spacing_glyph = -2
+		_font_clear.spacing_glyph = -7
 
 	# STAGE: CLEAR の自然幅に合わせて字間を自動調整（右端を揃える）
 	var stage_fs: int = int(card_h * 0.219)
@@ -3109,11 +3119,11 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_string(_font_clear, Vector2(tx - 5.0, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
 
 	# "#XX" 左詰 ／ "RESULT" 右詰（右端を STAGE/CLEAR 共通右端に揃え）
-	var num_fs: int = int(card_h * 0.1203)
+	var num_fs: int = int(card_h * 0.1203) - 2
 	var num_base_y: float = card_y + card_h * 0.498
 	var stage_num_str: String = "#%d" % (_game.current_stage + 1)
-	_game.draw_string(fdt, Vector2(tx, num_base_y), stage_num_str, HORIZONTAL_ALIGNMENT_LEFT,  stage_right - tx - 16.0, num_fs, c_dark)
-	_game.draw_string(fdt, Vector2(tx, num_base_y), "RESULT",      HORIZONTAL_ALIGNMENT_RIGHT, stage_right - tx - 16.0, num_fs, c_dark)
+	_game.draw_string(_font_din_result, Vector2(tx, num_base_y), stage_num_str, HORIZONTAL_ALIGNMENT_LEFT,  stage_right - tx - 16.0, num_fs, c_dark)
+	_game.draw_string(_font_din_result, Vector2(tx, num_base_y), "RESULT",      HORIZONTAL_ALIGNMENT_RIGHT, stage_right - tx - 16.0, num_fs, c_dark)
 
 	# ─── ラベルボックス + 数値（別オブジェクト行間・右端を STAGE/CLEAR 共通右端に揃え） ───
 	var box_w: float = left_w * 0.155
@@ -3160,7 +3170,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var val_bg_w: float = ct_val_w + pad      # pad 分広げて隙間を埋める
 	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
 	_game.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w * bar_progress, box_h), val_bg)
-	_game.draw_string(fdt, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+	_game.draw_string(_font_din_num, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# TRY COUNT ボックス（67.6%）
 	var tc_box_y: float = card_y + card_h * 0.676
@@ -3169,7 +3179,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
 	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w * bar_progress, box_h), val_bg)
-	_game.draw_string(fdt, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+	_game.draw_string(_font_din_num, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# ─── 右：見本の図形（85%縮小表示） ───
 	var shape_x: float = card_x + left_w
@@ -3177,7 +3187,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var shape_full_h: float = card_h - bar_h
 	var shape_mx: float = shape_w * 0.075
 	var shape_my: float = shape_full_h * 0.075
-	var shape_rect := Rect2(shape_x + shape_mx - 13.0, card_y + shape_my + 10.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
+	var shape_rect := Rect2(shape_x + shape_mx - 28.0, card_y + shape_my + 10.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
 	var fill_c := Color(c_red.r, c_red.g, c_red.b, c_red.a * 0.22)
 	_stage_renderer.draw_ideal_filled(shape_rect, fill_c, c_red, maxf(2.5, shape_w * 0.006), shape_w * 0.013)
 
