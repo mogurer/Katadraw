@@ -2751,7 +2751,7 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 		text_color = Color(0.26, 0.21, 0.28, alpha)
 	else:
 		# ONボタン：四隅が時刻ベースのサイン波でゆっくり動き続ける（OFFで正矩形に戻る）
-		var t: float = Time.get_ticks_msec() / 1000.0
+		var t: float = Time.get_ticks_msec() / 500.0
 		# mo をボタンサイズの 45% に制限: 頂点が交差して triangulation failed になるのを防ぐ
 		var mo: float = minf(5.0, minf(draw_w, draw_h) * 0.45)
 		var pts := PackedVector2Array([
