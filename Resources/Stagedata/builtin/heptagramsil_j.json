@@ -12,6 +12,7 @@
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
+		"stage_name": "七芒星シルエット",
 		"locale_key": "STAGE_HEPTAGRAMSIL_J"
 	},
 	"schema_version": 1.0,

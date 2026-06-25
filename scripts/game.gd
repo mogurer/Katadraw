@@ -44,6 +44,8 @@ var hovered_index: int = -1
 var game_state: String = "title"
 var start_time: float = 0.0
 var clear_time: float = 0.0
+var _new_record_time: bool = false
+var _new_record_moves: bool = false
 var min_radius: float = 0.0
 var max_radius: float = 0.0
 var clear_threshold: float = 5.0
@@ -1230,6 +1232,8 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	playing_mouse_steers_player = false
 	if reset_move_track:
 		stage_move_count = 0
+		_new_record_time = false
+		_new_record_moves = false
 		_reset_stage_move_track_internal()
 	clear_polygon_walk_order()
 	input_handler.reset_for_stage()
@@ -1292,7 +1296,9 @@ func _check_clear() -> void:
 		BGMManager.play_clear()
 		if not GameConfig.IS_DEMO:
 			StageSelectManager.mark_cleared(current_stage)
-			StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
+			var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
+			_new_record_time = _rec.time
+			_new_record_moves = _rec.moves
 		_save_dwell_log()
 
 

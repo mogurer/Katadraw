@@ -3143,7 +3143,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var ct_val_w: float = maxf(0.0, stage_right - ct_val_x - 16.0)
 
 	# CLEAR TIME ボックス（54.2%）
-	var ct_box_y: float = card_y + card_h * 0.542
+	var ct_box_y: float = card_y + card_h * 0.542 + 5.0
 	_game.draw_rect(Rect2(tx, ct_box_y, box_w, box_h), c_dark)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l1_off), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l2_off), "TIME",  HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
@@ -3173,13 +3173,48 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	_game.draw_string(_font_din_num, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
 	# TRY COUNT ボックス（67.6%）
-	var tc_box_y: float = card_y + card_h * 0.676
+	var tc_box_y: float = card_y + card_h * 0.676 + 17.0
 	_game.draw_rect(Rect2(tx, tc_box_y, box_w, box_h), c_dark)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l1_off), "TRY",   HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
 	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w * bar_progress, box_h), val_bg)
 	_game.draw_string(_font_din_num, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+
+	# ─── NEW RECORD! バッジ（スロット演出後にフェードイン） ───
+	const NR_FS: int = 15
+	const NR_TEXT: String = "NEW RECORD!"
+	const NR_PAD_X: float = 4.0
+	const NR_PAD_Y: float = 2.0
+	const NR_TAG_EXT: float = 10.0
+	var nr_badge_a: float = a * clampf((clear_elapsed - SLOT_DUR) / 0.3, 0.0, 1.0)
+	if nr_badge_a > 0.0:
+		var nr_asc: float = _game.font_din.get_ascent(NR_FS)
+		var nr_dsc: float = _game.font_din.get_descent(NR_FS)
+		var nr_text_w: float = fdt.get_string_size(NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS).x
+		var nr_w: float = nr_text_w + NR_PAD_X * 2.0
+		var nr_h: float = nr_asc + nr_dsc + NR_PAD_Y * 2.0 - 5.0
+		var nr_right: float = val_bg_x + val_bg_w
+		var nr_c_red: Color = Color(c_red.r, c_red.g, c_red.b, nr_badge_a)
+		var nr_c_white: Color = Color(1.0, 1.0, 1.0, nr_badge_a)
+		if _game._new_record_time:
+			var ct_nr_y: float = ct_box_y - nr_h
+			_game.draw_colored_polygon(PackedVector2Array([
+				Vector2(nr_right - nr_w, ct_nr_y),
+				Vector2(nr_right, ct_nr_y),
+				Vector2(nr_right, ct_nr_y + nr_h),
+				Vector2(nr_right - nr_w - NR_TAG_EXT, ct_nr_y + nr_h),
+			]), nr_c_red)
+			_game.draw_string(fdt, Vector2(nr_right - nr_w + NR_PAD_X, ct_nr_y + (nr_h + nr_asc - nr_dsc) * 0.5), NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, nr_c_white)
+		if _game._new_record_moves:
+			var tc_nr_y: float = tc_box_y - nr_h
+			_game.draw_colored_polygon(PackedVector2Array([
+				Vector2(nr_right - nr_w, tc_nr_y),
+				Vector2(nr_right, tc_nr_y),
+				Vector2(nr_right, tc_nr_y + nr_h),
+				Vector2(nr_right - nr_w - NR_TAG_EXT, tc_nr_y + nr_h),
+			]), nr_c_red)
+			_game.draw_string(fdt, Vector2(nr_right - nr_w + NR_PAD_X, tc_nr_y + (nr_h + nr_asc - nr_dsc) * 0.5), NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, nr_c_white)
 
 	# ─── 右：見本の図形（85%縮小表示） ───
 	var shape_x: float = card_x + left_w

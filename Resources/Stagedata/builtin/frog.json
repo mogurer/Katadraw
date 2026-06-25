@@ -12,6 +12,7 @@
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
+		"stage_name": "カエル",
 		"locale_key": "STAGE_FROG"
 	},
 	"schema_version": 1.0,

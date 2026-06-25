@@ -114,16 +114,18 @@ func _get_adjacent(stage_id: int) -> Array[int]:
 	return adj
 
 
-func update_best(stage_id: int, time: float, moves: int) -> void:
-	var update: bool = false
+func update_best(stage_id: int, time: float, moves: int) -> Dictionary:
+	var time_updated: bool = false
+	var moves_updated: bool = false
 	if not _best_times.has(stage_id) or time < float(_best_times[stage_id]):
 		_best_times[stage_id] = time
-		update = true
+		time_updated = true
 	if not _best_move_counts.has(stage_id) or moves < int(_best_move_counts[stage_id]):
 		_best_move_counts[stage_id] = moves
-		update = true
-	if update:
+		moves_updated = true
+	if time_updated or moves_updated:
 		_save_states()
+	return {time = time_updated, moves = moves_updated}
 
 
 func get_best_time(stage_id: int) -> float:

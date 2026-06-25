@@ -101,6 +101,9 @@ var _font: Font
 var _font_din: Font = null
 var _stage_cfgs: Array = []
 var _dbg_preview: AudioStreamPlayer = null
+var _sfx_hover: AudioStreamPlayer = null
+var _sfx_click: AudioStreamPlayer = null
+var _sfx_on: AudioStreamPlayer = null
 var _zou_stage_idx: int = -1  # [DEBUG] zou.json の StageData インデックス（-1=未発見）
 
 # --- BGM 曲名表示 ---
@@ -141,6 +144,18 @@ func _ready() -> void:
 		_zou_stage_idx = _find_zou_stage_idx()
 	_bgm_canvas = $BgmUI
 	_setup_bgm_ui()
+	_sfx_hover = AudioStreamPlayer.new()
+	_sfx_hover.stream = load("res://assets/sounds/pinon.wav")
+	_sfx_hover.volume_db = -10.0
+	add_child(_sfx_hover)
+	_sfx_click = AudioStreamPlayer.new()
+	_sfx_click.stream = load("res://assets/sounds/se_click.wav")
+	_sfx_click.volume_db = -14.5
+	add_child(_sfx_click)
+	_sfx_on = AudioStreamPlayer.new()
+	_sfx_on.stream = load("res://assets/sounds/se_on.wav")
+	_sfx_on.volume_db = -14.5
+	add_child(_sfx_on)
 	_start_bgm_label_anim.call_deferred()
 
 
@@ -166,7 +181,10 @@ func _process(delta: float) -> void:
 	# 最近傍ステージ更新（ユーザー操作で動いたときのみ）
 	if _char_moved_by_user and _popup_stage < 0:
 		_char_moved_by_user = false
+		var prev_nearest: int = _nearest
 		_nearest = _find_nearest_accessible()
+		if _nearest >= 0 and _nearest != prev_nearest:
+			_sfx_hover.play()
 
 	# BGM ボタンはポップアップ表示中に無効化
 	if _btn_prev:
@@ -248,6 +266,7 @@ func _input(event: InputEvent) -> void:
 		_popup_stage = _nearest
 		_popup_yes_hovered = true
 		_popup_no_hovered = false
+		_sfx_click.play()
 		queue_redraw()
 		return
 
@@ -255,6 +274,7 @@ func _input(event: InputEvent) -> void:
 		_esc_popup = true
 		_esc_popup_yes_hovered = false
 		_esc_popup_no_hovered = false
+		_sfx_click.play()
 		queue_redraw()
 
 	# L/R ボタンでBGM切り替え（ポップアップ非表示中のみ）
@@ -560,8 +580,12 @@ func _draw_popup(vp: Vector2) -> void:
 func _update_popup_hover(pos: Vector2) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var r: Dictionary = _popup_rects(vp)
-	_popup_yes_hovered = (r["yes"] as Rect2).has_point(pos)
-	_popup_no_hovered  = (r["no"]  as Rect2).has_point(pos)
+	var new_yes: bool = (r["yes"] as Rect2).has_point(pos)
+	var new_no: bool  = (r["no"]  as Rect2).has_point(pos)
+	if (new_yes and not _popup_yes_hovered) or (new_no and not _popup_no_hovered):
+		_sfx_on.play()
+	_popup_yes_hovered = new_yes
+	_popup_no_hovered  = new_no
 
 
 func _handle_popup_click(pos: Vector2) -> void:
@@ -579,6 +603,7 @@ func _handle_popup_click(pos: Vector2) -> void:
 
 
 func _handle_popup_confirm(yes: bool) -> void:
+	_sfx_click.play()
 	if yes:
 		StageSelectManager.pending_stage_id = _popup_stage
 		get_tree().change_scene_to_file(_GAME_SCENE)
@@ -634,8 +659,12 @@ func _draw_esc_popup(vp: Vector2) -> void:
 func _update_esc_popup_hover(pos: Vector2) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var r: Dictionary = _popup_rects(vp)
-	_esc_popup_yes_hovered = (r["yes"] as Rect2).has_point(pos)
-	_esc_popup_no_hovered  = (r["no"]  as Rect2).has_point(pos)
+	var new_yes: bool = (r["yes"] as Rect2).has_point(pos)
+	var new_no: bool  = (r["no"]  as Rect2).has_point(pos)
+	if (new_yes and not _esc_popup_yes_hovered) or (new_no and not _esc_popup_no_hovered):
+		_sfx_on.play()
+	_esc_popup_yes_hovered = new_yes
+	_esc_popup_no_hovered  = new_no
 
 
 func _handle_esc_popup_click(pos: Vector2) -> void:
@@ -651,6 +680,7 @@ func _handle_esc_popup_click(pos: Vector2) -> void:
 
 
 func _handle_esc_popup_confirm(yes: bool) -> void:
+	_sfx_click.play()
 	if yes:
 		BGMManager.stop()
 		get_tree().change_scene_to_file(_GAME_SCENE)
