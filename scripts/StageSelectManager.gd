@@ -44,6 +44,8 @@ var tutorial_return_to: String = ""
 
 var _states: Array[int] = []
 var _stage_names: Array[String] = []
+var _best_times: Dictionary = {}       # stage_id(int) → float
+var _best_move_counts: Dictionary = {} # stage_id(int) → int
 
 
 func _ready() -> void:
@@ -112,11 +114,39 @@ func _get_adjacent(stage_id: int) -> Array[int]:
 	return adj
 
 
+func update_best(stage_id: int, time: float, moves: int) -> void:
+	var update: bool = false
+	if not _best_times.has(stage_id) or time < float(_best_times[stage_id]):
+		_best_times[stage_id] = time
+		update = true
+	if not _best_move_counts.has(stage_id) or moves < int(_best_move_counts[stage_id]):
+		_best_move_counts[stage_id] = moves
+		update = true
+	if update:
+		_save_states()
+
+
+func get_best_time(stage_id: int) -> float:
+	return float(_best_times[stage_id]) if _best_times.has(stage_id) else -1.0
+
+
+func get_best_move_count(stage_id: int) -> int:
+	return int(_best_move_counts[stage_id]) if _best_move_counts.has(stage_id) else -1
+
+
 func _save_states() -> void:
 	var data: Dictionary = {}
 	for i in range(STAGE_COUNT):
 		data[str(i)] = _states[i]
 	data["tutorial_shown"] = tutorial_shown
+	var best_t: Dictionary = {}
+	for k in _best_times:
+		best_t[str(k)] = _best_times[k]
+	data["best_times"] = best_t
+	var best_m: Dictionary = {}
+	for k in _best_move_counts:
+		best_m[str(k)] = _best_move_counts[k]
+	data["best_moves"] = best_m
 	var f: FileAccess = FileAccess.open(_SAVE_PATH, FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
@@ -128,6 +158,8 @@ func reset_all() -> void:
 	_states[0] = StageState.UNLOCKED
 	tutorial_shown = false
 	pending_stage_id = -1
+	_best_times.clear()
+	_best_move_counts.clear()
 	_save_states()
 
 
@@ -147,3 +179,11 @@ func _load_states() -> void:
 			_states[i] = int(d[k])
 	if d.has("tutorial_shown"):
 		tutorial_shown = bool(d["tutorial_shown"])
+	if d.has("best_times"):
+		var bt: Dictionary = d["best_times"] as Dictionary
+		for k in bt:
+			_best_times[int(k)] = float(bt[k])
+	if d.has("best_moves"):
+		var bm: Dictionary = d["best_moves"] as Dictionary
+		for k in bm:
+			_best_move_counts[int(k)] = int(bm[k])

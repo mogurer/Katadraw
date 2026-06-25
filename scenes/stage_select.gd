@@ -46,11 +46,18 @@ const _DOT_RADIUS      := 20.0
 const _LINE_WIDTH      := 2.0
 const _CHAR_RADIUS     := 14.0
 const _PROX_DIST       := 140.0   # 吹き出し表示する距離（px）
-const _BUBBLE_R        := 60.0    # 吹き出し内の図形半径
-const _BUBBLE_PAD      := 18.0
-const _BUBBLE_NAME_H   := 34.0    # ステージ名ラベルの高さ
-const _POPUP_W         := 520.0
-const _POPUP_H         := 260.0
+const _BUBBLE_W        := 225.0   # バブル固定幅 (150 × 1.5)
+const _BUBBLE_H        := 300.0   # バブル固定高さ (200 × 1.5)
+const _BUBBLE_HDR_H    := 78.0    # ヘッダエリア高さ (52 × 1.5)
+const _BUBBLE_FIG_H    := 117.0   # 図形エリア高さ (78 × 1.5)
+const _BUBBLE_ROW_H    := 52.5    # BESTレコード各行高さ (35 × 1.5)
+const _BUBBLE_STRIPE_W := 22.5    # 左縦ストライプ幅 (15 × 1.5)
+const _BUBBLE_LABEL_W  := 67.5    # BEST行ラベルセル幅 (45 × 1.5)
+const _BUBBLE_DARK     := Color(0.26, 0.21, 0.28)
+const _BUBBLE_RED      := Color(0.95, 0.19, 0.32)
+const _BUBBLE_VAL_BG   := Color(0.87, 0.85, 0.85)
+const _POPUP_W         := 700.0
+const _POPUP_H         := 280.0
 
 # --- 自キャラ ---
 const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
@@ -91,6 +98,8 @@ var _esc_popup_yes_hovered: bool = false
 var _esc_popup_no_hovered: bool = false
 
 var _font: Font
+var _font_din: Font = null
+var _stage_cfgs: Array = []
 var _dbg_preview: AudioStreamPlayer = null
 var _zou_stage_idx: int = -1  # [DEBUG] zou.json の StageData インデックス（-1=未発見）
 
@@ -105,7 +114,18 @@ var _bgm_tween: Tween = null
 
 
 func _ready() -> void:
-	_font = ThemeDB.fallback_font
+	var mplus: Font = load("res://assets/fonts/Mplus2-Medium.otf")
+	if mplus != null:
+		mplus.fallbacks = [ThemeDB.fallback_font]
+		_font = mplus
+	else:
+		_font = ThemeDB.fallback_font
+	var din_res: FontFile = load("res://assets/fonts/D-DIN-PRO-700-Bold.otf")
+	if din_res != null:
+		din_res.fallbacks = [_font]
+		din_res.set_extra_spacing(0, TextServer.SPACING_GLYPH, -1)
+	_font_din = din_res if din_res != null else _font
+	_stage_cfgs = StageData.get_stages()
 	_char_pos = get_viewport_rect().size * 0.5
 	_char_target = _char_pos
 	var rng := RandomNumberGenerator.new()
@@ -308,100 +328,233 @@ func _draw() -> void:
 
 func _draw_bubble(stage_id: int) -> void:
 	var dot: Vector2 = _dot_pos(stage_id)
-	var bw: float = (_BUBBLE_R + _BUBBLE_PAD) * 2.0
-	var bh: float = bw + _BUBBLE_NAME_H
-	# 吹き出し位置: ドットの右上（画面端に応じて調整）
+	var bw: float = _BUBBLE_W
+	var bh: float = _BUBBLE_H
 	var vp: Vector2 = get_viewport_rect().size
-	var bx: float = dot.x + _DOT_RADIUS + 8.0
+	var bx: float = dot.x + _DOT_RADIUS + 12.0
 	var by: float = dot.y - bh - _DOT_RADIUS
-	bx = clampf(bx, 4.0, vp.x - bw - 4.0)
-	by = clampf(by, 4.0, vp.y - bh - 4.0)
-	var br := Rect2(bx, by, bw, bh)
-	# 背景
-	draw_rect(br, _BUBBLE_BORDER)
-	draw_rect(br.grow(-3.0), _BUBBLE_BG)
-	# ミニ図形（上部 bw×bw エリアの中央）
-	var center := Vector2(bx + bw * 0.5, by + bw * 0.5)
-	_draw_mini_shape(stage_id, center, _BUBBLE_R - _BUBBLE_PAD)
-	# ステージ名（下部ラベルエリア）
+	bx = clampf(bx, 6.0, vp.x - bw - 6.0)
+	by = clampf(by, 6.0, vp.y - bh - 6.0)
+
+	var bd: float    = 4.5
+	var str_w: float = _BUBBLE_STRIPE_W   # 縦ストライプ幅 = 15px
+	var ix: float    = bx + bd
+	var iy: float    = by + bd
+	var iw: float    = bw - bd * 2.0      # 144px
+	var ih: float    = bh - bd * 2.0      # 194px
+
+	# ─── ドロップシャドウ ───
+	draw_rect(Rect2(bx + 12.5, by + 12.5, bw, bh), Color(0.26, 0.21, 0.28, 0.30))
+
+	# ─── 外枠 ───
+	draw_rect(Rect2(bx, by, bw, bh), _BUBBLE_DARK)
+
+	# ─── 右コンテンツ背景（白・全高） ───
+	var cx: float = ix + str_w    # bx + 18
+	var cw: float = iw - str_w    # 129px
+	draw_rect(Rect2(cx, iy, cw, ih), _BUBBLE_BG)
+
+	# ─── 左縦ストライプ（全高）: 上部赤 + 下部ダーク ───
+	var red_h: float = ih * 0.38 - 20.0   # 下部を20pxカット
+	draw_rect(Rect2(ix, iy,         str_w, red_h),      _BUBBLE_RED)
+	draw_rect(Rect2(ix, iy + red_h, str_w, ih - red_h), _BUBBLE_DARK)
+
+	# ─── ストライプ内 平行四辺形（ダーク部・間隔を1/3に縮小して中央揃え） ───
+	var para_zone_top: float = iy + red_h
+	var para_zone_bot: float = iy + _BUBBLE_HDR_H + _BUBBLE_FIG_H
+	var para_count: int = 5
+	var para_full_step: float = (para_zone_bot - para_zone_top) / 4.0   # 元の3個分の間隔基準を維持
+	var para_step: float = para_full_step / 3.0 * 2.0   # 間隔は既存と同じ
+	var para_h: float    = para_full_step * 0.50        # 高さは元のままを維持
+	var para_skew: float = str_w * 0.55
+	var cluster_h: float = para_step * float(para_count - 1) + para_skew + para_h
+	var cluster_y: float = (para_zone_top + para_zone_bot) * 0.5 - cluster_h * 0.5 + 90.0   # 90px下に移動
+	for pi in range(para_count):
+		var py: float = cluster_y + float(pi) * para_step
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(ix + str_w, py),
+			Vector2(ix,         py + para_skew),
+			Vector2(ix,         py + para_skew + para_h),
+			Vector2(ix + str_w, py + para_h),
+		]), _BUBBLE_RED)
+
+	# ─── ヘッダ: #N ───
+	var num_fs: int = 39
+	draw_string(_font_din, Vector2(cx + 7.5, iy - 6.0 + _font_din.get_ascent(num_fs)),
+		"#%d" % (stage_id + 1), HORIZONTAL_ALIGNMENT_LEFT, cw - 12.0, num_fs, _BUBBLE_DARK)
+
+	# ─── ヘッダ: ステージ名 ───
 	var name_str: String = StageSelectManager.get_stage_name(stage_id)
 	if not name_str.is_empty():
-		var name_y: float = by + bw + _BUBBLE_NAME_H * 0.72
-		draw_string(_font, Vector2(bx, name_y), name_str,
-			HORIZONTAL_ALIGNMENT_CENTER, bw, 18, _BUBBLE_BORDER)
-	# しっぽ（ドットへ向かう小三角）
+		var name_fs: int = 20
+		draw_string(_font, Vector2(cx + 7.5, iy + 47.5 + _font.get_ascent(name_fs)),
+			name_str, HORIZONTAL_ALIGNMENT_LEFT, cw - 12.0, name_fs, _BUBBLE_DARK)
+
+	# ─── 図形エリア ───
+	var hdr_fig_h: float = _BUBBLE_HDR_H + _BUBBLE_FIG_H
+	var shape_r: float = 52.5 if stage_id >= 4 else 42.0   # STAGE5以降は125%
+	_draw_mini_shape(stage_id, Vector2(cx + cw * 0.5, iy + _BUBBLE_HDR_H + _BUBBLE_FIG_H * 0.5), shape_r)
+
+	# ─── BEST 枠 2 本 ───
+	var box_pad: float  = 7.5
+	var box_gap: float  = 4.5
+	var rows_top: float = iy + hdr_fig_h
+	var rows_bot: float = iy + ih - box_pad
+	var row_h: float    = (rows_bot - rows_top - box_gap) * 0.5
+	var box_x: float    = ix + box_pad + 20.0       # +20px 右シフト (15 + 5)
+	var box_w: float    = iw - box_pad * 2.0 - 20.0 # 右端位置を維持
+	var label_w: float  = _BUBBLE_LABEL_W   # 67.5px
+
+	var has_rec: bool  = StageSelectManager.get_best_time(stage_id) >= 0.0
+	var bt_str: String = "%.2f" % StageSelectManager.get_best_time(stage_id) if has_rec else "/"
+	var bm_str: String = "%d"   % StageSelectManager.get_best_move_count(stage_id) if has_rec else "/"
+
+	_draw_bubble_best_row(box_x, rows_top,                   box_w, row_h, label_w, "BEST", "CLEAR", "TIME",  bt_str)
+	_draw_bubble_best_row(box_x, rows_top + row_h + box_gap, box_w, row_h, label_w, "BEST", "TRY",   "COUNT", bm_str)
+
+	# ─── しっぽ ───
 	var tail_tip: Vector2 = dot + Vector2(-_DOT_RADIUS * 0.5, -_DOT_RADIUS * 0.5)
-	var tail_base_x: float = clampf(tail_tip.x, bx + 8.0, bx + bw - 8.0)
-	var tail_base_y: float = by + bh
+	var tail_base_x: float = clampf(tail_tip.x, bx + 12.0, bx + bw - 12.0)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(tail_base_x - 6, tail_base_y),
-		Vector2(tail_base_x + 6, tail_base_y),
+		Vector2(tail_base_x - 9.0, by + bh),
+		Vector2(tail_base_x + 9.0, by + bh),
 		tail_tip,
-	]), _BUBBLE_BORDER)
+	]), _BUBBLE_DARK)
+
+	# ─── 四隅サークル（ボタン・リザルトと同じデザイン言語） ───
+	var corner_r: float = bd * 1.25   # ≈ 5.6px
+	draw_circle(Vector2(bx + 1.0,      by + 1.0),      corner_r, _BUBBLE_DARK)
+	draw_circle(Vector2(bx + bw - 1.0, by + 1.0),      corner_r, _BUBBLE_DARK)
+	draw_circle(Vector2(bx + 1.0,      by + bh - 1.0), corner_r, _BUBBLE_DARK)
+	draw_circle(Vector2(bx + bw - 1.0, by + bh - 1.0), corner_r, _BUBBLE_DARK)
+
+
+func _draw_bubble_best_row(bx: float, by: float, bw: float, bh: float, lw: float,
+		l1: String, l2: String, l3: String, value_str: String) -> void:
+	# ラベルセル（ダーク）
+	draw_rect(Rect2(bx, by, lw, bh), _BUBBLE_DARK)
+	# ラベルテキスト（白・行間を半分に詰める）
+	var lfs: int = 12
+	var lasc: float = _font.get_ascent(lfs)
+	var ldsc: float = _font.get_descent(lfs)
+	var lh: float   = (lasc + ldsc + 1.0) * 0.5 + 3.0   # 行間 +3px (2 × 1.5)
+	var block_h: float = lh * 2.0 + lasc + ldsc
+	var ty: float = by + (bh - block_h) * 0.5 + lasc
+	var tx: float = bx + 4.5
+	var tw: float = lw - 6.0
+	draw_string(_font, Vector2(tx, ty),            l1, HORIZONTAL_ALIGNMENT_LEFT, tw, lfs, _BUBBLE_BG)
+	draw_string(_font, Vector2(tx, ty + lh),       l2, HORIZONTAL_ALIGNMENT_LEFT, tw, lfs, _BUBBLE_BG)
+	draw_string(_font, Vector2(tx, ty + lh * 2.0), l3, HORIZONTAL_ALIGNMENT_LEFT, tw, lfs, _BUBBLE_BG)
+	# 値テキスト（DIN Bold・右寄せ・グレー背景）
+	var vx: float  = bx + lw
+	var vw: float  = bw - lw
+	var vfs: int   = 34
+	var vasc: float = _font_din.get_ascent(vfs)
+	var vdsc: float = _font_din.get_descent(vfs)
+	draw_rect(Rect2(vx, by, vw, bh), _BUBBLE_VAL_BG)
+	draw_string(_font_din, Vector2(vx, by + (bh + vasc - vdsc) * 0.5),
+		value_str, HORIZONTAL_ALIGNMENT_RIGHT, vw - 7.5, vfs, _BUBBLE_DARK)
 
 
 func _draw_mini_shape(stage_id: int, center: Vector2, r: float) -> void:
-	# スケルトン段階: ステージ番号を円とともに表示（実データ接続後に形状別描画へ置き換え）
-	var segments: int = 48
+	var cfg: Dictionary = {}
+	if stage_id < _stage_cfgs.size():
+		cfg = _stage_cfgs[stage_id] as Dictionary
+	var stype: String = str(cfg.get("shape_type", cfg.get("type", "circle")))
+	var fill_c := Color(_BUBBLE_RED.r, _BUBBLE_RED.g, _BUBBLE_RED.b, 0.22)
+	var line_c := _BUBBLE_DARK
 	var pts := PackedVector2Array()
-	for i in range(segments):
-		var a: float = i * TAU / segments
-		pts.append(center + Vector2(cos(a), sin(a)) * r)
-	draw_colored_polygon(pts, Color(_BUBBLE_BORDER, 0.18))
-	draw_polyline(pts + PackedVector2Array([pts[0]]), _BUBBLE_BORDER, 1.5)
-	var label: String = str(stage_id + 1)
-	draw_string(_font, center - Vector2(r * 0.25, -r * 0.22), label, HORIZONTAL_ALIGNMENT_CENTER, r * 0.7, int(r * 0.5), _BUBBLE_BORDER)
+
+	# カスタム形状: shape_polygon_vertices が存在する場合はそちらを優先
+	if cfg.has("shape_polygon_vertices"):
+		var raw: Array = cfg["shape_polygon_vertices"] as Array
+		if not raw.is_empty():
+			var raw_pts := PackedVector2Array()
+			var max_dist: float = 0.01
+			for v in raw:
+				var arr: Array = v as Array
+				var p := Vector2(float(arr[0]), float(arr[1]))
+				raw_pts.append(p)
+				max_dist = maxf(max_dist, p.length())
+			var sc: float = r / max_dist
+			for p in raw_pts:
+				pts.append(center + p * sc)
+	else:
+		match stype:
+			"triangle":
+				for i in range(3):
+					var a: float = -PI * 0.5 + float(i) * TAU / 3.0
+					pts.append(center + Vector2(cos(a), sin(a)) * r)
+			"square":
+				var h: float = r * 0.707
+				pts = PackedVector2Array([
+					center + Vector2(-h, -h), center + Vector2(h, -h),
+					center + Vector2(h,  h),  center + Vector2(-h, h),
+				])
+			"rhombus":
+				pts = PackedVector2Array([
+					center + Vector2(0, -r),        center + Vector2(r * 0.72, 0),
+					center + Vector2(0,  r),        center + Vector2(-r * 0.72, 0),
+				])
+			"hexagon":
+				for i in range(6):
+					var a: float = float(i) * TAU / 6.0 - PI / 6.0
+					pts.append(center + Vector2(cos(a), sin(a)) * r)
+			_:  # circle やその他
+				draw_circle(center, r, fill_c)
+				var cp := PackedVector2Array()
+				for i in range(32):
+					cp.append(center + Vector2(cos(float(i) * TAU / 32.0), sin(float(i) * TAU / 32.0)) * r)
+				draw_polyline(cp + PackedVector2Array([cp[0]]), line_c, 2.25)
+				return
+
+	if pts.size() < 3:
+		return
+	draw_colored_polygon(pts, fill_c)
+	draw_polyline(pts + PackedVector2Array([pts[0]]), line_c, 2.25)
+	for p in pts:
+		draw_circle(p, 3.0, line_c)
 
 
 # ---------- ポップアップ ----------
 
 func _popup_rects(vp: Vector2) -> Dictionary:
-	var px: float = (vp.x - _POPUP_W) * 0.5
-	var py: float = (vp.y - _POPUP_H) * 0.5
-	var popup_rect := Rect2(px, py, _POPUP_W, _POPUP_H)
-	var btn_w: float = _POPUP_W * 0.3
-	var btn_h: float = 52.0
-	var btn_y: float = py + _POPUP_H - btn_h - 28.0
-	var yes_rect := Rect2(px + _POPUP_W * 0.18, btn_y, btn_w, btn_h)
-	var no_rect  := Rect2(px + _POPUP_W * 0.52, btn_y, btn_w, btn_h)
+	var cx: float = vp.x * 0.5
+	var cy: float = vp.y * 0.5
+	var popup_rect := Rect2(cx - _POPUP_W * 0.5, cy - _POPUP_H * 0.5, _POPUP_W, _POPUP_H)
+	var btn_w: float  = 220.0
+	var btn_h: float  = 64.0
+	var cbtn_gap: float = btn_w * 0.5 + 30.0   # = 140
+	var btn_cy: float = cy + 70.0
+	var yes_rect := Rect2(cx - cbtn_gap - btn_w * 0.5, btn_cy - btn_h * 0.5, btn_w, btn_h)
+	var no_rect  := Rect2(cx + cbtn_gap - btn_w * 0.5, btn_cy - btn_h * 0.5, btn_w, btn_h)
 	return { "popup": popup_rect, "yes": yes_rect, "no": no_rect }
 
 
 func _draw_popup(vp: Vector2) -> void:
-	# 暗幕
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.35))
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
 	var r: Dictionary = _popup_rects(vp)
 	var pr: Rect2 = r["popup"]
 	var yr: Rect2 = r["yes"]
 	var nr: Rect2 = r["no"]
+	var cy: float  = pr.position.y + pr.size.y * 0.5
 
-	# パネル
-	draw_rect(pr.grow(4.0), _POPUP_BORDER)
-	draw_rect(pr, _POPUP_BG)
+	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(0.26, 0.21, 0.28, 0.25))
+	draw_rect(pr, Color(1.0, 1.0, 1.0))
+	_draw_rect_border_with_corners_local(pr, Color(0.26, 0.21, 0.28), 5.75)
 
-	# テキスト
-	var text_y: float = pr.position.y + pr.size.y * 0.38
-	draw_string(_font, Vector2(pr.position.x, text_y), "このステージをプレイしますか？",
-		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 28, Color(0.26, 0.21, 0.28))
-	var sub_y: float = text_y + 40.0
+	draw_string(_font_din, Vector2(pr.position.x, cy - 45.0), "このステージをプレイしますか？",
+		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 42, Color(0.95, 0.19, 0.32))
 	var stage_label: String = "ステージ %d" % (_popup_stage + 1)
 	var stage_name: String = StageSelectManager.get_stage_name(_popup_stage)
 	if not stage_name.is_empty():
 		stage_label += "　" + stage_name
-	draw_string(_font, Vector2(pr.position.x, sub_y), stage_label,
-		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 22, Color(0.50, 0.30, 0.30))
+	var sub_fs: int = 22
+	draw_string(_font, Vector2(pr.position.x, cy + _font.get_ascent(sub_fs) - 30.0),
+		stage_label, HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, sub_fs, Color(0.50, 0.30, 0.30))
 
-	# [はい] ボタン
-	var yes_col: Color = _BTN_YES_COLOR if _popup_yes_hovered else Color(_BTN_YES_COLOR, 0.5)
-	draw_rect(yr, yes_col)
-	draw_string(_font, Vector2(yr.position.x, yr.position.y + yr.size.y * 0.72),
-		"はい", HORIZONTAL_ALIGNMENT_CENTER, yr.size.x, 26, Color.WHITE)
-
-	# [いいえ] ボタン
-	var no_col: Color = _BTN_NO_COLOR if _popup_no_hovered else Color(_BTN_NO_COLOR, 0.5)
-	draw_rect(nr, no_col)
-	draw_string(_font, Vector2(nr.position.x, nr.position.y + nr.size.y * 0.72),
-		"いいえ", HORIZONTAL_ALIGNMENT_CENTER, nr.size.x, 26, Color.WHITE)
+	_draw_popup_btn(yr, "はい",   _popup_yes_hovered)
+	_draw_popup_btn(nr, "いいえ", _popup_no_hovered)
 
 
 func _update_popup_hover(pos: Vector2) -> void:
@@ -460,28 +613,22 @@ func _find_nearest_accessible() -> int:
 # ---------- タイトル戻りポップアップ ----------
 
 func _draw_esc_popup(vp: Vector2) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.35))
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
 	var r: Dictionary = _popup_rects(vp)
 	var pr: Rect2 = r["popup"]
 	var yr: Rect2 = r["yes"]
 	var nr: Rect2 = r["no"]
+	var cy: float  = pr.position.y + pr.size.y * 0.5
 
-	draw_rect(pr.grow(4.0), _POPUP_BORDER)
-	draw_rect(pr, _POPUP_BG)
+	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(0.26, 0.21, 0.28, 0.25))
+	draw_rect(pr, Color(1.0, 1.0, 1.0))
+	_draw_rect_border_with_corners_local(pr, Color(0.26, 0.21, 0.28), 5.75)
 
-	var text_y: float = pr.position.y + pr.size.y * 0.42
-	draw_string(_font, Vector2(pr.position.x, text_y), "タイトル画面へ戻りますか？",
-		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 28, Color(0.26, 0.21, 0.28))
+	draw_string(_font_din, Vector2(pr.position.x, cy - 45.0), "タイトル画面へ戻りますか？",
+		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 42, Color(0.95, 0.19, 0.32))
 
-	var yes_col: Color = _BTN_YES_COLOR if _esc_popup_yes_hovered else Color(_BTN_YES_COLOR, 0.5)
-	draw_rect(yr, yes_col)
-	draw_string(_font, Vector2(yr.position.x, yr.position.y + yr.size.y * 0.72),
-		"はい", HORIZONTAL_ALIGNMENT_CENTER, yr.size.x, 26, Color.WHITE)
-
-	var no_col: Color = _BTN_NO_COLOR if _esc_popup_no_hovered else Color(_BTN_NO_COLOR, 0.5)
-	draw_rect(nr, no_col)
-	draw_string(_font, Vector2(nr.position.x, nr.position.y + nr.size.y * 0.72),
-		"いいえ", HORIZONTAL_ALIGNMENT_CENTER, nr.size.x, 26, Color.WHITE)
+	_draw_popup_btn(yr, "はい",   _esc_popup_yes_hovered)
+	_draw_popup_btn(nr, "いいえ", _esc_popup_no_hovered)
 
 
 func _update_esc_popup_hover(pos: Vector2) -> void:
@@ -510,6 +657,50 @@ func _handle_esc_popup_confirm(yes: bool) -> void:
 	else:
 		_esc_popup = false
 		queue_redraw()
+
+
+# ---------- ポップアップ共通ヘルパー ----------
+
+func _draw_rect_border_with_corners_local(rect: Rect2, color: Color, bw: float) -> void:
+	var dot_r: float = bw * 1.25
+	draw_rect(rect, color, false, bw)
+	draw_circle(rect.position,                        dot_r, color)
+	draw_circle(Vector2(rect.end.x, rect.position.y), dot_r, color)
+	draw_circle(Vector2(rect.position.x, rect.end.y), dot_r, color)
+	draw_circle(rect.end,                             dot_r, color)
+
+
+func _draw_popup_btn(rect: Rect2, label: String, hovered: bool) -> void:
+	const BTN_BW: float = 5.75
+	var dot_r: float = BTN_BW * 1.25
+	var fs: int = 40
+	var baseline_y: float = rect.position.y + (rect.size.y + _font.get_ascent(fs) - _font.get_descent(fs)) * 0.5
+	if hovered:
+		# アニメーション形状変化（ui_renderer の ON ボタンと同仕様）
+		var t: float = Time.get_ticks_msec() / 500.0
+		var mo: float = minf(5.0, minf(rect.size.x, rect.size.y) * 0.45)
+		var pts := PackedVector2Array([
+			Vector2(rect.position.x + sin(t * 0.71 + 0.00) * mo, rect.position.y + sin(t * 0.53 + 1.10) * mo),
+			Vector2(rect.end.x      + sin(t * 0.63 + 2.30) * mo, rect.position.y + sin(t * 0.79 + 3.50) * mo),
+			Vector2(rect.end.x      + sin(t * 0.58 + 4.70) * mo, rect.end.y      + sin(t * 0.67 + 5.90) * mo),
+			Vector2(rect.position.x + sin(t * 0.82 + 7.10) * mo, rect.end.y      + sin(t * 0.61 + 8.30) * mo),
+		])
+		var so := Vector2(12.5, 12.5)
+		draw_colored_polygon(PackedVector2Array([pts[0]+so, pts[1]+so, pts[2]+so, pts[3]+so]),
+			Color(0.26, 0.21, 0.28, 0.30))
+		draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.9))
+		for i in range(4):
+			draw_line(pts[i], pts[(i + 1) % 4], Color(0.26, 0.21, 0.28), BTN_BW, true)
+		for c in pts:
+			draw_circle(c, dot_r, Color(0.26, 0.21, 0.28))
+		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
+			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, Color(1.0, 0.937, 0.89))
+	else:
+		draw_rect(Rect2(rect.position + Vector2(12.5, 12.5), rect.size), Color(0.26, 0.21, 0.28, 0.30))
+		draw_rect(rect, Color(1.0, 0.937, 0.89))
+		_draw_rect_border_with_corners_local(rect, Color(0.26, 0.21, 0.28), BTN_BW)
+		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
+			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, Color(0.26, 0.21, 0.28))
 
 
 # ---------- [DEBUG] SE選択パネル ----------

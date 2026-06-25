@@ -1292,6 +1292,7 @@ func _check_clear() -> void:
 		BGMManager.play_clear()
 		if not GameConfig.IS_DEMO:
 			StageSelectManager.mark_cleared(current_stage)
+			StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
 		_save_dwell_log()
 
 
