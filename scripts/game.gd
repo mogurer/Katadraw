@@ -828,7 +828,7 @@ func _update_player_hover() -> void:
 					else:
 						var extra_y: float = vp.y * 0.07
 						var item_y: float = base_y + i * CONFIG_MENU_SPACING
-						if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y:
+						if pos.y >= item_y - 20.0 + extra_y - 120.0 and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0:
 							config_index = i
 				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
 		return
@@ -2473,14 +2473,13 @@ func _hit_config_item(pos: Vector2) -> Dictionary:
 	var vp: Vector2 = get_viewport_rect().size
 	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
 	var spacing: float = CONFIG_MENU_SPACING
-	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO
 	var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
 	var extra_y: float = vp.y * 0.07
-	var btn_half_w: float = box_w / 2.0
+	var btn_half_w: float = 350.0
 	var btn_cx: float = vp.x / 2.0
 	for i in [5, 6]:
 		var item_y: float = base_y + i * spacing
-		if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
+		if pos.y >= item_y - 20.0 + extra_y - 120.0 and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0 and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
 			return { "ok": true, "main": i }
 	return {}
 
@@ -2529,7 +2528,7 @@ func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 
 ## コンフィグ 値行 0〜4 のボックス中心・矢印位置（get_btn_scale 適用後）。描画とヒット判定で共通。
 func config_row_scaled_layout(vp: Vector2, item_idx: int) -> Dictionary:
-	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
+	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO - 70.0
 	var spacing: float = CONFIG_MENU_SPACING
 	var vx: float = vp.x * CONFIG_MENU_VX_RATIO
 	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO

@@ -1304,8 +1304,8 @@ func _draw_config(vp: Vector2) -> void:
 		var is_sel: bool = (i == _game.config_index)
 		if i >= 5:
 			# 「練習」「戻る」— ボタン行
-			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.07)
-			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, box_w)
+			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.07 - 120.0)
+			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, 700.0)
 			continue
 		# 0〜3: 値行は同一レイアウト（◀ ボックス ▶）。選択行はタイトルメニューと同様のホバー拡大＋シャドウ。
 		var btn_id: String = _game.CONFIG_ROW_BTN_IDS[i]
@@ -1325,7 +1325,7 @@ func _draw_config(vp: Vector2) -> void:
 		_game.draw_rect(box_rect, Color(1.0, 1.0, 1.0))
 		_draw_rect_border_with_corners(box_rect, Color(0.26, 0.21, 0.28), 5.75)
 		var val_font: Font = _game.font_din if (i == 3 or i == 4) else _game.font
-		var val_fs: int = 50 if (i == 3 or i == 4) else 34
+		var val_fs: int = 50 if (i == 3 or i == 4) else (27 if i == 0 else 34)
 		var val_baseline_y: float = box_rect.position.y + (bh + val_font.get_ascent(val_fs) - val_font.get_descent(val_fs)) * 0.5
 		_game.draw_string(val_font, Vector2(box_rect.position.x, val_baseline_y), item_values[i], HORIZONTAL_ALIGNMENT_CENTER, bw, val_fs, val_c)
 		var c: Color = sel_c if is_sel else text_c
