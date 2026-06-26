@@ -828,7 +828,8 @@ func _update_player_hover() -> void:
 					else:
 						var extra_y: float = vp.y * 0.07
 						var item_y: float = base_y + i * CONFIG_MENU_SPACING
-						if pos.y >= item_y - 20.0 + extra_y - 120.0 and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0:
+						var back_extra: float = 30.0 if i == 6 else 0.0
+						if pos.y >= item_y - 20.0 + extra_y - 120.0 + back_extra and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0 + back_extra:
 							config_index = i
 				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
 		return
@@ -921,7 +922,7 @@ func _setup_audio() -> void:
 	add_child(sfx_pin_off)
 
 	sfx_spot = AudioStreamPlayer.new()
-	sfx_spot.stream = _load_audio("res://assets/sounds/se_spot.wav")
+	sfx_spot.stream = _load_audio("res://assets/sounds/se_spot02.wav")
 	sfx_spot.volume_db = -14.5
 	add_child(sfx_spot)
 
@@ -1898,9 +1899,12 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 				_start_game()
 			elif idx == 1:
 				_sync_window_display_from_os()
-				game_state = "config"
-				config_index = 0
-				_reset_ui_menu_stick_navigation()
+				TransitionManager.play_diagonal(func():
+					game_state = "config"
+					config_index = 0
+					_reset_ui_menu_stick_navigation()
+					queue_redraw()
+				)
 			elif idx == 2:
 				menu_confirm_quit = true
 				menu_confirm_index = 1  # デフォルト「いいえ」
@@ -2071,9 +2075,11 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
 			config_reset_hovered = false
 			config_reset_confirm = false
-			game_state = "menu"
-			_reset_ui_menu_stick_navigation()
-			queue_redraw()
+			TransitionManager.play_diagonal(func():
+				game_state = "menu"
+				_reset_ui_menu_stick_navigation()
+				queue_redraw()
+			)
 		)
 		queue_redraw()
 	if moved:
@@ -2479,7 +2485,8 @@ func _hit_config_item(pos: Vector2) -> Dictionary:
 	var btn_cx: float = vp.x / 2.0
 	for i in [5, 6]:
 		var item_y: float = base_y + i * spacing
-		if pos.y >= item_y - 20.0 + extra_y - 120.0 and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0 and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
+		var back_extra: float = 30.0 if i == 6 else 0.0
+		if pos.y >= item_y - 20.0 + extra_y - 120.0 + back_extra and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0 + back_extra and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
 			return { "ok": true, "main": i }
 	return {}
 
@@ -2736,9 +2743,12 @@ func _start_game() -> void:
 			StageSelectManager._save_states()
 			_enter_rules()
 			return
-		# B: 2回目以降 → インゲームBGM開始してステージセレクトへ
-		BGMManager.play_ingame()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		# B: 2回目以降 → タイトルBGM停止→斜めワイプ→（画面覆った瞬間）インゲームBGM開始＋シーン切替
+		BGMManager.stop()
+		TransitionManager.play_diagonal(func():
+			BGMManager.play_ingame()
+			get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		)
 		return
 
 	# IS_DEMO=true: 従来どおり
@@ -2764,14 +2774,14 @@ func _return_to_stage_select_preserve_bgm() -> void:
 	pause_retry_elapsed = -1.0
 	BGMManager.resume_stage_select()
 	_play_sfx(sfx_window_close)
-	get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 
 
 func _advance_stage() -> void:
 	if not GameConfig.IS_DEMO:
 		# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
 		BGMManager.resume_stage_select()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
 		return
 	if current_stage < GameConfig.get_max_stage_index():
 		_start_stage(current_stage + 1)
@@ -2827,7 +2837,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		BGMManager.stop()  # BGMManager に移行
 	elif not GameConfig.IS_DEMO:
 		BGMManager.resume_stage_select()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 	else:
 		debug_mode = false
 		game_state = "title"
@@ -3082,7 +3092,7 @@ func _pbd_exit_to_stage_select() -> void:
 	debug_mode = false
 	if not GameConfig.IS_DEMO:
 		BGMManager.resume_stage_select()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 	else:
 		game_state = "title"
 		title_start_time = Time.get_ticks_msec() / 1000.0

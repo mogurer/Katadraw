@@ -137,6 +137,10 @@ var particle_spawn_time: float = 0.0
 var spore_particles: Array[Dictionary] = []
 var _spore_spawn_accum: float = 0.0
 
+# --- Snap color effect (スナップ時: 赤→黒フェード) ---
+const SNAP_COLOR_DUR := 2.0
+var _snap_color_effects: Dictionary = {}  # {point_idx: elapsed}
+
 # --- Animation state ---
 var _prev_state: String = ""          # 前フレームのゲームステート
 var _transition_alpha: float = 1.0    # 画面遷移フェード（0=暗転中, 1=表示中）
@@ -197,9 +201,10 @@ var title_intro: TitleIntroAnimator
 # --- game 参照 (Node2D/CanvasItem) ---
 var _game: Node2D
 var _stage_renderer: StageRenderer
-var _font_din_tight: FontVariation = null  # font_din の字間詰めバリアント（spacing_glyph = 0、net +5px）KATA-DRAW用
-var _font_din_num: FontVariation = null    # 数値表示専用（spacing_glyph = -1、net +4px）
-var _font_din_result: FontVariation = null # #N/RESULT 専用（spacing_glyph = -2、net +3px）
+var _font_din_tight: FontVariation = null        # font_din の字間詰めバリアント（spacing_glyph = 0、net +5px）KATA-DRAW用
+var _font_din_num: FontVariation = null          # 数値表示専用（spacing_glyph = -1、net +4px）
+var _font_din_result: FontVariation = null       # #N/RESULT 専用（spacing_glyph = -2、net +3px）
+var _font_din_config_logo: FontVariation = null  # CONFIG ロゴ専用（spacing_glyph = -10、net -5px）
 var _font_stage: FontVariation = null      # STAGE 専用: CLEAR 幅に合わせて字間を自動調整
 var _font_clear: FontVariation = null      # CLEAR 専用: spacing_glyph = -7（net -2px）
 
@@ -313,6 +318,15 @@ func update_animations(delta: float) -> void:
 	# フレーム終了時にホバーフラグをリセット（次フレームの set_btn_hover で再設定される）
 	for key in _btn_hover_active.keys():
 		_btn_hover_active[key] = false
+
+	# スナップカラーエフェクト更新
+	var _snap_done: Array = []
+	for key in _snap_color_effects.keys():
+		_snap_color_effects[key] += delta
+		if _snap_color_effects[key] >= SNAP_COLOR_DUR:
+			_snap_done.append(key)
+	for key in _snap_done:
+		_snap_color_effects.erase(key)
 
 func update_result_mouse_pos(pos: Vector2) -> void:
 	_result_mouse_pos = pos
@@ -474,6 +488,11 @@ func draw(state: String, vp: Vector2) -> void:
 
 func draw_pause_overlay(vp: Vector2) -> void:
 	_draw_pause_overlay(vp)
+
+
+func trigger_snap_color(point_idx: int) -> void:
+	"""スナップ時カラーエフェクトを登録（input_handler から呼ぶ）"""
+	_snap_color_effects[point_idx] = 0.0
 
 
 func spawn_particles(center: Vector2) -> void:
@@ -1262,10 +1281,14 @@ func _draw_debug_log_button(vp: Vector2) -> void:
 func _draw_config(vp: Vector2) -> void:
 	_draw_bg(vp)
 
-	# モードタイトル
-	var title_fs: int = 48
-	var title_y: float = 80.0 + _game.font_bold.get_ascent(title_fs)
-	_game.draw_string(_game.font_bold, Vector2(0, title_y), tr("MENU_CONFIG"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, title_fs, Color(0.95, 0.19, 0.32))
+	# 大きな「CONFIG」ロゴ（左上、少し切れる位置、spacing net -5px）
+	if not _font_din_config_logo:
+		_font_din_config_logo = FontVariation.new()
+		_font_din_config_logo.base_font = _game.font_din
+		_font_din_config_logo.set_spacing(TextServer.SPACING_GLYPH, -10)
+	var big_fs: int = 400
+	var big_y: float = _font_din_config_logo.get_ascent(big_fs) - 170.0
+	_game.draw_string(_font_din_config_logo, Vector2(-20.0, big_y), "CONFIG", HORIZONTAL_ALIGNMENT_LEFT, -1, big_fs, Color(0.26, 0.21, 0.28, 0.2))
 
 	var text_c := Color(0.26, 0.21, 0.28)
 	var sel_c := Color(0.95, 0.19, 0.32)
@@ -1303,8 +1326,9 @@ func _draw_config(vp: Vector2) -> void:
 		var item_y: float = base_y + i * spacing
 		var is_sel: bool = (i == _game.config_index)
 		if i >= 5:
-			# 「練習」「戻る」— ボタン行
-			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.07 - 120.0)
+			# 「練習」「戻る」— ボタン行（タイトルに戻る＝i==6 は 30px 下）
+			var back_extra: float = 30.0 if i == 6 else 0.0
+			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.07 - 120.0 + back_extra)
 			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, 700.0)
 			continue
 		# 0〜3: 値行は同一レイアウト（◀ ボックス ▶）。選択行はタイトルメニューと同様のホバー拡大＋シャドウ。
@@ -1944,7 +1968,13 @@ func _draw_game(vp: Vector2) -> void:
 			color = Color(0.40, 0.33, 0.38, 0.5)
 			radius = r_guide
 		elif on_guide_outline:
-			_draw_guide_snapped_point_black_disc(pos)
+			if _snap_color_effects.has(i):
+				var snap_t: float = clampf(_snap_color_effects[i] / SNAP_COLOR_DUR, 0.0, 1.0)
+				var snap_col: Color = Color(0.95, 0.19, 0.32).lerp(Color.BLACK, snap_t)
+				var snap_r: float = StageRenderer.HUD_GUIDE_LINE_WIDTH_PX * 2.5
+				_game.draw_circle(pos, snap_r, snap_col)
+			else:
+				_draw_guide_snapped_point_black_disc(pos)
 			skip_fill_circle = true
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）

@@ -23,6 +23,7 @@ config/windows_native_icon="res://assets/icons/kataicon256.ico"
 BGMManager="*res://scripts/bgm/BGMManager.gd"
 SteamManager="*uid://di1gsd1cdiimu"
 StageSelectManager="*res://scripts/StageSelectManager.gd"
+TransitionManager="*res://scripts/TransitionManager.gd"
 
 [display]
 

@@ -99,6 +99,7 @@ var _esc_popup_no_hovered: bool = false
 
 var _font: Font
 var _font_din: Font = null
+var _font_din_logo: FontVariation = null  # STAGESELECTロゴ専用（spacing_glyph=-4、net -5px）
 var _stage_cfgs: Array = []
 var _dbg_preview: AudioStreamPlayer = null
 var _sfx_hover: AudioStreamPlayer = null
@@ -127,6 +128,9 @@ func _ready() -> void:
 	if din_res != null:
 		din_res.fallbacks = [_font]
 		din_res.set_extra_spacing(0, TextServer.SPACING_GLYPH, -1)
+		_font_din_logo = FontVariation.new()
+		_font_din_logo.base_font = din_res
+		_font_din_logo.set_spacing(TextServer.SPACING_GLYPH, -4)  # base(-1) + (-4) = net -5px
 	_font_din = din_res if din_res != null else _font
 	_stage_cfgs = StageData.get_stages()
 	_char_pos = get_viewport_rect().size * 0.5
@@ -211,7 +215,7 @@ func _input(event: InputEvent) -> void:
 			return
 		if _zou_stage_idx >= 0 and event.position.distance_to(_ZOU_DOT_POS) <= _ZOU_DOT_R:
 			StageSelectManager.pending_stage_id = _zou_stage_idx
-			get_tree().change_scene_to_file(_GAME_SCENE)
+			TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 			return
 
 	# タイトル戻り確認ポップアップ
@@ -291,6 +295,18 @@ func _draw() -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	draw_rect(Rect2(Vector2.ZERO, vp), _BG_COLOR)
 
+	# STAGE / SELECT ロゴ（背景直上レイヤー）
+	if _font_din_logo:
+		var logo_fs: int = 400
+		var logo_x: float = -20.0
+		var logo_asc: float = _font_din_logo.get_ascent(logo_fs)
+		var logo_dsc: float = _font_din_logo.get_descent(logo_fs)
+		var stage_y: float  = logo_asc - 170.0
+		var select_y: float = stage_y + logo_dsc + 10.0 + logo_asc - 300.0
+		var logo_col := Color(0.26, 0.21, 0.28, 0.2)
+		draw_string(_font_din_logo, Vector2(logo_x, stage_y),  "STAGE",  HORIZONTAL_ALIGNMENT_LEFT, -1, logo_fs, logo_col)
+		draw_string(_font_din_logo, Vector2(logo_x, select_y), "SELECT", HORIZONTAL_ALIGNMENT_LEFT, -1, logo_fs, logo_col)
+
 	# 接続ライン
 	for conn in StageSelectManager.get_connections():
 		var a: int = conn[0]
@@ -320,7 +336,6 @@ func _draw() -> void:
 		_draw_bubble(_nearest)
 
 	# ラベル
-	draw_string(_font, Vector2(40, 48), "STAGE SELECT", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(0.3, 0.1, 0.1))
 	draw_string(_font, Vector2(40, vp.y - 32), "ESC: タイトルへ戻る", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
 
 	# 確認ポップアップ
@@ -646,7 +661,7 @@ func _handle_popup_confirm(yes: bool) -> void:
 	_sfx_click.play()
 	if yes:
 		StageSelectManager.pending_stage_id = _popup_stage
-		get_tree().change_scene_to_file(_GAME_SCENE)
+		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 	else:
 		_popup_stage = -1
 		_nearest = _find_nearest_accessible()
@@ -723,7 +738,7 @@ func _handle_esc_popup_confirm(yes: bool) -> void:
 	_sfx_click.play()
 	if yes:
 		BGMManager.stop()
-		get_tree().change_scene_to_file(_GAME_SCENE)
+		TransitionManager.play_polygon(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 	else:
 		_esc_popup = false
 		queue_redraw()
