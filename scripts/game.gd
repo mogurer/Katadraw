@@ -520,6 +520,7 @@ var sfx_motion: AudioStreamPlayer
 var sfx_stagestart: AudioStreamPlayer
 var sfx_pin_on: AudioStreamPlayer
 var sfx_pin_off: AudioStreamPlayer
+var sfx_spot: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 var _sfx_ui_in: AudioStreamPlayer = null    # [DEBUG] 引力SE
 var _sfx_ui_out: AudioStreamPlayer = null   # [DEBUG] 斥力SE
@@ -919,6 +920,11 @@ func _setup_audio() -> void:
 	sfx_pin_off.volume_db = -14.5
 	add_child(sfx_pin_off)
 
+	sfx_spot = AudioStreamPlayer.new()
+	sfx_spot.stream = _load_audio("res://assets/sounds/se_spot.wav")
+	sfx_spot.volume_db = -14.5
+	add_child(sfx_spot)
+
 	sfx_click = AudioStreamPlayer.new()
 	sfx_click.stream = _load_audio("res://assets/sounds/se_click.wav")
 	sfx_click.volume_db = -14.5
@@ -991,6 +997,10 @@ func _start_sfx_move() -> void:
 		if not sfx_move.playing:
 			sfx_move.play()
 		_sfx_move_playing = true
+
+
+func play_sfx_spot() -> void:
+	_play_sfx(sfx_spot)
 
 
 func play_sfx_ui_in() -> void:
@@ -2235,6 +2245,7 @@ func _apply_se_volume() -> void:
 	sfx_point.volume_db = -14.5 + offset_db
 	sfx_motion.volume_db = -14.5 + offset_db
 	sfx_stagestart.volume_db = -14.5 + offset_db
+	sfx_spot.volume_db = -14.5 + offset_db
 
 
 func _volume_offset_db(level: int) -> float:

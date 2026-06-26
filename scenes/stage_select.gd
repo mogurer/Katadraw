@@ -57,7 +57,7 @@ const _BUBBLE_DARK     := Color(0.26, 0.21, 0.28)
 const _BUBBLE_RED      := Color(0.95, 0.19, 0.32)
 const _BUBBLE_VAL_BG   := Color(0.87, 0.85, 0.85)
 const _POPUP_W         := 700.0
-const _POPUP_H         := 280.0
+const _POPUP_H         := 250.0
 
 # --- 自キャラ ---
 const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
@@ -178,8 +178,8 @@ func _process(delta: float) -> void:
 			_char_moved_by_user = true
 		_char_pos = new_pos
 
-	# 最近傍ステージ更新（ユーザー操作で動いたときのみ）
-	if _char_moved_by_user and _popup_stage < 0:
+	# 最近傍ステージ更新（ユーザー操作で動いたとき・ポップアップ非表示時のみ）
+	if _char_moved_by_user and _popup_stage < 0 and not _esc_popup:
 		_char_moved_by_user = false
 		var prev_nearest: int = _nearest
 		_nearest = _find_nearest_accessible()
@@ -305,7 +305,7 @@ func _draw() -> void:
 	for i in range(StageSelectManager.STAGE_COUNT):
 		var state: int = StageSelectManager.get_state(i)
 		var pos: Vector2 = _dot_pos(i)
-		var is_near: bool = (i == _nearest and _popup_stage < 0)
+		var is_near: bool = (i == _nearest and _popup_stage < 0 and not _esc_popup)
 		match state:
 			StageSelectManager.StageState.LOCKED:
 				draw_circle(pos, _DOT_RADIUS, _LOCKED_COLOR)
@@ -316,7 +316,7 @@ func _draw() -> void:
 				draw_circle(pos, _DOT_RADIUS * 0.35, Color.WHITE)
 
 	# 吹き出し（最近傍ステージ・ポップアップ非表示時のみ）
-	if _nearest >= 0 and _popup_stage < 0:
+	if _nearest >= 0 and _popup_stage < 0 and not _esc_popup:
 		_draw_bubble(_nearest)
 
 	# ラベル
@@ -346,15 +346,24 @@ func _draw() -> void:
 
 # ---------- 吹き出し ----------
 
-func _draw_bubble(stage_id: int) -> void:
+func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -> void:
 	var dot: Vector2 = _dot_pos(stage_id)
 	var bw: float = _BUBBLE_W
 	var bh: float = _BUBBLE_H
 	var vp: Vector2 = get_viewport_rect().size
-	var bx: float = dot.x + _DOT_RADIUS + 12.0
-	var by: float = dot.y - bh - _DOT_RADIUS
-	bx = clampf(bx, 6.0, vp.x - bw - 6.0)
-	by = clampf(by, 6.0, vp.y - bh - 6.0)
+	var bx: float
+	var by: float
+	var draw_tail: bool
+	if is_nan(fixed_bx):
+		bx = dot.x + _DOT_RADIUS + 12.0
+		by = dot.y - bh - _DOT_RADIUS
+		bx = clampf(bx, 6.0, vp.x - bw - 6.0)
+		by = clampf(by, 6.0, vp.y - bh - 6.0)
+		draw_tail = true
+	else:
+		bx = fixed_bx
+		by = fixed_by
+		draw_tail = false
 
 	var bd: float    = 4.5
 	var str_w: float = _BUBBLE_STRIPE_W   # 縦ストライプ幅 = 15px
@@ -398,22 +407,35 @@ func _draw_bubble(stage_id: int) -> void:
 			Vector2(ix + str_w, py + para_h),
 		]), _BUBBLE_RED)
 
+	# ─── プレイ済み（クリア済み）判定 ───
+	var has_rec: bool = StageSelectManager.get_best_time(stage_id) >= 0.0
+
 	# ─── ヘッダ: #N ───
 	var num_fs: int = 39
 	draw_string(_font_din, Vector2(cx + 7.5, iy - 6.0 + _font_din.get_ascent(num_fs)),
 		"#%d" % (stage_id + 1), HORIZONTAL_ALIGNMENT_LEFT, cw - 12.0, num_fs, _BUBBLE_DARK)
 
-	# ─── ヘッダ: ステージ名 ───
-	var name_str: String = StageSelectManager.get_stage_name(stage_id)
+	# ─── ヘッダ: ステージ名（未プレイは ???） ───
+	var name_str: String = StageSelectManager.get_stage_name(stage_id) if has_rec else "???"
 	if not name_str.is_empty():
 		var name_fs: int = 20
 		draw_string(_font, Vector2(cx + 7.5, iy + 47.5 + _font.get_ascent(name_fs)),
 			name_str, HORIZONTAL_ALIGNMENT_LEFT, cw - 12.0, name_fs, _BUBBLE_DARK)
 
-	# ─── 図形エリア ───
+	# ─── 図形エリア（未プレイは大きな ? をグレーで表示） ───
 	var hdr_fig_h: float = _BUBBLE_HDR_H + _BUBBLE_FIG_H
-	var shape_r: float = 52.5 if stage_id >= 4 else 42.0   # STAGE5以降は125%
-	_draw_mini_shape(stage_id, Vector2(cx + cw * 0.5, iy + _BUBBLE_HDR_H + _BUBBLE_FIG_H * 0.5), shape_r)
+	var fig_cx: float = cx + cw * 0.5
+	var fig_cy: float = iy + _BUBBLE_HDR_H + _BUBBLE_FIG_H * 0.5
+	if has_rec:
+		var shape_r: float = 52.5 if stage_id >= 4 else 42.0
+		_draw_mini_shape(stage_id, Vector2(fig_cx, fig_cy), shape_r)
+	else:
+		var q_fs: int = 66
+		var q_c: Color = Color(0.72, 0.68, 0.66)
+		var q_asc: float = _font_din.get_ascent(q_fs)
+		var q_dsc: float = _font_din.get_descent(q_fs)
+		draw_string(_font_din, Vector2(cx, fig_cy + (q_asc - q_dsc) * 0.5), "?",
+			HORIZONTAL_ALIGNMENT_CENTER, cw, q_fs, q_c)
 
 	# ─── BEST 枠 2 本 ───
 	var box_pad: float  = 7.5
@@ -421,25 +443,25 @@ func _draw_bubble(stage_id: int) -> void:
 	var rows_top: float = iy + hdr_fig_h
 	var rows_bot: float = iy + ih - box_pad
 	var row_h: float    = (rows_bot - rows_top - box_gap) * 0.5
-	var box_x: float    = ix + box_pad + 20.0       # +20px 右シフト (15 + 5)
-	var box_w: float    = iw - box_pad * 2.0 - 20.0 # 右端位置を維持
+	var box_x: float    = ix + box_pad + 20.0
+	var box_w: float    = iw - box_pad * 2.0 - 20.0
 	var label_w: float  = _BUBBLE_LABEL_W   # 67.5px
 
-	var has_rec: bool  = StageSelectManager.get_best_time(stage_id) >= 0.0
-	var bt_str: String = "%.2f" % StageSelectManager.get_best_time(stage_id) if has_rec else "/"
-	var bm_str: String = "%d"   % StageSelectManager.get_best_move_count(stage_id) if has_rec else "/"
+	var bt_str: String = "%.2f" % StageSelectManager.get_best_time(stage_id) if has_rec else "---"
+	var bm_str: String = "%d"   % StageSelectManager.get_best_move_count(stage_id) if has_rec else "---"
 
 	_draw_bubble_best_row(box_x, rows_top,                   box_w, row_h, label_w, "BEST", "CLEAR", "TIME",  bt_str)
 	_draw_bubble_best_row(box_x, rows_top + row_h + box_gap, box_w, row_h, label_w, "BEST", "TRY",   "COUNT", bm_str)
 
 	# ─── しっぽ ───
-	var tail_tip: Vector2 = dot + Vector2(-_DOT_RADIUS * 0.5, -_DOT_RADIUS * 0.5)
-	var tail_base_x: float = clampf(tail_tip.x, bx + 12.0, bx + bw - 12.0)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(tail_base_x - 9.0, by + bh),
-		Vector2(tail_base_x + 9.0, by + bh),
-		tail_tip,
-	]), _BUBBLE_DARK)
+	if draw_tail:
+		var tail_tip: Vector2 = dot + Vector2(-_DOT_RADIUS * 0.5, -_DOT_RADIUS * 0.5)
+		var tail_base_x: float = clampf(tail_tip.x, bx + 12.0, bx + bw - 12.0)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(tail_base_x - 9.0, by + bh),
+			Vector2(tail_base_x + 9.0, by + bh),
+			tail_tip,
+		]), _BUBBLE_DARK)
 
 	# ─── 四隅サークル（ボタン・リザルトと同じデザイン言語） ───
 	var corner_r: float = bd * 1.25   # ≈ 5.6px
@@ -545,7 +567,25 @@ func _popup_rects(vp: Vector2) -> Dictionary:
 	var btn_w: float  = 220.0
 	var btn_h: float  = 64.0
 	var cbtn_gap: float = btn_w * 0.5 + 30.0   # = 140
-	var btn_cy: float = cy + 70.0
+	var btn_cy: float = cy + 40.0
+	var yes_rect := Rect2(cx - cbtn_gap - btn_w * 0.5, btn_cy - btn_h * 0.5, btn_w, btn_h)
+	var no_rect  := Rect2(cx + cbtn_gap - btn_w * 0.5, btn_cy - btn_h * 0.5, btn_w, btn_h)
+	return { "popup": popup_rect, "yes": yes_rect, "no": no_rect }
+
+
+func _stage_popup_rects(vp: Vector2) -> Dictionary:
+	var cx: float = vp.x * 0.5
+	var cy: float = vp.y * 0.5
+	var pw: float = _POPUP_W
+	var ph: float = _POPUP_H
+	# バブル(300) + ギャップ(20) + ダイアログ(280) = 600px を縦中央配置
+	var bubble_gap: float = 20.0
+	var popup_top: float = cy + (_BUBBLE_H + bubble_gap - ph) * 0.5
+	var popup_rect := Rect2(cx - pw * 0.5, popup_top, pw, ph)
+	var btn_w: float  = 220.0
+	var btn_h: float  = 64.0
+	var cbtn_gap: float = btn_w * 0.5 + 30.0
+	var btn_cy: float = popup_top + ph * 0.5 + 40.0
 	var yes_rect := Rect2(cx - cbtn_gap - btn_w * 0.5, btn_cy - btn_h * 0.5, btn_w, btn_h)
 	var no_rect  := Rect2(cx + cbtn_gap - btn_w * 0.5, btn_cy - btn_h * 0.5, btn_w, btn_h)
 	return { "popup": popup_rect, "yes": yes_rect, "no": no_rect }
@@ -553,25 +593,25 @@ func _popup_rects(vp: Vector2) -> Dictionary:
 
 func _draw_popup(vp: Vector2) -> void:
 	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
-	var r: Dictionary = _popup_rects(vp)
+	var r: Dictionary = _stage_popup_rects(vp)
 	var pr: Rect2 = r["popup"]
 	var yr: Rect2 = r["yes"]
 	var nr: Rect2 = r["no"]
-	var cy: float  = pr.position.y + pr.size.y * 0.5
+
+	# バブルをダイアログ上辺から20px上に離して水平中央配置（ダイアログより先に描画）
+	var bubble_bx: float = pr.position.x + (pr.size.x - _BUBBLE_W) * 0.5
+	var bubble_by: float = pr.position.y - _BUBBLE_H - 20.0
+	_draw_bubble(_popup_stage, bubble_bx, bubble_by)
 
 	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(0.26, 0.21, 0.28, 0.25))
 	draw_rect(pr, Color(1.0, 1.0, 1.0))
 	_draw_rect_border_with_corners_local(pr, Color(0.26, 0.21, 0.28), 5.75)
 
-	draw_string(_font_din, Vector2(pr.position.x, cy - 45.0), "このステージをプレイしますか？",
-		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 42, Color(0.95, 0.19, 0.32))
-	var stage_label: String = "ステージ %d" % (_popup_stage + 1)
-	var stage_name: String = StageSelectManager.get_stage_name(_popup_stage)
-	if not stage_name.is_empty():
-		stage_label += "　" + stage_name
-	var sub_fs: int = 22
-	draw_string(_font, Vector2(pr.position.x, cy + _font.get_ascent(sub_fs) - 30.0),
-		stage_label, HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, sub_fs, Color(0.50, 0.30, 0.30))
+	# 問いかけ文（ESCダイアログと同一レイアウト）
+	var q_fs: int = 42
+	var dialog_cy: float = pr.position.y + pr.size.y * 0.5
+	draw_string(_font_din, Vector2(pr.position.x, dialog_cy - 45.0), "このステージをプレイしますか？",
+		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, q_fs, Color(0.95, 0.19, 0.32))
 
 	_draw_popup_btn(yr, "はい",   _popup_yes_hovered)
 	_draw_popup_btn(nr, "いいえ", _popup_no_hovered)
@@ -579,7 +619,7 @@ func _draw_popup(vp: Vector2) -> void:
 
 func _update_popup_hover(pos: Vector2) -> void:
 	var vp: Vector2 = get_viewport_rect().size
-	var r: Dictionary = _popup_rects(vp)
+	var r: Dictionary = _stage_popup_rects(vp)
 	var new_yes: bool = (r["yes"] as Rect2).has_point(pos)
 	var new_no: bool  = (r["no"]  as Rect2).has_point(pos)
 	if (new_yes and not _popup_yes_hovered) or (new_no and not _popup_no_hovered):
@@ -590,7 +630,7 @@ func _update_popup_hover(pos: Vector2) -> void:
 
 func _handle_popup_click(pos: Vector2) -> void:
 	var vp: Vector2 = get_viewport_rect().size
-	var r: Dictionary = _popup_rects(vp)
+	var r: Dictionary = _stage_popup_rects(vp)
 	if (r["yes"] as Rect2).has_point(pos):
 		_handle_popup_confirm(true)
 	elif (r["no"] as Rect2).has_point(pos):

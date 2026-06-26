@@ -2966,6 +2966,7 @@ func _presnap_at_corners() -> void:
 				_snap_point_target[i] = corners[ci]
 				_snap_point_corner_idx[i] = ci
 				_snap_corner_occupant[ci] = i
+				_game.play_sfx_spot()
 				break
 
 
@@ -3101,6 +3102,7 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 				_snap_point_corner_idx[i] = best_ci
 				_game.point_positions[i] = target
 				point_velocities[i] = Vector2.ZERO
+				_game.play_sfx_spot()
 			else:
 				# 常時アプローチバネ力（スムーズ移動）
 				forces[i] += (target - pos) * eff_approach_spring
@@ -3310,6 +3312,7 @@ func _apply_snap_vertex_forces(forces: Array[Vector2]) -> void:
 				_snap_point_corner_idx[i] = best_ci
 				_game.point_positions[i] = target
 				point_velocities[i] = Vector2.ZERO
+				_game.play_sfx_spot()
 			else:
 				# 近接バネ力
 				forces[i] += (target - pos) * SNAP_VERTEX_APPROACH_SPRING

@@ -285,7 +285,7 @@ func _apply_hud_correspondence_scale() -> void:
 	if ideal_outline_points.is_empty():
 		return
 	correspondence_scale = hud_guide_scale
-	if stage_type == "triangle":
+	if stage_type == "triangle" or stage_type == "circle":
 		ideal_display_radius = hud_guide_scale
 
 
