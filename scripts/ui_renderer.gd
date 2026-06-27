@@ -485,8 +485,8 @@ func draw(state: String, vp: Vector2) -> void:
 		var fade_a: float = 1.0 - _transition_alpha
 		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(_game.BG_COLOR.r, _game.BG_COLOR.g, _game.BG_COLOR.b, fade_a))
 
-	if _game.stage_session.debug_test_mode and state == "playing":
-		_draw_debug_log_button(vp)
+	#if _game.stage_session.debug_test_mode and state == "playing":
+		#_draw_debug_log_button(vp)
 
 	if not _game.pause_active and state != "logo" and state != "title_intro":
 		var _show_avatar: bool = true
@@ -496,8 +496,8 @@ func draw(state: String, vp: Vector2) -> void:
 		if _show_avatar:
 			_draw_player_avatar()
 
-	# デバッグ起動時: バージョン番号を全画面で常時表示
-	if _game._debug_tools_enabled():
+	# デバッグ起動時: バージョン番号をプレイ中以外で表示
+	if _game._debug_tools_enabled() and state != "playing":
 		_game.draw_string(_game.font, Vector2(16, vp.y - 14), APP_VERSION, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.45, 0.38, 0.45, 0.8))
 
 
@@ -1993,7 +1993,7 @@ func _draw_game(vp: Vector2) -> void:
 		if _game._is_locked(i):
 			color = Color(0.40, 0.33, 0.38, 0.5)
 			radius = r_guide
-		elif on_guide_outline:
+		elif on_guide_outline and not (_cat_phase != 0 and _game.input_handler.is_point_free(i)):
 			if _snap_color_effects.has(i):
 				var snap_t: float = clampf(_snap_color_effects[i] / SNAP_COLOR_DUR, 0.0, 1.0)
 				var snap_col: Color = Color(0.95, 0.19, 0.32).lerp(Color.BLACK, snap_t)
