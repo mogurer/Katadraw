@@ -1505,6 +1505,7 @@ func _draw_credit(vp: Vector2) -> void:
 		"Planner : Hirame Kumokura",
 		"Stage Editing / Web Design : Irori Hibachi",
 		"Title Music Composition / Sound Effect Design : tigerlily",
+		"Cat : Ohagi",
 		"",
 		"Music Support : Diverse System",
 		"  Clockwork Prophet / Solvrae",
