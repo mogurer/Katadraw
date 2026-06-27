@@ -124,15 +124,30 @@
 
 ### 2.7 TransitionManager（`scripts/TransitionManager.gd`）
 
-シーン切り替え時に使うワイプアニメーション AutoLoad。
+シーン切り替え・ゲームステート変更時に使うワイプアニメーション AutoLoad（CanvasLayer layer=100）。
+パターン別トリガー対応表・その他演出の詳細は `Docs/画面遷移.md` セクション 6 を参照。
 
-| メソッド | SE | 用途 |
-|----------|----|------|
-| `play_triangle(on_mid, use_se)` | `ts02.wav` | ステージセレクト → ゲーム |
-| `play_polygon(on_mid, use_se)` | `ts03.wav` | ゲーム → ステージセレクト |
+#### タイミング（全パターン共通）
 
-- `on_mid`: ワイプ中間で呼ばれる `Callable`（ここでシーン遷移を実行）
-- `_sfx_diagonal` として `ts01.wav` も保持（`play_diagonal` 等で使用予定）
+| フェーズ | 定数 | 時間 |
+|---------|------|------|
+| COVER（画面を覆う） | `COVER_DUR` | 0.32 秒 |
+| HOLD（中間保持） | `HOLD_DUR` | 0.05 秒 |
+| REVEAL（画面を開く） | `REVEAL_DUR` | 0.32 秒 |
+| 合計 | — | **0.69 秒** |
+
+イージング: smoothstep（x² × (3 − 2x)）。  
+`on_mid` コールバックは COVER 完了の瞬間に呼ばれ、シーン遷移または game_state 変更をここで実行。
+
+#### ワイプパターン
+
+| メソッド | 視覚形状 | 色 | SE | 主な用途 |
+|----------|---------|----|----|---------|
+| `play_triangle(on_mid, use_se)` | 中心から拡大する三角形 | 暗紫 | `ts02.wav` | ステージセレクト ↔ ゲーム間のシーン遷移 |
+| `play_polygon(on_mid, use_se)` | 中心から拡大する六角形 | ピンク | `ts03.wav` | ステージセレクト → タイトル（全再起動） |
+| `play_diagonal(on_mid, use_se)` | 左下→右上の斜め矩形 | 暗紫 | `ts01.wav` | ゲーム内ステート横断（メニュー・設定・クレジット） |
+
+- `use_se=false` で SE を省略（クリア後の自動進行等）
 
 ---
 
@@ -492,7 +507,7 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 | `se_spot02.wav` | 頂点がガイドに吸着（スナップ）したとき |
 | `pinon.wav` | ピン止め ON |
 | `pinoff.wav` | ピン止め OFF |
-| `ts01.wav` | TransitionManager 対角ワイプ SE（予備） |
+| `ts01.wav` | TransitionManager 対角ワイプ SE（`play_diagonal`） |
 | `ts02.wav` | TransitionManager 三角ワイプ SE（`play_triangle`） |
 | `ts03.wav` | TransitionManager 多角ワイプ SE（`play_polygon`） |
 | `ui_in_01〜03.wav` | [DEBUG] 引力 SE 候補（SE 選択パネルで試聴） |

@@ -738,7 +738,7 @@ func _handle_esc_popup_confirm(yes: bool) -> void:
 	_sfx_click.play()
 	if yes:
 		BGMManager.stop()
-		TransitionManager.play_polygon(func(): get_tree().change_scene_to_file(_GAME_SCENE))
+		TransitionManager.play_diagonal(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 	else:
 		_esc_popup = false
 		queue_redraw()

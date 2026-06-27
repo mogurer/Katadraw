@@ -17,7 +17,8 @@
       "Bash(python -c ' *)",
       "Bash(node -e ' *)",
       "Bash(grep -v \"//\\\\|#.*not\")",
-      "Bash(grep -v \"#.*config\\\\|//\\\\|#.*not\")"
+      "Bash(grep -v \"#.*config\\\\|//\\\\|#.*not\")",
+      "Bash(xargs grep -l \"BGMManager\\\\|TransitionManager\")"
     ]
   }
 }

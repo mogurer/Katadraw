@@ -159,17 +159,19 @@ class _DrawNode extends Node2D:
 				_draw_diagonal(vp, t)
 
 	# 三角形マスクワイプ（汎用）— STAGE1三角形モチーフ・白の線と点
+	# COVER: 中心から拡大しながら時計回り360°回転。REVEAL: 逆順（縮小しながら同方向回転）。
 	func _draw_triangle(vp: Vector2, t: float) -> void:
 		var cx: float = vp.x * 0.5
 		var cy: float = vp.y * 0.5
-		var max_r: float = maxf(vp.x / sqrt(3.0), vp.y) + 100.0
+		var max_r: float = vp.length()
 		var r: float = t * max_r
+		var base_angle: float = -PI * 0.5
+		var rotation_offset: float = t * TAU
 		var pts := PackedVector2Array()
 		for k in range(3):
-			var a: float = -PI * 0.5 + TAU * float(k) / 3.0
+			var a: float = base_angle + rotation_offset + TAU * float(k) / 3.0
 			pts.append(Vector2(cx + cos(a) * r, cy + sin(a) * r))
 		draw_colored_polygon(pts, Color(0.26, 0.21, 0.28))
-		# KATAスタイル：白い線と点
 		for k in range(3):
 			draw_line(pts[k], pts[(k + 1) % 3], Color.WHITE, LINE_W, true)
 		for k in range(3):
