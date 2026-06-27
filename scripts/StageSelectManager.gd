@@ -1,59 +1,73 @@
 # StageSelectManager — AutoLoad singleton for stage select state.
 # Tracks LOCKED / UNLOCKED / CLEARED per stage, persists to user://stage_select_state.json.
-# Provides grid positions (placeholder 10×5) for the stage select screen.
+# Node positions are defined in res://data/manifest.json (honeycomb grid).
 
 extends Node
 
 enum StageState { LOCKED, UNLOCKED, CLEARED }
 
 const STAGE_COUNT := 50
-const COLS := 10
-const ROWS := 5
+const _SAVE_PATH    := "user://stage_select_state.json"
+const _MANIFEST_PATH := "res://data/stage_select_manifest.json"
 
-const _SAVE_PATH := "user://stage_select_state.json"
+const X_PITCH: float = 200.0  # ワールド座標のグリッドピッチ（調整可能）
+const SQRT3: float = 1.7320508
 
-# Placeholder grid positions: 10 columns × 5 rows across 1920×1080.
-# X: 200–1720 (step ≈169), Y: 250–830 (step = 145).
-# Replace with exact coordinates once the layout is decided.
-const STAGE_POSITIONS: Array[Vector2] = [
-	# Row 0
-	Vector2(200, 250), Vector2(369, 250), Vector2(538, 250), Vector2(707, 250), Vector2(876, 250),
-	Vector2(1045, 250), Vector2(1214, 250), Vector2(1383, 250), Vector2(1552, 250), Vector2(1720, 250),
-	# Row 1
-	Vector2(200, 395), Vector2(369, 395), Vector2(538, 395), Vector2(707, 395), Vector2(876, 395),
-	Vector2(1045, 395), Vector2(1214, 395), Vector2(1383, 395), Vector2(1552, 395), Vector2(1720, 395),
-	# Row 2
-	Vector2(200, 540), Vector2(369, 540), Vector2(538, 540), Vector2(707, 540), Vector2(876, 540),
-	Vector2(1045, 540), Vector2(1214, 540), Vector2(1383, 540), Vector2(1552, 540), Vector2(1720, 540),
-	# Row 3
-	Vector2(200, 685), Vector2(369, 685), Vector2(538, 685), Vector2(707, 685), Vector2(876, 685),
-	Vector2(1045, 685), Vector2(1214, 685), Vector2(1383, 685), Vector2(1552, 685), Vector2(1720, 685),
-	# Row 4
-	Vector2(200, 830), Vector2(369, 830), Vector2(538, 830), Vector2(707, 830), Vector2(876, 830),
-	Vector2(1045, 830), Vector2(1214, 830), Vector2(1383, 830), Vector2(1552, 830), Vector2(1720, 830),
-]
+# 一本道ゾーン: このIDをクリアしたとき、接続リストではなくここで定義した相手のみを解放する
+const _LINEAR_ZONE: Dictionary = { 0: [1], 1: [2], 2: [3] }
 
 # Which stage_id to start when transitioning to game.tscn. -1 = not set.
 var pending_stage_id: int = -1
+# ステージセレクトに戻ったときのフォーカス位置（最後にプレイしたステージID）
+var last_played_stage_id: int = -1
 
-# チュートリアル済みフラグ（保存あり）。
+# チュートリアル済みフラグ（保存あり）
 var tutorial_shown: bool = false
 
-# チュートリアルの戻り先。"stage1"=ゲーム開始、"config"=コンフィグへ戻る。（保存なし・セッションのみ）
+# チュートリアルの戻り先（保存なし・セッションのみ）
 var tutorial_return_to: String = ""
 
+# manifest から読み込むデータ
+var _connections: Dictionary = {}   # { id: [隣接id, ...] }
+var _grid_pos: Dictionary = {}      # { id: Vector2i(col, row) }
+var _y_offset: Dictionary = {}      # { id: float }
+var _bgm_zones: Array = []          # BGM解禁ゾーン定義
+
+# 進行状態
 var _states: Array[int] = []
 var _stage_names: Array[String] = []
-var _best_times: Dictionary = {}       # stage_id(int) → float
-var _best_move_counts: Dictionary = {} # stage_id(int) → int
+var _best_times: Dictionary = {}
+var _best_move_counts: Dictionary = {}
+var _unlocked_bgms: Array[String] = []
 
 
 func _ready() -> void:
 	_states.resize(STAGE_COUNT)
 	_states.fill(StageState.LOCKED)
 	_states[0] = StageState.UNLOCKED
+	_load_manifest()
 	_load_states()
 	_load_stage_names()
+
+
+func _load_manifest() -> void:
+	var f: FileAccess = FileAccess.open(_MANIFEST_PATH, FileAccess.READ)
+	if f == null:
+		push_error("StageSelectManager: manifest.json not found at " + _MANIFEST_PATH)
+		return
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		push_error("StageSelectManager: manifest.json parse error")
+		return
+	var d: Dictionary = parsed as Dictionary
+	for entry in d.get("stages", []):
+		var id: int = int(entry["id"])
+		var conns: Array = entry.get("connections", [])
+		_connections[id] = conns
+		var gp: Array = entry.get("grid_pos", [0, 0])
+		_grid_pos[id] = Vector2i(int(gp[0]), int(gp[1]))
+		_y_offset[id] = float(entry.get("y_offset", 0))
+	_bgm_zones = d.get("bgm_unlock_zones", [])
 
 
 func _load_stage_names() -> void:
@@ -62,6 +76,17 @@ func _load_stage_names() -> void:
 	var stages: Array = StageData.get_stages()
 	for i in range(mini(stages.size(), STAGE_COUNT)):
 		_stage_names[i] = str(stages[i].get("guide_type_label", ""))
+
+
+## ステージのワールド座標を返す（ぷるぷるアニメーション適用前の基準座標）
+func get_world_pos(stage_id: int) -> Vector2:
+	if not _grid_pos.has(stage_id):
+		return Vector2.ZERO
+	var gp: Vector2i = _grid_pos[stage_id]
+	var x: float = gp.x * X_PITCH * SQRT3
+	var y: float = gp.y * X_PITCH
+	y += _y_offset.get(stage_id, 0.0)
+	return Vector2(x, y)
 
 
 func get_stage_name(stage_id: int) -> String:
@@ -80,38 +105,46 @@ func mark_cleared(stage_id: int) -> void:
 	if stage_id < 0 or stage_id >= STAGE_COUNT:
 		return
 	_states[stage_id] = StageState.CLEARED
-	for adj in _get_adjacent(stage_id):
-		if _states[adj] == StageState.LOCKED:
-			_states[adj] = StageState.UNLOCKED
+	# 一本道ゾーンは専用リスト、それ以外は接続リストを使う
+	var unlock_targets: Array = _LINEAR_ZONE.get(stage_id, _connections.get(stage_id, []))
+	for nb_id in unlock_targets:
+		if nb_id >= 0 and nb_id < _states.size() and _states[nb_id] == StageState.LOCKED:
+			_states[nb_id] = StageState.UNLOCKED
 	_save_states()
 
 
-## Returns [[a, b], ...] index pairs for all grid edges.
+## [[a, b], ...] 形式の隣接ペア一覧を返す（重複なし）
 func get_connections() -> Array:
-	var conns: Array = []
-	for row in range(ROWS):
-		for col in range(COLS):
-			var idx: int = row * COLS + col
-			if col < COLS - 1:
-				conns.append([idx, idx + 1])
-			if row < ROWS - 1:
-				conns.append([idx, idx + COLS])
-	return conns
+	var result: Array = []
+	var seen: Dictionary = {}
+	for id in _connections:
+		for nb in _connections[id]:
+			var key_str: String = "%d_%d" % [mini(id, nb), maxi(id, nb)]
+			if not seen.has(key_str):
+				seen[key_str] = true
+				result.append([mini(id, nb), maxi(id, nb)])
+	return result
 
 
-func _get_adjacent(stage_id: int) -> Array[int]:
-	var col: int = stage_id % COLS
-	var row: int = stage_id / COLS
-	var adj: Array[int] = []
-	if col > 0:
-		adj.append(row * COLS + col - 1)
-	if col < COLS - 1:
-		adj.append(row * COLS + col + 1)
-	if row > 0:
-		adj.append((row - 1) * COLS + col)
-	if row < ROWS - 1:
-		adj.append((row + 1) * COLS + col)
-	return adj
+## 新たに解禁されたBGM名の配列を返す。解禁があれば保存も行う。
+func check_bgm_unlocks() -> Array[String]:
+	var newly_unlocked: Array[String] = []
+	for zone in _bgm_zones:
+		var bgm_name: String = str(zone.get("unlocks_bgm", ""))
+		if bgm_name.is_empty() or _unlocked_bgms.has(bgm_name):
+			continue
+		var all_cleared: bool = true
+		for sid in zone.get("required_stages", []):
+			var sid_int: int = int(sid)
+			if sid_int < 0 or sid_int >= _states.size() or _states[sid_int] != StageState.CLEARED:
+				all_cleared = false
+				break
+		if all_cleared:
+			_unlocked_bgms.append(bgm_name)
+			newly_unlocked.append(bgm_name)
+	if newly_unlocked.size() > 0:
+		_save_states()
+	return newly_unlocked
 
 
 func update_best(stage_id: int, time: float, moves: int) -> Dictionary:
@@ -136,6 +169,18 @@ func get_best_move_count(stage_id: int) -> int:
 	return int(_best_move_counts[stage_id]) if _best_move_counts.has(stage_id) else -1
 
 
+## プレイ履歴を全て初期化する。ステージ0のみ UNLOCKED、tutorial_shown=false。
+func reset_all() -> void:
+	_states.fill(StageState.LOCKED)
+	_states[0] = StageState.UNLOCKED
+	tutorial_shown = false
+	pending_stage_id = -1
+	_best_times.clear()
+	_best_move_counts.clear()
+	_unlocked_bgms.clear()
+	_save_states()
+
+
 func _save_states() -> void:
 	var data: Dictionary = {}
 	for i in range(STAGE_COUNT):
@@ -149,20 +194,10 @@ func _save_states() -> void:
 	for k in _best_move_counts:
 		best_m[str(k)] = _best_move_counts[k]
 	data["best_moves"] = best_m
+	data["unlocked_bgms"] = _unlocked_bgms
 	var f: FileAccess = FileAccess.open(_SAVE_PATH, FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
-
-
-## プレイ履歴を全て初期化する。ステージ0のみ UNLOCKED、tutorial_shown=false。
-func reset_all() -> void:
-	_states.fill(StageState.LOCKED)
-	_states[0] = StageState.UNLOCKED
-	tutorial_shown = false
-	pending_stage_id = -1
-	_best_times.clear()
-	_best_move_counts.clear()
-	_save_states()
 
 
 func _load_states() -> void:
@@ -189,3 +224,6 @@ func _load_states() -> void:
 		var bm: Dictionary = d["best_moves"] as Dictionary
 		for k in bm:
 			_best_move_counts[int(k)] = int(bm[k])
+	if d.has("unlocked_bgms"):
+		for bgm in d["unlocked_bgms"]:
+			_unlocked_bgms.append(str(bgm))

@@ -2781,6 +2781,7 @@ func _start_game() -> void:
 
 func _start_game_from_stage_select() -> void:
 	var sid: int = StageSelectManager.pending_stage_id
+	StageSelectManager.last_played_stage_id = sid
 	StageSelectManager.pending_stage_id = -1
 	stage_session.clear_debug_test()
 	input_recorder = null

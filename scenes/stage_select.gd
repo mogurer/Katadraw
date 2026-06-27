@@ -63,6 +63,14 @@ const _POPUP_H         := 250.0
 const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
 const _PAD_SPEED       := 600.0   # ゲームパッド移動速度（px/sec）
 
+# --- Camera2D スクロール ---
+const SCROLL_MARGIN: float = 0.20  # ビューポート端からスクロール開始する割合
+const SCROLL_SPEED: float  = 800.0 # スクロール速度（px/sec）
+
+# --- ステージ解放フォーカス演出 ---
+const FOCUS_DURATION: float = 0.8  # 1ステージあたりのフォーカス時間（秒）
+const FOCUS_LERP: float     = 5.0  # カメラ追従の線形補間係数
+
 # --- BGM 曲名表示 ---
 const _BGM_TRACK_KEYS: Array[String] = [
 	"BGM_01-05",
@@ -77,9 +85,17 @@ const _BGM_TYPEWRITER_SEC  := 1.0
 const _BGM_HOLD_SEC        := 5.0
 const _BGM_DISMISS_SEC     := 2.0
 
+var _camera: Camera2D = null  # コードで生成する Camera2D
+
 var _char_pos: Vector2 = Vector2(960, 540)
 var _char_target: Vector2 = Vector2(960, 540)
 var _char_moved_by_user: bool = false
+
+# --- ステージ解放フォーカス演出 ---
+var _focus_queue: Array = []      # フォーカス対象ステージID配列
+var _is_focusing: bool = false    # フォーカス演出中フラグ
+var _focus_elapsed: float = 0.0   # 現在フォーカス経過時間
+var _focus_return_id: int = -1    # フォーカス演出終了後に戻るステージID
 
 # --- アニメーション ---
 var _elapsed: float = 0.0
@@ -133,8 +149,23 @@ func _ready() -> void:
 		_font_din_logo.set_spacing(TextServer.SPACING_GLYPH, -4)  # base(-1) + (-4) = net -5px
 	_font_din = din_res if din_res != null else _font
 	_stage_cfgs = StageData.get_stages()
-	_char_pos = get_viewport_rect().size * 0.5
-	_char_target = _char_pos
+
+	# Camera2D をコードで生成してワールド座標追従を有効化
+	_camera = Camera2D.new()
+	_camera.zoom = Vector2(1.0, 1.0)
+	_camera.position_smoothing_enabled = false
+	add_child(_camera)
+	_camera.make_current()
+
+	# アバター初期位置: 最後にプレイしたステージがあればそこへ、なければステージ0
+	var _focus_id: int = StageSelectManager.last_played_stage_id
+	if _focus_id < 0 or _focus_id >= StageSelectManager.STAGE_COUNT:
+		_focus_id = 0
+	var _start: Vector2 = StageSelectManager.get_world_pos(_focus_id)
+	_char_pos = _start
+	_char_target = _start
+	_camera.position = _start
+
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
 	for i in range(StageSelectManager.STAGE_COUNT):
@@ -166,13 +197,21 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_elapsed += delta
 
+	# フォーカス演出中は通常の入力・描画更新をスキップ
+	if _is_focusing:
+		_process_focus(delta)
+		queue_redraw()
+		return
+
 	# ゲームパッドスティック
 	var sx: float = Input.get_axis("ui_left", "ui_right")
 	var sy: float = Input.get_axis("ui_up", "ui_down")
 	var pad_active: bool = absf(sx) > 0.1 or absf(sy) > 0.1
 	if pad_active:
 		_char_pos += Vector2(sx, sy).normalized() * _PAD_SPEED * delta
-		_char_pos = _char_pos.clamp(Vector2.ZERO, get_viewport_rect().size)
+		# クランプをワールド座標範囲に変更
+		var bounds: Rect2 = _calc_world_bounds()
+		_char_pos = _char_pos.clamp(bounds.position, bounds.position + bounds.size)
 		_char_target = _char_pos
 		_char_moved_by_user = true
 	else:
@@ -196,13 +235,14 @@ func _process(delta: float) -> void:
 		_btn_prev.disabled = popup_open
 		_btn_next.disabled = popup_open
 
+	_update_camera(delta)
 	queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
 	# マウス位置 → 自キャラターゲット更新
 	if event is InputEventMouseMotion:
-		_char_target = event.position
+		_char_target = get_canvas_transform().affine_inverse() * event.position
 		_char_moved_by_user = true
 		if _esc_popup:
 			_update_esc_popup_hover(event.position)
@@ -293,9 +333,16 @@ func _input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var vp: Vector2 = get_viewport_rect().size
+
+	# ─── 画面固定レイヤー ───
+	# get_canvas_transform() は world→screen。逆変換を draw_set_transform_matrix に
+	# 与えることで「draw座標 = screen座標」になる。
+	var screen_xform := get_canvas_transform().affine_inverse()
+	draw_set_transform_matrix(screen_xform)
+
 	draw_rect(Rect2(Vector2.ZERO, vp), _BG_COLOR)
 
-	# STAGE / SELECT ロゴ（背景直上レイヤー）
+	# STAGE / SELECT ロゴ（画面固定）
 	if _font_din_logo:
 		var logo_fs: int = 400
 		var logo_x: float = -20.0
@@ -306,6 +353,10 @@ func _draw() -> void:
 		var logo_col := Color(0.26, 0.21, 0.28, 0.2)
 		draw_string(_font_din_logo, Vector2(logo_x, stage_y),  "STAGE",  HORIZONTAL_ALIGNMENT_LEFT, -1, logo_fs, logo_col)
 		draw_string(_font_din_logo, Vector2(logo_x, select_y), "SELECT", HORIZONTAL_ALIGNMENT_LEFT, -1, logo_fs, logo_col)
+
+	# ─── ワールド座標レイヤー ───
+	# Identity = ノードのローカル（=ワールド）座標。Camera2D が自動でスクリーンに変換する。
+	draw_set_transform_matrix(Transform2D())
 
 	# 接続ライン
 	for conn in StageSelectManager.get_connections():
@@ -331,7 +382,14 @@ func _draw() -> void:
 				draw_circle(pos, _DOT_RADIUS, _HOVER_COLOR if is_near else _CLEARED_COLOR)
 				draw_circle(pos, _DOT_RADIUS * 0.35, Color.WHITE)
 
-	# 吹き出し（最近傍ステージ・ポップアップ非表示時のみ）
+	# 自キャラ（ワールド座標・最前面）
+	draw_circle(_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
+	draw_circle(_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
+
+	# ─── 再び画面固定レイヤーへ戻してUI要素を描画 ───
+	draw_set_transform_matrix(get_canvas_transform().affine_inverse())
+
+	# 吹き出し（スクリーン座標で描画。dot位置はcanvas_transformで変換済み）
 	if _nearest >= 0 and _popup_stage < 0 and not _esc_popup:
 		_draw_bubble(_nearest)
 
@@ -346,23 +404,20 @@ func _draw() -> void:
 	if _esc_popup:
 		_draw_esc_popup(vp)
 
-	# [DEBUG] ゾウステージ起動ドット
+	# [DEBUG] ゾウステージ起動ドット（画面固定）
 	if _is_debug() and _zou_stage_idx >= 0:
 		draw_circle(_ZOU_DOT_POS, _ZOU_DOT_R, Color(0.15, 0.10, 0.20))
 
-	# [DEBUG] SE選択パネル
+	# [DEBUG] SE選択パネル（画面固定）
 	if _is_debug() and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
 		_draw_dbg_sfx_panel()
-
-	# 自キャラ（ポップアップより前面）
-	draw_circle(_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
-	draw_circle(_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
 
 
 # ---------- 吹き出し ----------
 
 func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -> void:
-	var dot: Vector2 = _dot_pos(stage_id)
+	# _draw_bubble はスクリーン座標セクションで呼ばれる。ワールド座標を画面座標へ変換する。
+	var dot: Vector2 = get_canvas_transform() * _dot_pos(stage_id)
 	var bw: float = _BUBBLE_W
 	var bh: float = _BUBBLE_H
 	var vp: Vector2 = get_viewport_rect().size
@@ -671,9 +726,90 @@ func _handle_popup_confirm(yes: bool) -> void:
 # ---------- ヘルパー ----------
 
 func _dot_pos(i: int) -> Vector2:
-	var base: Vector2 = StageSelectManager.STAGE_POSITIONS[i]
+	var base: Vector2 = StageSelectManager.get_world_pos(i)
 	var oy: float = sin(_elapsed * _anim_freq[i] + _anim_phase[i]) * _anim_amp[i]
 	return base + Vector2(0.0, oy)
+
+
+func _calc_world_bounds() -> Rect2:
+	var min_x: float = INF
+	var min_y: float = INF
+	var max_x: float = -INF
+	var max_y: float = -INF
+	for i in range(StageSelectManager.STAGE_COUNT):
+		var pos: Vector2 = StageSelectManager.get_world_pos(i)
+		min_x = minf(min_x, pos.x)
+		min_y = minf(min_y, pos.y)
+		max_x = maxf(max_x, pos.x)
+		max_y = maxf(max_y, pos.y)
+	var margin: float = 200.0
+	return Rect2(min_x - margin, min_y - margin,
+				 max_x - min_x + margin * 2.0,
+				 max_y - min_y + margin * 2.0)
+
+
+func _update_camera(delta: float) -> void:
+	if _camera == null or _is_focusing:
+		return
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var half_view: Vector2 = viewport_size / 2.0 / _camera.zoom
+	var margin: Vector2 = half_view * 2.0 * SCROLL_MARGIN
+	var rel: Vector2 = _char_pos - _camera.position
+	var scroll: Vector2 = Vector2.ZERO
+	if rel.x < -half_view.x + margin.x:
+		scroll.x = -1.0
+	elif rel.x > half_view.x - margin.x:
+		scroll.x = 1.0
+	if rel.y < -half_view.y + margin.y:
+		scroll.y = -1.0
+	elif rel.y > half_view.y - margin.y:
+		scroll.y = 1.0
+	if scroll != Vector2.ZERO:
+		_camera.position += scroll.normalized() * SCROLL_SPEED * delta
+
+
+func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
+	_focus_return_id = return_stage_id
+	if unlocked_ids.is_empty():
+		if return_stage_id >= 0:
+			_camera.position = StageSelectManager.get_world_pos(return_stage_id)
+			_char_pos = _camera.position
+			_char_target = _camera.position
+		return
+	# 時計回りにソート（直前ステージを中心とした角度順）
+	var center: Vector2 = Vector2.ZERO
+	if return_stage_id >= 0:
+		center = StageSelectManager.get_world_pos(return_stage_id)
+	var sorted_ids: Array = unlocked_ids.duplicate()
+	sorted_ids.sort_custom(func(a: int, b: int) -> bool:
+		var pa: Vector2 = StageSelectManager.get_world_pos(a) - center
+		var pb: Vector2 = StageSelectManager.get_world_pos(b) - center
+		return -pa.angle() < -pb.angle()
+	)
+	_focus_queue = sorted_ids
+	_is_focusing = true
+	_focus_elapsed = 0.0
+
+
+func _process_focus(delta: float) -> void:
+	if not _is_focusing or _focus_queue.is_empty():
+		_is_focusing = false
+		# 全ノードを巡り終えたら直前ステージへ戻る
+		if _focus_return_id >= 0:
+			var return_pos: Vector2 = StageSelectManager.get_world_pos(_focus_return_id)
+			_camera.position = return_pos
+			_char_pos = return_pos
+			_char_target = return_pos
+			_focus_return_id = -1
+		return
+	_focus_elapsed += delta
+	var target_pos: Vector2 = StageSelectManager.get_world_pos(_focus_queue[0])
+	_camera.position = _camera.position.lerp(target_pos, FOCUS_LERP * delta)
+	if _focus_elapsed >= FOCUS_DURATION or _camera.position.distance_to(target_pos) < 5.0:
+		_focus_queue.pop_front()
+		_focus_elapsed = 0.0
+		if _focus_queue.is_empty():
+			_is_focusing = false
 
 
 func _find_nearest_accessible() -> int:
