@@ -209,6 +209,8 @@ var _font_din_tight: FontVariation = null        # font_din の字間詰めバ�
 var _font_din_num: FontVariation = null          # 数値表示専用（spacing_glyph = -1、net +4px）
 var _font_din_result: FontVariation = null       # #N/RESULT 専用（spacing_glyph = -2、net +3px）
 var _font_din_config_logo: FontVariation = null  # CONFIG ロゴ専用（spacing_glyph = -10、net -5px）
+var _credit_kata_lbl: Label = null   # クレジット用 KATA-DRAW ラベル
+var _credit_staff_lbl: Label = null  # クレジット用 STAFF ラベル
 var _font_stage: FontVariation = null      # STAGE 専用: CLEAR 幅に合わせて字間を自動調整
 var _font_clear: FontVariation = null      # CLEAR 専用: spacing_glyph = -7（net -2px）
 
@@ -448,6 +450,12 @@ func draw(state: String, vp: Vector2) -> void:
 	if state != _prev_state:
 		on_state_changed(state)
 
+	# credit 以外のステートではロゴラベルを非表示
+	if state != "credit":
+		if _credit_kata_lbl != null:
+			_credit_kata_lbl.visible = false
+			_credit_staff_lbl.visible = false
+
 	match state:
 		"logo":
 			_draw_logo(vp)
@@ -459,6 +467,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_menu(vp)
 		"config":
 			_draw_config(vp)
+		"credit":
+			_draw_credit(vp)
 		"rules":
 			_draw_rules(vp)
 		"guide_info":
@@ -1341,6 +1351,7 @@ func _draw_config(vp: Vector2) -> void:
 		tr("CONFIG_BGM_VOLUME"),
 		tr("CONFIG_SE_VOLUME"),
 		tr("CONFIG_PRACTICE"),
+		tr("CONFIG_CREDIT"),
 		tr("CONFIG_BACK"),
 	]
 	var item_values: Array[String] = [
@@ -1351,19 +1362,16 @@ func _draw_config(vp: Vector2) -> void:
 		str(_game.se_volume),
 		"",
 		"",
+		"",
 	]
 
 	var arrow_fs: int = 28
 
-	for i in range(7):
+	for i in range(8):
 		var item_y: float = base_y + i * spacing
 		var is_sel: bool = (i == _game.config_index)
 		if i >= 5:
-			# 「練習」「戻る」— ボタン行（タイトルに戻る＝i==6 は 30px 下）
-			var back_extra: float = 30.0 if i == 6 else 0.0
-			var btn_center := Vector2(vp.x / 2.0, item_y + box_h / 2.0 - 16.0 + vp.y * 0.07 - 120.0 + back_extra)
-			_draw_auto_button_with_shadow(btn_center, item_labels[i], BTN_FONT_SIZE, 1.0, not is_sel, 700.0)
-			continue
+			continue  # ボタン行は後続のセクションで描画
 		# 0〜3: 値行は同一レイアウト（◀ ボックス ▶）。選択行はタイトルメニューと同様のホバー拡大＋シャドウ。
 		var btn_id: String = _game.CONFIG_ROW_BTN_IDS[i]
 		if is_sel:
@@ -1408,6 +1416,15 @@ func _draw_config(vp: Vector2) -> void:
 		var up_c: Color = (sel_c if is_sel else text_c) if right_enabled else Color(0.26, 0.21, 0.28, 0.25)
 		_game.draw_string(_game.font_bold, Vector2(up_x, down_baseline), "▶", HORIZONTAL_ALIGNMENT_CENTER, aw, arrow_fs, up_c)
 
+	# --- 練習・クレジット・タイトルに戻る ボタン行（25px均等間隔）---
+	var btn_h_act: float = (_game.font.get_ascent(BTN_FONT_SIZE) + _game.font.get_descent(BTN_FONT_SIZE)) * 1.5
+	var btn_base_cy: float = base_y + 5.0 * spacing + btn_h_act * 0.5 - 16.0 + vp.y * 0.07 - 230.0
+	for btn_i in range(3):
+		var act_i: int = 5 + btn_i
+		var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)  # 25px間隔
+		var is_sel_btn: bool = (act_i == _game.config_index)
+		_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, btn_cy), item_labels[act_i], BTN_FONT_SIZE, 1.0, not is_sel_btn, 700.0)
+
 	# --- RESET ボタン（右下固定） ---
 	var reset_rect: Rect2 = _game.get_config_reset_button_rect(vp)
 	var reset_center := Vector2(reset_rect.position.x + reset_rect.size.x * 0.5,
@@ -1436,6 +1453,73 @@ func _draw_config(vp: Vector2) -> void:
 		var no_off: bool  = _game.config_reset_confirm_index != 1
 		_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
 		_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off,  cbtn_w)
+
+
+func _draw_credit(vp: Vector2) -> void:
+	_draw_bg(vp)
+
+	# ── タイトルロゴ「KATA-DRAW / STAFF」— 別Labelオブジェクト、上端基準で20px間隔 ──
+	if not _font_din_config_logo:
+		_font_din_config_logo = FontVariation.new()
+		_font_din_config_logo.base_font = _game.font_din
+		_font_din_config_logo.set_spacing(TextServer.SPACING_GLYPH, -10)
+
+	# ラベルを初回だけ生成してゲームノードの子に追加
+	if _credit_kata_lbl == null:
+		_credit_kata_lbl = Label.new()
+		_credit_kata_lbl.text = "KATA-DRAW"
+		_credit_kata_lbl.add_theme_font_override("font", _font_din_config_logo)
+		_credit_kata_lbl.add_theme_font_size_override("font_size", 280)
+		_credit_kata_lbl.add_theme_color_override("font_color", Color(0.26, 0.21, 0.28, 0.2))
+		_credit_kata_lbl.clip_text = false
+		_credit_kata_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		_game.add_child(_credit_kata_lbl)
+
+		_credit_staff_lbl = Label.new()
+		_credit_staff_lbl.text = "STAFF"
+		_credit_staff_lbl.add_theme_font_override("font", _font_din_config_logo)
+		_credit_staff_lbl.add_theme_font_size_override("font_size", 280)
+		_credit_staff_lbl.add_theme_color_override("font_color", Color(0.26, 0.21, 0.28, 0.2))
+		_credit_staff_lbl.clip_text = false
+		_credit_staff_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		_game.add_child(_credit_staff_lbl)
+
+	# KATA-DRAW: 上端を画面上端から -100px（少し上にはみ出し）
+	_credit_kata_lbl.position = Vector2(-20.0, -100.0)
+	_credit_kata_lbl.visible = true
+
+	# KATA-DRAW の下端から20px空けて STAFF を配置
+	# get_minimum_size().y = Label が必要とする実際の高さ
+	var kata_h: float = _credit_kata_lbl.get_minimum_size().y
+	_credit_staff_lbl.position = Vector2(-20.0, _credit_kata_lbl.position.y + kata_h + 20.0 - 200.0)
+	_credit_staff_lbl.visible = true
+
+	# ── クレジット本文 ──
+	var text_col := Color(0.26, 0.21, 0.28)
+	var content_fs: int = 30
+	var line_h: float = _game.font_din.get_ascent(content_fs) + _game.font_din.get_descent(content_fs) + 8.0
+	var cx: float = vp.x * 0.5 - 600.0
+	var start_y: float = vp.y * 0.38 - 270.0
+	var lines: Array[String] = [
+		"Producer / Director / UI&Logo Design : Kionachi",
+		"Planner : Hirame Kumokura",
+		"Stage Editing / Web Design : Irori Hibachi",
+		"",
+		"Title Music Composition / Sound Effect Design : tigerlily",
+		"",
+		"Music Support : Diverse System",
+		"  Clockwork Prophet / Solvrae",
+		"  Micro'n'Macro / taqumi",
+		"  TRANSFER / ZiXS",
+		"  Thinking Time / U-Ruri",
+		"  Small Routines / Yebisu303",
+		"Licenced by Diverse System (works.16)",
+		"",
+		"production work : 2026 Meseed Software",
+	]
+	for idx in range(lines.size()):
+		var ly: float = start_y + idx * line_h + _game.font_din.get_ascent(content_fs)
+		_game.draw_string(_game.font_din, Vector2(cx, ly), lines[idx], HORIZONTAL_ALIGNMENT_CENTER, -1, content_fs, text_col)
 
 
 func _config_fit_label_text(font: Font, text: String, max_w: float, fs: int) -> String:

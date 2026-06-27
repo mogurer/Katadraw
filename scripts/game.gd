@@ -223,7 +223,7 @@ func get_polygon_prev_vertex_index(vert_idx: int) -> int:
 var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
 var menu_confirm_quit: bool = false
 var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
-var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像度,2=カーソル…,6=戻る
+var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像度,2=カーソル…,6=クレジット,7=戻る
 var config_reset_hovered: bool = false
 var config_reset_confirm: bool = false
 var config_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
@@ -813,23 +813,21 @@ func _update_player_hover() -> void:
 				else:
 					config_reset_confirm_index = 1
 			else:
-				var items_count: int = 7
 				var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
-				var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-				for i in range(items_count):
-					if i < 5:
-						var geom: Dictionary = config_row_scaled_layout(vp, i)
-						var bh: float = geom["bh"]
-						var top: float = geom["Lp"].y - bh * 0.5
-						var bottom: float = top + bh
-						if pos.y >= top - 5.0 and pos.y <= bottom + 5.0:
-							config_index = i
-					else:
-						var extra_y: float = vp.y * 0.07
-						var item_y: float = base_y + i * CONFIG_MENU_SPACING
-						var back_extra: float = 30.0 if i == 6 else 0.0
-						if pos.y >= item_y - 20.0 + extra_y - 120.0 + back_extra and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0 + back_extra:
-							config_index = i
+				for i in range(5):
+					var geom: Dictionary = config_row_scaled_layout(vp, i)
+					var bh: float = geom["bh"]
+					var top: float = geom["Lp"].y - bh * 0.5
+					var bottom: float = top + bh
+					if pos.y >= top - 5.0 and pos.y <= bottom + 5.0:
+						config_index = i
+				var btn_h_act: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+				var btn_base_cy: float = base_y + 5.0 * CONFIG_MENU_SPACING + btn_h_act * 0.5 - 16.0 + vp.y * 0.07 - 230.0
+				for btn_i in range(3):
+					var act_i: int = 5 + btn_i
+					var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)
+					if pos.y >= btn_cy - btn_h_act * 0.5 - 5.0 and pos.y <= btn_cy + btn_h_act * 0.5 + 5.0:
+						config_index = act_i
 				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
 		return
 
@@ -1502,7 +1500,7 @@ func _ui_menu_stick_nav_horizontal_first(delta: float) -> Vector2i:
 
 func _process_config_stick_navigation(delta: float) -> void:
 	# 上下＝行移動、左右＝値変更（全項目で同じ優先: 縦を先に処理）
-	var items_count: int = 7
+	var items_count: int = 8
 	var ly: float = _ui_stick_ly
 	var lx: float = _ui_stick_lx
 	var vy: int = _ui_menu_stick_vertical_step(delta, ly)
@@ -1657,6 +1655,10 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "config":
 		_input_config(event, is_confirm_key, is_confirm_pad, is_confirm_click)
+		return
+
+	if game_state == "credit":
+		_input_credit(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
 
 	if game_state == "stage_edit":
@@ -1961,7 +1963,7 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 
 
 func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
-	var items_count: int = 7
+	var items_count: int = 8
 	var moved: bool = false
 
 	# ---------- RESET 確認ダイアログ ----------
@@ -2066,6 +2068,14 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		)
 		queue_redraw()
 	if do_confirm and config_index == 6:
+		ui_renderer.set_btn_press_with_callback(tr("CONFIG_CREDIT"), func():
+			TransitionManager.play_diagonal(func():
+				game_state = "credit"
+				queue_redraw()
+			)
+		)
+		queue_redraw()
+	if do_confirm and config_index == 7:
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
 			config_reset_hovered = false
 			config_reset_confirm = false
@@ -2078,6 +2088,18 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		queue_redraw()
 	if moved:
 		queue_redraw()
+
+
+func _input_credit(_event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
+	var is_back: bool = (
+		(_event is InputEventKey and _event.pressed and not _event.echo and _event.keycode == KEY_ESCAPE)
+		or (_event is InputEventJoypadButton and _event.pressed and _event.button_index == JOY_BUTTON_B)
+	)
+	if is_back or is_confirm_key or is_confirm_pad or is_confirm_click:
+		TransitionManager.play_diagonal(func():
+			game_state = "config"
+			queue_redraw()
+		)
 
 
 ## コンフィグ: 値行の左右（±1）。0=画面モード、1=マウス制限、2=言語、3=BGM、4=SE
@@ -2470,19 +2492,18 @@ func _hit_menu_item(pos: Vector2) -> int:
 
 
 func _hit_config_item(pos: Vector2) -> Dictionary:
-	# 「練習」「戻る」ボタン行（index 5, 6）のクリック判定。値行の ◀▶ は _hit_config_value_arrows。
+	# 「練習」「クレジット」「戻る」ボタン行（index 5, 6, 7）のクリック判定。値行の ◀▶ は _hit_config_value_arrows。
 	var vp: Vector2 = get_viewport_rect().size
 	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
-	var spacing: float = CONFIG_MENU_SPACING
-	var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-	var extra_y: float = vp.y * 0.07
-	var btn_half_w: float = 350.0
+	var btn_h_act: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+	var btn_base_cy: float = base_y + 5.0 * CONFIG_MENU_SPACING + btn_h_act * 0.5 - 16.0 + vp.y * 0.07 - 230.0
 	var btn_cx: float = vp.x / 2.0
-	for i in [5, 6]:
-		var item_y: float = base_y + i * spacing
-		var back_extra: float = 30.0 if i == 6 else 0.0
-		if pos.y >= item_y - 20.0 + extra_y - 120.0 + back_extra and pos.y <= item_y - 16.0 + box_h + extra_y - 120.0 + back_extra and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
-			return { "ok": true, "main": i }
+	var btn_half_w: float = 350.0
+	for btn_i in range(3):
+		var act_i: int = 5 + btn_i
+		var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)
+		if pos.y >= btn_cy - btn_h_act * 0.5 - 20.0 and pos.y <= btn_cy + btn_h_act * 0.5 and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
+			return { "ok": true, "main": act_i }
 	return {}
 
 
@@ -2530,7 +2551,7 @@ func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 
 ## コンフィグ 値行 0〜4 のボックス中心・矢印位置（get_btn_scale 適用後）。描画とヒット判定で共通。
 func config_row_scaled_layout(vp: Vector2, item_idx: int) -> Dictionary:
-	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO - 70.0
+	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO - 180.0
 	var spacing: float = CONFIG_MENU_SPACING
 	var vx: float = vp.x * CONFIG_MENU_VX_RATIO
 	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO
@@ -4752,7 +4773,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config":
+	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config" or game_state == "credit":
 		if game_state == "rules":
 			if _metrics_settle_timer > 0.0:
 				_metrics_settle_timer -= delta
