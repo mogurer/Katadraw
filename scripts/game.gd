@@ -1692,6 +1692,11 @@ func _input(event: InputEvent) -> void:
 			return
 		# ボタンなし: 任意の箇所で クリック / Enter / A で次へ（目標図形を隠さない）
 		if is_confirm:
+			if not ui_renderer.is_guide_typewriter_done():
+				# タイプライター演出中 → スキップして全文表示
+				ui_renderer.skip_guide_typewriter()
+				queue_redraw()
+				return
 			game_state = "guide_countdown"
 			guide_start_time = Time.get_ticks_msec() / 1000.0
 			guide_count_played = 0

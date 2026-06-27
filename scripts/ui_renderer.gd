@@ -176,6 +176,7 @@ var _btn_press_pending: bool = false    # 押下アニメ待機中（遷移を�
 var _hover_sfx_suppress_until: float = 0.0  # ホバーSE抑制タイマー
 
 var _guide_info_time: float = 0.0     # guide_info 表示開始からの経過時間
+var _guide_typewriter_done: bool = false  # タイプライター演出完了フラグ
 var _countdown_scales: Dictionary = {} # カウントダウン数字 → スケールアニメ用
 var _countdown_prev: int = -1
 
@@ -251,6 +252,12 @@ func get_stage_intro_progress() -> float:
 
 func is_stage_intro_done() -> bool:
 	return get_stage_intro_progress() >= 1.0
+
+func is_guide_typewriter_done() -> bool:
+	return _guide_typewriter_done
+
+func skip_guide_typewriter() -> void:
+	_guide_typewriter_done = true
 
 func _ease_out_back(t: float) -> float:
 	"""少し弾むイーズアウト"""
@@ -419,6 +426,7 @@ func on_state_changed(new_state: String) -> void:
 	"""ステート変更時に呼ぶ（演出タイマーリセット等）"""
 	if new_state == "guide_info":
 		_guide_info_time = 0.0
+		_guide_typewriter_done = false
 	if new_state == "cleared":
 		_clear_anim_time = Time.get_ticks_msec() / 1000.0
 	if new_state == "playing":
@@ -2574,13 +2582,25 @@ func _draw_guide_info(vp: Vector2) -> void:
 	var a2: float = e2
 	_draw_monospace_number(_game.font_din, Vector2(tx, y2 + slide_px * (1.0 - e2)), _game._stage_display_number_text(), HORIZONTAL_ALIGNMENT_CENTER, text_w, num_fs, Color(text_color.r, text_color.g, text_color.b, a2))
 
-	# ステージ目的
+	# ステージ目的（タイプライター演出）
 	var y3: float = y2 + num_desc_h + gap2 + desc_asc
 	var a3: float = e3
 	var type_desc: String = _stage_renderer.get_type_description()
 	if _game.stage_session.debug_test_mode and _game.stage_session.debug_test_meta_stage_name.strip_edges() != "":
 		type_desc = _game.stage_session.debug_test_meta_stage_name
-	_game.draw_string(_game.font, Vector2(tx, y3 + slide_px * (1.0 - e3)), type_desc, HORIZONTAL_ALIGNMENT_CENTER, text_w, desc_fs, Color(0.35, 0.28, 0.35, a3))
+
+	const TYPEWRITER_START: float = 0.54  # スライドイン完了後に開始
+	const TYPEWRITER_CPS: float = 12.0    # 1秒あたりの表示文字数
+	var tw_elapsed: float = maxf(0.0, t - TYPEWRITER_START)
+	var visible_chars: int
+	if _guide_typewriter_done:
+		visible_chars = type_desc.length()
+	else:
+		visible_chars = mini(int(tw_elapsed * TYPEWRITER_CPS), type_desc.length())
+		if visible_chars >= type_desc.length():
+			_guide_typewriter_done = true
+	var visible_text: String = type_desc.substr(0, visible_chars)
+	_game.draw_string(_game.font, Vector2(tx, y3 + slide_px * (1.0 - e3)), visible_text, HORIZONTAL_ALIGNMENT_CENTER, text_w, desc_fs, Color(0.35, 0.28, 0.35, a3))
 
 	# 上部ブロックの下端
 	var top_block_bottom: float = y3 + desc_desc_h
@@ -2593,8 +2613,8 @@ func _draw_guide_info(vp: Vector2) -> void:
 	var start_asc: float = _game.font_bold.get_ascent(start_fs)
 	var bottom_text_top: float = start_text_y - start_asc
 
-	# "クリックでスタート" は図形アニメ完了後にフェードイン
-	var t5: float = clampf((t - stagger * 4) / anim_dur, 0.0, 1.0)
+	# "クリックでスタート" はタイプライター完了後にフェードイン
+	var t5: float = clampf((t - stagger * 4) / anim_dur, 0.0, 1.0) if _guide_typewriter_done else 0.0
 	var blink: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 0.5)
 	_game.draw_string(_game.font_bold, Vector2(tx, start_text_y), tr("GUIDE_CLICK_START"), HORIZONTAL_ALIGNMENT_CENTER, text_w, start_fs, Color(0.95, 0.19, 0.32, t5 * blink))
 
