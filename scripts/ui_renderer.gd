@@ -124,14 +124,7 @@ const PLAYING_BTN_DEMO_CENTER_X_FRAC := 0.22
 const PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC := 0.18
 const PLAYING_BTN_DEMO_MAX_R_FRAC := 0.22
 const PLAYING_BTN_DEMO_RING_ALPHA_MUL := 2.0  # 拡大する円の塗り・縁のみ濃く（ダミー自キャラは対象外）
-# A+X: 均等化領域内ポイント周りのピンク円（隣との距離の半分まで拡げ、離れると追随）
-const AX_SPACING_VIS_PINK_EXPAND_PX_SEC := 520.0
-const AX_SPACING_VIS_PINK_SHRINK_PX_SEC := 720.0
-const AX_SPACING_VIS_PINK_FILL := Color(0.98, 0.34, 0.52, 0.26)
-const AX_SPACING_VIS_PINK_STROKE := Color(1.0, 0.55, 0.72, 0.72)
-
 # --- Particle state ---
-var _ax_spacing_pink_ring_r: Array[float] = []
 var particles: Array[Dictionary] = []
 var particle_spawn_time: float = 0.0
 var spore_particles: Array[Dictionary] = []
@@ -140,6 +133,17 @@ var _spore_spawn_accum: float = 0.0
 # --- Snap color effect (スナップ時: 赤→黒フェード) ---
 const SNAP_COLOR_DUR := 2.0
 var _snap_color_effects: Dictionary = {}  # {point_idx: elapsed}
+
+# --- ネコアニメーション ---
+var _cat_phase: int = 0   # 0=IDLE 1=MORPHIN 2=WIGGLE 3=MORPHOUT
+var _cat_elapsed: float = 0.0
+const _CAT_SIZE_PX: float = 32.0
+const _CAT_MORPH_IN_SEC: float = 0.2
+const _CAT_WIGGLE_SEC: float = 0.8
+const _CAT_MORPH_OUT_SEC: float = 0.2
+const _CAT_WIGGLE_DEG: float = 5.0
+const _CAT_WIGGLE_FREQ: float = 5.0
+var _cat_texture: Texture2D = null
 
 # --- Animation state ---
 var _prev_state: String = ""          # 前フレームのゲームステート
@@ -213,6 +217,7 @@ func _init(game: Node2D) -> void:
 	_game = game
 	title_intro = TitleIntroAnimator.new(_game, Callable(self, "suppress_hover_sfx"))
 	_stage_renderer = StageRenderer.new(game, self)
+	_cat_texture = load("res://assets/UI/cat.png") as Texture2D
 
 
 func capture_stage_result_shapes() -> Dictionary:
@@ -296,7 +301,21 @@ func update_animations(delta: float) -> void:
 		var shadow_target: float = 3.5 if target > 1.0 else 0.0
 		_btn_hover_shadows[key] = move_toward(_btn_hover_shadows[key], shadow_target, delta * 25.0)
 
-	_update_ax_spacing_pink_bubble_rings(delta)
+	if _cat_phase != 0:
+		_cat_elapsed += delta
+		match _cat_phase:
+			1:  # MORPHIN
+				if _cat_elapsed >= _CAT_MORPH_IN_SEC:
+					_cat_elapsed = 0.0
+					_cat_phase = 2
+			2:  # WIGGLE
+				if _cat_elapsed >= _CAT_WIGGLE_SEC:
+					_cat_elapsed = 0.0
+					_cat_phase = 3
+			3:  # MORPHOUT
+				if _cat_elapsed >= _CAT_MORPH_OUT_SEC:
+					_cat_elapsed = 0.0
+					_cat_phase = 0
 
 	# 押下アニメーション進行
 	var finished_keys: Array = []
@@ -460,10 +479,6 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_stage_edit(vp)
 		"play_balance_debug":
 			_draw_play_balance_debug(vp)
-
-	# ピン止めチャージ円アニメーション（playing 中のみ）
-	if state == "playing":
-		_draw_pin_charge_effect()
 
 	# 画面遷移フェードオーバーレイ
 	if _transition_alpha < 1.0:
@@ -661,14 +676,32 @@ func is_title_intro_skip_done() -> bool:
 	return title_intro.is_skip_done()
 
 
-func _draw_pin_charge_effect() -> void:
-	var progress: float = _game.input_handler.get_pin_charge_progress()
-	if progress <= 0.0:
+func start_cat_anim() -> void:
+	_cat_phase = 1  # MORPHIN
+	_cat_elapsed = 0.0
+
+
+func _draw_cat_anim_point(pos: Vector2, base_radius: float) -> void:
+	if _cat_texture == null:
 		return
-	var center: Vector2 = _game.input_handler.player_position
-	var max_r: float = _game.input_handler.get_pin_charge_radius()
-	var r: float = max_r * progress
-	_game.draw_arc(center, r, 0.0, TAU, 48, Color(0.55, 0.55, 0.55, 0.65), 3.0, true)
+	var size_px: float
+	var rot_rad: float = 0.0
+	match _cat_phase:
+		1:  # MORPHIN
+			var t: float = clampf(_cat_elapsed / _CAT_MORPH_IN_SEC, 0.0, 1.0)
+			size_px = lerpf(base_radius * 2.0, _CAT_SIZE_PX * 2.0, t)
+		2:  # WIGGLE
+			size_px = _CAT_SIZE_PX * 2.0
+			rot_rad = deg_to_rad(_CAT_WIGGLE_DEG) * sin(_cat_elapsed * TAU * _CAT_WIGGLE_FREQ)
+		3:  # MORPHOUT
+			var t: float = 1.0 - clampf(_cat_elapsed / _CAT_MORPH_OUT_SEC, 0.0, 1.0)
+			size_px = lerpf(base_radius * 2.0, _CAT_SIZE_PX * 2.0, t)
+		_:
+			return
+	var half: float = size_px * 0.5
+	_game.draw_set_transform(pos, rot_rad, Vector2.ONE)
+	_game.draw_texture_rect(_cat_texture, Rect2(Vector2(-half, -half), Vector2(size_px, size_px)), false)
+	_game.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_title(vp: Vector2) -> void:
@@ -1848,13 +1881,9 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var r: float = _point_radius_by_guide(i)
-		if _game.input_handler.is_pinned(i):
-			_game.draw_circle(pos, r * 1.5, Color.WHITE)
-			_game.draw_arc(pos, r * 1.5, 0.0, TAU, 32, Color(0.15, 0.12, 0.18, 0.85), 2.0, true)
-		else:
-			var base_c: Color = POINT_COLOR
-			var alpha: float = _game._point_accuracy_alpha(i)
-			_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
+		var base_c: Color = POINT_COLOR
+		var alpha: float = _game._point_accuracy_alpha(i)
+		_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
 		# デバッグ: 再接続発火ポイントを赤円でハイライト
 		if _dbg_hl.has(i):
 			var _exp: int = _dbg_hl[i] as int
@@ -1945,9 +1974,6 @@ func _draw_game(vp: Vector2) -> void:
 	# 2. ユーザーの図形（線・ポイント・エフェクト）
 	_stage_renderer.draw_stage_lines()
 
-	# A+X 均等化: 隣接点間の「押し合い」ピンク円（頂点より下のレイヤー）
-	_draw_ax_spacing_equalization_pink_bubbles()
-
 	_refresh_guide_point_distance_bounds()
 	var focus_idx: int = _game.input_handler.get_player_focus_index()
 	for i in range(n):
@@ -1988,7 +2014,10 @@ func _draw_game(vp: Vector2) -> void:
 			color = Color(base_c.r, base_c.g, base_c.b, alpha)
 			radius = r_guide
 		if not skip_fill_circle:
-			_game.draw_circle(pos, radius, color)
+			if _cat_phase != 0 and _game.input_handler.is_point_free(i):
+				_draw_cat_anim_point(pos, radius)
+			else:
+				_game.draw_circle(pos, radius, color)
 		if i == focus_idx and _game.input_handler.grab_input_active:
 			_draw_point_position_effect(pos, r_guide)
 
@@ -2256,83 +2285,12 @@ func _draw_discharge_lightning_between(
 		_game.draw_line(from_p, to_p, Color(bolt_rgb.r, bolt_rgb.g, bolt_rgb.b, 0.55 * branch_fade), 1.5, true)
 
 
-func _update_ax_spacing_pink_bubble_rings(delta: float) -> void:
-	var ih: InputHandler = _game.input_handler
-	var n: int = _game.point_positions.size()
-	while _ax_spacing_pink_ring_r.size() < n:
-		_ax_spacing_pink_ring_r.append(0.0)
-	while _ax_spacing_pink_ring_r.size() > n:
-		_ax_spacing_pink_ring_r.pop_back()
-	if n < 2 or _game.game_state != "playing" or not ih.is_ax_spacing_mode_active():
-		for k in range(_ax_spacing_pink_ring_r.size()):
-			_ax_spacing_pink_ring_r[k] = move_toward(
-				_ax_spacing_pink_ring_r[k], 0.0, AX_SPACING_VIS_PINK_SHRINK_PX_SEC * delta
-			)
-		return
-	var pp: Vector2 = ih.get_player_position()
-	var Rlim: float = ih.get_ax_spacing_equalization_radius()
-	var rsq: float = Rlim * Rlim
-	var targets: Array[float] = []
-	targets.resize(n)
-	for ii in range(n):
-		targets[ii] = INF
-	var edges: Array[Vector2i] = ih.get_polygon_edges_for_repulsion()
-	for e in edges:
-		var ia: int = e.x
-		var ib: int = e.y
-		if ia < 0 or ib < 0 or ia >= n or ib >= n:
-			continue
-		var pi: Vector2 = _game.point_positions[ia]
-		var pj: Vector2 = _game.point_positions[ib]
-		var half: float = pi.distance_to(pj) * 0.5
-		if not _game._is_locked(ia):
-			targets[ia] = minf(targets[ia], half)
-		if not _game._is_locked(ib):
-			targets[ib] = minf(targets[ib], half)
-	for i in range(n):
-		var tr: float = 0.0
-		if (
-			not _game._is_locked(i)
-			and targets[i] < 1e17
-			and pp.distance_squared_to(_game.point_positions[i]) <= rsq
-		):
-			tr = targets[i]
-		var cur: float = _ax_spacing_pink_ring_r[i]
-		if tr <= 0.01:
-			_ax_spacing_pink_ring_r[i] = move_toward(cur, 0.0, AX_SPACING_VIS_PINK_SHRINK_PX_SEC * delta)
-		elif cur <= tr:
-			_ax_spacing_pink_ring_r[i] = move_toward(cur, tr, AX_SPACING_VIS_PINK_EXPAND_PX_SEC * delta)
-		else:
-			_ax_spacing_pink_ring_r[i] = move_toward(cur, tr, AX_SPACING_VIS_PINK_SHRINK_PX_SEC * delta)
-		if tr > 0.02:
-			_ax_spacing_pink_ring_r[i] = minf(_ax_spacing_pink_ring_r[i], tr)
-
-
-func _draw_ax_spacing_equalization_pink_bubbles() -> void:
-	if _game.game_state != "playing":
-		return
-	var ih: InputHandler = _game.input_handler
-	if not ih.is_ax_spacing_mode_active():
-		return
-	var n: int = _game.point_positions.size()
-	for i in range(n):
-		var rad: float = _ax_spacing_pink_ring_r[i] if i < _ax_spacing_pink_ring_r.size() else 0.0
-		if rad < 0.4:
-			continue
-		var pos: Vector2 = _game.point_positions[i]
-		_game.draw_circle(pos, rad, AX_SPACING_VIS_PINK_FILL)
-		_game.draw_arc(pos, rad, 0.0, TAU, 64, AX_SPACING_VIS_PINK_STROKE, 2.25, true)
-
-
 func _draw_player_avatar() -> void:
 	if not _game.input_handler.has_player_avatar():
 		return
 	var center: Vector2 = _game.input_handler.get_player_position()
 	var core_r: float = InputHandler.PLAYER_RADIUS
 	var field_r: float = _game.input_handler.get_effective_player_force_visual_radius()
-	var ax_mode: bool = _game.input_handler.is_ax_spacing_mode_active()
-	if ax_mode:
-		field_r = _game.input_handler.get_ax_spacing_equalization_radius()
 	var attracting: bool = _game.input_handler.is_player_attracting()
 	var repelling: bool = _game.input_handler.is_player_repelling()
 	var av_mul: float = 1.0
@@ -2346,9 +2304,6 @@ func _draw_player_avatar() -> void:
 	elif repelling:
 		ring_color = Color(1.0, 0.55, 0.62, 0.14 * av_mul)
 		edge_color = Color(1.0, 0.82, 0.86, 0.28 * av_mul)
-	elif ax_mode:
-		ring_color = Color(0.62, 0.78, 1.0, 0.12 * av_mul)
-		edge_color = Color(0.78, 0.9, 1.0, 0.24 * av_mul)
 	if attracting or repelling:
 		_draw_player_force_influence_visual(center, core_r, field_r, attracting, av_mul)
 	else:

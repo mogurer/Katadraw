@@ -218,13 +218,6 @@ func draw_guide_proximity_reveal() -> void:
 	for cp: Vector2 in corner_markers:
 		_draw_guide_corner_marker(cp, col)
 
-	if ih.is_ax_combo_held() and ih.has_player_avatar():
-		var player_probe: Array[Vector2] = [ih.get_player_position()]
-		for si in range(n):
-			var va: Vector2 = loop[si] as Vector2
-			var vb: Vector2 = loop[(si + 1) % n] as Vector2
-			_draw_guide_seg_proximity(va, vb, player_probe, col, width)
-
 
 func _draw_guide_corner_marker(center: Vector2, col: Color) -> void:
 	var r: float = _CORNER_MARKER_RADIUS

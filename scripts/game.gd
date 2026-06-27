@@ -518,8 +518,7 @@ var sfx_stageclear02: AudioStreamPlayer
 var sfx_point: AudioStreamPlayer
 var sfx_motion: AudioStreamPlayer
 var sfx_stagestart: AudioStreamPlayer
-var sfx_pin_on: AudioStreamPlayer
-var sfx_pin_off: AudioStreamPlayer
+var sfx_cat: AudioStreamPlayer
 var sfx_spot: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 var _sfx_ui_in: AudioStreamPlayer = null    # [DEBUG] 引力SE
@@ -911,15 +910,10 @@ func _setup_audio() -> void:
 	sfx_stagestart.volume_db = -14.5
 	add_child(sfx_stagestart)
 
-	sfx_pin_on = AudioStreamPlayer.new()
-	sfx_pin_on.stream = _load_audio("res://assets/sounds/pinon.wav")
-	sfx_pin_on.volume_db = -14.5
-	add_child(sfx_pin_on)
-
-	sfx_pin_off = AudioStreamPlayer.new()
-	sfx_pin_off.stream = _load_audio("res://assets/sounds/pinoff.wav")
-	sfx_pin_off.volume_db = -14.5
-	add_child(sfx_pin_off)
+	sfx_cat = AudioStreamPlayer.new()
+	sfx_cat.stream = _load_audio("res://assets/sounds/cat.wav")
+	sfx_cat.volume_db = -14.5
+	add_child(sfx_cat)
 
 	sfx_spot = AudioStreamPlayer.new()
 	sfx_spot.stream = _load_audio("res://assets/sounds/se_spot02.wav")
@@ -2251,6 +2245,7 @@ func _apply_se_volume() -> void:
 	sfx_point.volume_db = -14.5 + offset_db
 	sfx_motion.volume_db = -14.5 + offset_db
 	sfx_stagestart.volume_db = -14.5 + offset_db
+	sfx_cat.volume_db = -14.5 + offset_db
 	sfx_spot.volume_db = -14.5 + offset_db
 
 
@@ -4850,6 +4845,10 @@ func _process(delta: float) -> void:
 						hint_alpha = 0.8
 						break
 		ui_renderer.update_spore_particles(delta)
+		if input_handler.cat_anim_triggered:
+			input_handler.cat_anim_triggered = false
+			_play_sfx(sfx_cat)
+			ui_renderer.start_cat_anim()
 		# 描画の分離: 以下のいずれかの場合のみ queue_redraw を発行する。
 		# moved=true のとき input_handler.update_drag_physics が既に発行済みのため重複しても問題ない。
 		var _has_particles: bool = not ui_renderer.spore_particles.is_empty()
