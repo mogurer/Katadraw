@@ -1504,7 +1504,6 @@ func _draw_credit(vp: Vector2) -> void:
 		"Producer / Director / UI&Logo Design : Kionachi",
 		"Planner : Hirame Kumokura",
 		"Stage Editing / Web Design : Irori Hibachi",
-		"",
 		"Title Music Composition / Sound Effect Design : tigerlily",
 		"",
 		"Music Support : Diverse System",
