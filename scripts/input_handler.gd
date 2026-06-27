@@ -202,45 +202,6 @@ var _foldback_cooldown: int = 0
 var _debug_reconnect_highlight: Dictionary = {}
 const _DEBUG_RECONNECT_HIGHLIGHT_MS: int = 2000  # 2秒間赤表示
 
-# --- 物理パフォーマンス計測（デバッグ用） ---
-## 直近 N フレームの計測値を蓄積してオーバーレイに表示する
-const PERF_SAMPLE_FRAMES := 60
-var _perf_frame_us: Array[float] = []      # フレームごとの物理合計時間 (μs)
-var _perf_substeps: Array[int] = []        # フレームごとのサブステップ数
-var _perf_isect_us: Array[float] = []      # フレームごとの交差判定時間 (μs)
-## 外部参照用（UIRenderer から読む）
-var perf_avg_us: float = 0.0
-var perf_max_us: float = 0.0
-var perf_avg_substeps: float = 0.0
-var perf_avg_isect_us: float = 0.0
-var perf_isect_triggered: int = 0          # 今フレームの交差解消発動回数
-var _perf_last_isect_us: float = 0.0      # 直前サブステップの交差判定時間
-
-## フレーム計測値を記録して集計を更新する
-func _perf_record(frame_us: float, substeps: int, isect_us: float) -> void:
-	_perf_frame_us.append(frame_us)
-	_perf_substeps.append(substeps)
-	_perf_isect_us.append(isect_us)
-	if _perf_frame_us.size() > PERF_SAMPLE_FRAMES:
-		_perf_frame_us.pop_front()
-		_perf_substeps.pop_front()
-		_perf_isect_us.pop_front()
-	var sum_us: float = 0.0
-	var max_us: float = 0.0
-	var sum_ss: float = 0.0
-	var sum_is: float = 0.0
-	for v in _perf_frame_us:
-		sum_us += v
-		max_us = maxf(max_us, v)
-	for v in _perf_substeps:
-		sum_ss += v
-	for v in _perf_isect_us:
-		sum_is += v
-	var cnt: float = float(_perf_frame_us.size())
-	perf_avg_us = sum_us / cnt
-	perf_max_us = max_us
-	perf_avg_substeps = sum_ss / cnt
-	perf_avg_isect_us = sum_is / cnt
 const _ISECT_THROTTLE_EVERY: int = 3
 ## 鋭角折り返し（ヘアピン）検出の内積閾値。
 ## 連続する2辺の方向ベクトルの内積がこの値未満なら折り返しとみなす（-1.0=180°, 0.0=90°）。
@@ -1450,10 +1411,7 @@ func update_drag_physics(delta: float) -> void:
 		and not _has_active_point_velocity()
 		and not _ax_spacing_active
 	):
-		_perf_record(0.0, 0, 0.0)
 		return
-
-	var _t_frame_start: int = Time.get_ticks_usec()
 
 	# ガイドデータをフレームごとに1回キャッシュ（サブステップで使い回すため、物理実行時のみ）
 	_snap_cached_corner_world = _game.stage_manager.get_corner_positions_world()
@@ -1461,16 +1419,12 @@ func update_drag_physics(delta: float) -> void:
 
 	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
 	var step_delta: float = delta / float(steps)
-	perf_isect_triggered = 0
 	var moved: bool = false
 	for _i in range(steps):
 		moved = _step_drag_physics(step_delta) or moved
 
 	# [DISABLED] Layer 4: _ideal_drift_timer = IDEAL_DRIFT_DURATION
 	_prev_player_force_active = player_force_active
-
-	var _t_frame_end: int = Time.get_ticks_usec()
-	_perf_record(float(_t_frame_end - _t_frame_start), steps, float(_perf_last_isect_us))
 
 	if moved:
 		_notify_points_changed()
@@ -1556,7 +1510,6 @@ func _step_drag_physics(delta: float) -> bool:
 	if _foldback_cooldown > 0:
 		_foldback_cooldown -= 1
 	var topology_changed: bool = false
-	var _t_isect0: int = Time.get_ticks_usec()
 	if _isect_throttle == 0 and _has_any_unlocked_polygon_vertex():
 		var _n_pts: int = _game.point_positions.size()
 		var _now_ms: int = Time.get_ticks_msec()
@@ -1579,7 +1532,6 @@ func _step_drag_physics(delta: float) -> bool:
 					_game.point_positions[_pd].snapped(Vector2.ONE),
 				])
 			topology_changed = true
-			perf_isect_triggered += 1
 			_resolve_intersections_2opt(lo, hi)
 			_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS
 		elif _foldback_cooldown == 0:
@@ -1596,7 +1548,6 @@ func _step_drag_physics(delta: float) -> bool:
 					if _hi >= 0 and _hi < _n_pts:
 						_debug_reconnect_highlight[_hi] = _exp_ms
 				topology_changed = true
-				perf_isect_triggered += 1
 				var _fold_ok: bool = _resolve_foldback_at_vertex(fb_k)
 				if _fold_ok:
 					print("[FOLD]  折返解消: k=%d(ei=%d,ej=%d) dot=%.3f  pos:%v" % [
@@ -1609,7 +1560,6 @@ func _step_drag_physics(delta: float) -> bool:
 					print("[FOLD]  折返=交差と両立不可、現状維持: k=%d dot=%.3f" % [fb_k, _dot_v])
 					# 長いクールダウンで同じ試行を繰り返さない
 					_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS * 10
-	_perf_last_isect_us = float(Time.get_ticks_usec() - _t_isect0)
 
 	# 交差解消後: 位置が変わったスナップ点を解除（案Y: 交差解消優先）
 	if topology_changed:

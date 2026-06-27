@@ -1,6 +1,7 @@
 # KATA-DRAW 現行ゲーム仕様書
 
-> **作成日**: 2026-05-24  
+> **最終更新**: 2026-06-27（コードベース照合による改訂）  
+> **初版作成**: 2026-05-24  
 > **出典**: リポジトリ内のスクリプト・リソース（`Docs/` 内の旧ドキュメントは参照していません）  
 > **エンジン**: Godot 4.6  
 > **ビルド設定の基準**: `Resources/game_config.gd` の現行値（`EXPERIENCE_VERSION = false`, `IS_DEMO = false`）
@@ -30,7 +31,7 @@
 
 - プレイヤーは **自キャラ（円）** を動かし、各頂点に **引力** または **斥力** を与えて KATA の形を変形する
 - **一致度** がステージごとのクリア閾値（`clear_pct`）以上になるとクリア
-- 組み込みステージは JSON で管理され、マニフェストに **62 面** 定義されている
+- 組み込みステージは JSON で管理され、マニフェストに **61 面** 定義されている
 - 製品版の本編進行は **最大 50 面**（ステージセレクト 10×5 グリッド）
 
 ### プロジェクト構成（主要）
@@ -38,7 +39,7 @@
 | 項目 | 値 |
 |------|-----|
 | メインシーン | `res://scenes/game.tscn` |
-| AutoLoad | `BGMManager`, `SteamManager`, `StageSelectManager` |
+| AutoLoad | `BGMManager`, `SteamManager`, `StageSelectManager`, `TransitionManager` |
 | 内部解像度 | 1920×1080 固定 |
 | デフォルト言語 | 日本語（`Resources/Translation/Translation.csv`） |
 
@@ -78,10 +79,10 @@
        └─ 2回目以降「ゲーム開始」
              → BGM ingame 開始 → stage_select.tscn
                   → ステージ選択・確認
-                  → game.tscn（pending_stage_id）
+                  → TransitionManager.play_triangle() でワイプ → game.tscn
                        → guide_info → guide_countdown（3秒）
                        → playing → cleared
-                       → ステージセレクトへ戻る
+                       → TransitionManager.play_polygon() でワイプ → ステージセレクトへ戻る
 ```
 
 - 初回プレイ時: `StageSelectManager.tutorial_shown = true` を保存し、`BGMManager.start_first_stage()`（**無音**）ののちステージ 0 を開始
@@ -121,6 +122,18 @@
 | `TI_TOTAL_DUR` | 10.1 秒 | `title_intro_animation.gd` |
 | `TITLE_INTRO_SKIP_FADE` | 1.0 秒 | 同上 |
 
+### 2.7 TransitionManager（`scripts/TransitionManager.gd`）
+
+シーン切り替え時に使うワイプアニメーション AutoLoad。
+
+| メソッド | SE | 用途 |
+|----------|----|------|
+| `play_triangle(on_mid, use_se)` | `ts02.wav` | ステージセレクト → ゲーム |
+| `play_polygon(on_mid, use_se)` | `ts03.wav` | ゲーム → ステージセレクト |
+
+- `on_mid`: ワイプ中間で呼ばれる `Callable`（ここでシーン遷移を実行）
+- `_sfx_diagonal` として `ts01.wav` も保持（`play_diagonal` 等で使用予定）
+
 ---
 
 ## 3. コアゲームプレイ
@@ -138,9 +151,12 @@
 
 - **弧誤差のみ**、**回転非対応**
 - HUD モード（`USE_SCREEN_HUD_GUIDE = true`）: 画面固定ガイド輪郭との距離で評価
-- 複合スコア: 平均 **70%** + 最大 **30%**（`ARC_ERROR_AVG_WEIGHT` / `ARC_ERROR_MAX_WEIGHT`）
+- 複合スコア: 平均 **70%** + 最大 **30%**（`ARC_ERROR_AVG_WEIGHT = 0.7` / `ARC_ERROR_MAX_WEIGHT = 0.3`）
 - 辺ごと Hausdorff 距離（`USE_PER_EDGE_HAUSDORFF = true`）
-- Hausdorff 計算は **10 フレームに 1 回**（`HAUSDORFF_THROTTLE_EVERY = 10`）
+- Hausdorff 計算は頂点の移動量に応じて 3 段階スロットリング:  
+  - **激しく動いている**: 10 フレームに 1 回（`HAUSDORFF_THROTTLE_FAST = 10`）  
+  - **減速中**: 5 フレームに 1 回（`HAUSDORFF_THROTTLE_MID = 5`）  
+  - **ほぼ静止**: 2 フレームに 1 回（`HAUSDORFF_THROTTLE_SLOW = 2`）
 - メトリクスは頂点静止 **0.15 秒** 後に更新（`_METRICS_SETTLE_DELAY`）
 
 **クリア条件**:
@@ -163,7 +179,28 @@ current_circularity >= clear_pct
 - つかみ（grab）終了ごとに +1（有効トラック時）
 - つかみ中、KATA 重心が **22 px** 以上動くとトラック有効（`STAGE_MOVE_COUNT_PIXEL_THRESHOLD`）
 
-### 3.4 ヒント
+### 3.4 ガイドスナップ
+
+頂点がガイドのコーナー（またはエッジ）に近づくと自動吸着する。
+
+- 吸着時: `se_spot02.wav` 再生 + 頂点が **2 秒間** カラーハイライト（`SNAP_COLOR_DUR = 2.0`、`ui_renderer.trigger_snap_color()`）
+- 吸着後に別の頂点を同じコーナーに近づけても先着優先（コーナー占有制）
+- ガイドからプレイヤー力が強い場合はスナップをバイパス
+
+### 3.5 ピン止め
+
+**A+X（またはマウス左右同時）を 1000 ms 以上ホールド**すると、プレイヤー力影響範囲内のガイドに吸着済み頂点のピン状態をトグルする。
+
+| 動作 | SE |
+|------|----|
+| ピン止め ON（選択頂点を固定） | `pinon.wav` |
+| ピン止め OFF（固定解除） | `pinoff.wav` |
+
+- ピン止め中の頂点: ドラッグ不可・プレイヤー力の影響を受けない
+- ピン状態は `_pin_state: PackedByteArray`（0=解除 / 1=ピン止め）で管理
+- ステージリセット（やりなおし）でピン状態もリセット
+
+### 3.6 ヒント
 
 | タイミング | 動作 |
 |------------|------|
@@ -174,7 +211,7 @@ current_circularity >= clear_pct
 
 ※ `USE_SCREEN_HUD_GUIDE = true` のため、プレイ中のヒント描画はオフ（定数は残存）
 
-### 3.5 形状タイプ
+### 3.7 形状タイプ
 
 `StageConfig.KNOWN_SHAPE_TYPES` で定義:
 
@@ -187,7 +224,7 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 - 弧セグメントの一致度緩和係数: **0.6**（`ARC_SEGMENT_MATCH_LENIENCY_MUL`）
 - 先端（鋭角）ペナルティ重み: **0.3**（`VERTEX_TIP_WEIGHT`）
 
-### 3.6 HUD ガイド配置
+### 3.8 HUD ガイド配置
 
 | 定数 | 値 | 説明 |
 |------|-----|------|
@@ -208,24 +245,25 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 |------|------|
 | 左クリック押下 | **斥力**（repel） |
 | 右クリック押下 | **引力**（attract） |
-| 左+右同時 | **A+X 均等化**（頂点間斥力のみ、自キャラ力オフ） |
+| 左+右同時 | **A+X 均等化**（頂点間斥力のみ、自キャラ力オフ）/ 1000ms ホールドでピン止めトグル |
 | マウス移動 | 自キャラ位置（lerp **10.0**） |
 | 頂点クリック | 選択・ドラッグ（ヒット半径 **30 px**） |
 | 矩形選択 | 複数選択 → BB 変形（Shift で移動 **1/3**） |
 
 - プレイ中: パッド入力後はマウス移動が自キャラを動かさない（`playing_mouse_steers_player`）
 - カーソル: **2.5 秒** アイドルで非表示、パッド入力で再表示
+- カスタムカーソル: `assets/UI/katacursor.png` に差し替え
 
 ### 4.2 ゲームパッド
 
 | 入力 | 効果 |
 |------|------|
-| 左スティック / D-pad | 自キャラ移動（速度 **600 px/s** 基準、加速ランプ **960 ms**） |
+| 左スティック / D-pad | 自キャラ移動（基本速度 **600 px/s**） |
+| **LB / RB / LT / RT** | 自キャラ移動速度ブースト（各ボタン **+35%**、最大 4 段、合計 **+140%**） |
 | **A** | 斥力 |
 | **X** | 引力 |
-| **A+X 同時** | 頂点間均等化斥力（**500 ms** 以上の長押しで効果開始、最大 **3 秒** で頭打ち） |
+| **A+X 同時** | 頂点間均等化斥力 / **1000 ms** 以上の長押しでピン止めトグル |
 | **B** | 力リセット |
-| **LB/RB** | 閉路頂点の前/次選択（ポリゴンリング巡回） |
 | 右スティック | 頂点選択・ドラッグ |
 | **Start** | ポーズ |
 | **Esc**（キーボード） | ポーズ / UI 戻る |
@@ -250,7 +288,7 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 
 - パス: `Resources/Stagedata/builtin/manifest.json`
 - `schema_version: 1`
-- **62 面** 定義（`tutorial_triangle.json` 〜 `umbrella.json`）
+- **61 面** 定義（`tutorial_triangle.json` 〜 `hexagon.json`）
 - 読み込み: `StageData.get_stages()` → `CustomStageFile.parse_file()` 経由
 
 ### 5.2 ステージ JSON 形式
@@ -295,56 +333,70 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 |------|----------|
 | `EXPERIENCE_VERSION = true`（体験版） | **3 面**（index 0〜2） |
 | `EXPERIENCE_VERSION = false`（製品版、現行） | **50 面**（index 0〜49） |
-| マニフェスト定義総数 | **62 面**（index 50〜61 は現状セレクト未使用） |
+| マニフェスト定義総数 | **61 面**（index 50〜60 は現状セレクト未使用） |
 
 ### 5.4 ステージセレクト
 
-- グリッド: **10 列 × 5 行 = 50 スロット**
+- グリッド: **10 列 × 5 行 = 50 スロット**（X: 200〜1720、Y: 250〜830、各ステップ≈169 / 145 px）
 - 状態: `LOCKED` / `UNLOCKED` / `CLEARED`
 - 永続化: `user://stage_select_state.json`
 - 初期: ステージ 0 のみ `UNLOCKED`
 - クリア時: 自身を `CLEARED` + 上下左右隣接を `UNLOCKED`
-- 自キャラ接近 **140 px** で吹き出しプレビュー
-- 決定で確認ポップアップ → `pending_stage_id` 設定 → `game.tscn` へ
-- **コントローラ L/R ボタン**（左ショルダー / 右ショルダー）でインゲーム BGM を切り替え（**5 曲**を循環、先頭から再生）。ステージ選択確認・タイトル戻り確認のポップアップ表示中は無効。キーボード・マウスでの切り替え操作はなし（`scenes/stage_select.gd` → `BGMManager.select_prev_bgm()` / `select_next_bgm()`）
+- 自キャラ接近 **140 px** で吹き出しプレビュー（ステージ番号・名前・図形サムネイル・ベストタイム・移動回数）
+- 決定で確認ポップアップ → `pending_stage_id` 設定 → `TransitionManager.play_triangle()` でワイプ → `game.tscn` へ
+- **BGM 曲名表示 UI**: 右下に `◀[L] ♪ [曲名] ♪ [R]▶` を表示  
+  - **タイプライター演出**（1 秒）→ **5 秒保持** → **左端から 1 文字ずつ消える**（2 秒）+ `CPUParticles2D` 散布エフェクト  
+  - ◀[L] / [R]▶ ボタンをマウスクリックでも BGM 切り替え可能（ポップアップ表示中は無効）
+  - コントローラ L/R ボタン（左/右ショルダー）でも切り替え（5 曲循環）
+- ESC キーでタイトル戻り確認ポップアップ
+- **「STAGE / SELECT」大文字ロゴ**を背景レイヤーに描画
 
-### 5.5 組み込みステージ一覧（manifest 順）
+**ステージセレクト SE**:
+
+| SE | 用途 |
+|----|------|
+| `pinon.wav` | ステージドット・ボタンにホバーしたとき |
+| `se_click.wav` | 確認ポップアップ「はい」「いいえ」クリック |
+| `se_on.wav` | ステージ選択確定 / ESC 戻るポップアップ開閉 |
+
+### 5.5 組み込みステージ一覧（manifest 順・現行）
 
 | # | ファイル | # | ファイル |
 |---|----------|---|----------|
-| 0 | tutorial_triangle.json | 31 | hexagon.json |
-| 1 | test_square.json | 32 | hourglass.json |
-| 2 | hexagon_6.json | 33 | keitora.json |
-| 3 | circle_14.json | 34 | key.json |
-| 4 | star_10.json | 35 | king.json |
-| 5 | cat_face_18.json | 36 | milk_carton.json |
-| 6 | rugby_ball.json | 37 | mount_fuji.json |
-| 7 | home.json | 38 | mushrooms.json |
-| 8 | ocarina.json | 39 | one_quarter.json |
-| 9 | mug.json | 40 | onion.json |
-| 10 | acoustic_guitar.json | 41 | paramecium.json |
-| 11 | airship.json | 42 | pen.json |
-| 12 | arrow.json | 43 | penguin.json |
-| 13 | banana.json | 44 | pentagon.json |
-| 14 | bed.json | 45 | pot.json |
-| 15 | book.json | 46 | rabbit.json |
-| 16 | bottle_s.json | 47 | rainbow.json |
-| 17 | butterfly.json | 48 | shark.json |
-| 18 | cactus.json | 49 | ship_m.json |
-| 19 | cap.json | 50 | shuriken.json |
-| 20 | cicada.json | 51 | small_bird.json |
-| 21 | cows_face.json | 52 | sorbet.json |
-| 22 | cross.json | 53 | tears.json |
-| 23 | cupcake.json | 54 | television.json |
-| 24 | dent.json | 55 | treasure_chest.json |
-| 25 | folding_fan.json | 56 | waning_moon.json |
-| 26 | frog.json | 57 | wrench.json |
-| 27 | ghost.json | 58 | crab.json |
-| 28 | gift_box.json | 59 | three_storied_pagoda.json |
-| 29 | heart.json | 60 | tulip.json |
-| 30 | heptagramsil_j.json | 61 | umbrella.json |
+| 0 | tutorial_triangle.json | 31 | keitora.json |
+| 1 | test_square.json | 32 | key.json |
+| 2 | hexagon_6.json | 33 | king.json |
+| 3 | circle_14.json | 34 | milk_carton.json |
+| 4 | rugby_ball.json | 35 | mount_fuji.json |
+| 5 | small_bird.json | 36 | mushrooms.json |
+| 6 | ocarina.json | 37 | television.json |
+| 7 | mug.json | 38 | one_quarter.json |
+| 8 | acoustic_guitar.json | 39 | three_storied_pagoda.json |
+| 9 | airship.json | 40 | treasure_chest.json |
+| 10 | arrow.json | 41 | paramecium.json |
+| 11 | banana.json | 42 | tulip.json |
+| 12 | bed.json | 43 | penguin.json |
+| 13 | book.json | 44 | pot.json |
+| 14 | bottle_s.json | 45 | rabbit.json |
+| 15 | butterfly.json | 46 | rainbow.json |
+| 16 | cactus.json | 47 | shark.json |
+| 17 | cap.json | 48 | ship_m.json |
+| 18 | cicada.json | 49 | shuriken.json |
+| 19 | cows_face.json | 50 | sorbet.json |
+| 20 | cross.json | 51 | tears.json |
+| 21 | cupcake.json | 52 | wrench.json |
+| 22 | dent.json | 53 | crab.json |
+| 23 | folding_fan.json | 54 | umbrella.json |
+| 24 | frog.json | 55 | home.json |
+| 25 | ghost.json | 56 | onion.json |
+| 26 | gift_box.json | 57 | pen.json |
+| 27 | heart.json | 58 | pentagon.json |
+| 28 | heptagramsil_j.json | 59 | zou.json ※DEBUG のみ |
+| 29 | hourglass.json | 60 | hexagon.json |
+| 30 | waning_moon.json | | |
 
-※ 本編進行（ステージセレクト）は index **0〜49** の 50 面まで
+※ 本編進行（ステージセレクト）は index **0〜49** の 50 面まで  
+※ index 59 の `zou.json`（象）はデバッグ専用ステージ（通常セレクト画面からは見えない）
 
 ---
 
@@ -382,16 +434,16 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 
 ### 6.5 コンフィグ項目
 
-| # | 項目 |
-|---|------|
-| 0 | 表示モード（1080p / 720p / フルスクリーン） |
-| 1 | マウスウィンドウ内閉じ込め ON/OFF |
-| 2 | 言語（ja / en） |
-| 3 | BGM 音量 0〜10（5=0 dB、0=ミュート） |
-| 4 | SE 音量 0〜10 |
-| 5 | チュートリアル再表示 |
-| 6 | 戻る |
-| 右下 | **RESET**（進行データ全消去） |
+| # | 項目 | 内容 |
+|---|------|------|
+| 0 | 表示モード | 1080p / 720p / フルスクリーン |
+| 1 | マウスウィンドウ内閉じ込め | ON/OFF |
+| 2 | 言語 | ja / en |
+| 3 | BGM 音量 | 0〜10（5=0 dB、0=ミュート） |
+| 4 | SE 音量 | 0〜10 |
+| 5 | 練習 | クリックでチュートリアル（`rules` 状態）へ。終了後コンフィグへ戻る |
+| 6 | 戻る | コンフィグを閉じてメニューへ |
+| 右下 | RESET | 進行データ全消去 |
 
 ---
 
@@ -402,7 +454,7 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 | トラック | 内容 |
 |----------|------|
 | 0〜4 ingame | 5 曲（`01-05` / `01-06` / `01-08` / `02-03` / `02-09`）。各曲イントロ + モチーフ複数本。ステージセレクトで L/R 切り替え |
-| 5 title | intro `KATADRAW_Title_0000.ogg` + モチーフ 5 本 |
+| 5 title | intro `KATADRAW_Title_0000.ogg` + モチーフ 5 本（`_0010`〜`_0050`） |
 
 | 定数 | 値 |
 |------|-----|
@@ -412,21 +464,39 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 | カウントダウン中 | **-3 dB** |
 | 初回ステージ | 無音 → `resume_ingame()` **1 秒後** に ingame 開始 |
 
+**BGM 曲名 Translation キー**:
+
+| トラック index | Translation キー | 曲名（全言語共通） |
+|---------------|-----------------|-------------------|
+| 0 | `BGM_01-05` | Solvrae_Clockwork |
+| 1 | `BGM_01-06` | taqumi - Micro'n'Macro |
+| 2 | `BGM_01-08` | Yebisu303_Small_Routines |
+| 3 | `BGM_02-03` | ZiXS - TRANSFER |
+| 4 | `BGM_02-09` | U_RURI_Thinking Time |
+
 ### 7.2 SE（基準 **-14.5 dB** + SE 音量オフセット）
 
 | ファイル | 用途 |
 |----------|------|
 | `se_count.wav` | カウントダウン |
 | `se_match.mp3` | クリア合致 |
-| `se_on.wav` | UI |
+| `se_on.wav` | UI 確定・ウィンドウ系 |
 | `se_point.wav` | ポイント |
 | `se_motion.mp3` | タイトルイントロ |
 | `katadraw_stagestart.wav` | ステージ開始 |
 | `se_click.wav` | クリック |
-| `se_window_open.wav` / `se_window_close.wav` | ウィンドウ |
+| `se_window_open.wav` / `se_window_close.wav` | ウィンドウ開閉 |
 | `se_catch.wav` | つかみ |
-| `se_move`（ループ） | 操作中 |
+| `se_move.wav`（ループ） | 操作中 |
 | `se_stageclear.wav` / `se_stageclear02.wav` | クリア |
+| `se_spot02.wav` | 頂点がガイドに吸着（スナップ）したとき |
+| `pinon.wav` | ピン止め ON |
+| `pinoff.wav` | ピン止め OFF |
+| `ts01.wav` | TransitionManager 対角ワイプ SE（予備） |
+| `ts02.wav` | TransitionManager 三角ワイプ SE（`play_triangle`） |
+| `ts03.wav` | TransitionManager 多角ワイプ SE（`play_polygon`） |
+| `ui_in_01〜03.wav` | [DEBUG] 引力 SE 候補（SE 選択パネルで試聴） |
+| `ui_out_01〜04.wav` | [DEBUG] 斥力 SE 候補（SE 選択パネルで試聴） |
 
 ---
 
@@ -454,7 +524,7 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 
 ### ステージデバッグ（F2）
 
-- 組み込み 62 面 + `user://custom_stages/*.json` 一覧
+- 組み込み 61 面 + `user://custom_stages/*.json` 一覧
 - 編集フィールド: `type`, `num_points`, `min/max_radius`, `variance`, `zigzag`, `display_rate_min_pct`, `clear_pct`, `guide_follows_player_radius`, `group_sizes`, `stage_name`, `description`
 - テストプレイ / 保存 / 図形編集（`stage_edit` 状態）
 
@@ -462,6 +532,18 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 
 - 現ステージの 6 パラメータを編集 → テスト → JSON 保存 / 図形編集
 - フィールド: ポイント数、クリア一致度、最小/最大半径、バラツキ、最低表示率
+
+### ゾウステージ起動ドット（ステージセレクト）
+
+- ステージセレクト左上（**Vector2(40, 80)**）に半径 **16 px** の暗い点を表示
+- クリックすると `zou.json`（manifest index 59、象ステージ）を直接起動
+- `StageData._stages_cache_ready` を毎回リセットしてマニフェスト変更を確実に反映
+
+### [DEBUG] SE 選択パネル（ステージセレクト）
+
+- `assets/sounds/ui_in_*.wav`（最大 10 ファイル）と `ui_out_*.wav`（最大 10 ファイル）を列挙
+- パネルをクリックして各 SE を試聴、`DebugSFXConfig` の `in_idx` / `out_idx` に記録
+- 引力/斥力発生中にループ再生（折り返し間隔 **0.5 秒**）
 
 ### その他
 
@@ -498,8 +580,8 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 
 | 項目 | 値 | 参照ファイル |
 |------|-----|-------------|
-| マニフェスト面数 | 62 | `manifest.json` |
-| 本編最大面数 | 50 | `game_config.gd` |
+| マニフェスト面数 | 61 | `manifest.json` |
+| 本編最大面数 | 50 | `StageSelectManager.gd` |
 | 体験版面数 | 3 | `game_config.gd` |
 | クリア閾値 | JSON `clear_pct` | 各 stage JSON |
 | メトリクス静止待ち | 0.15 s | `game.gd` |
@@ -507,9 +589,12 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 | ステージイントロ | 0.5 s | `ui_renderer.gd` |
 | 自キャラ半径 | 16 px | `input_handler.gd` |
 | 移動カウント閾値 | 22 px | `game.gd` |
-| Hausdorff 間引き | 10 フレームに 1 回 | `stage_manager.gd` |
+| Hausdorff 間引き | FAST=10 / MID=5 / SLOW=2 フレーム | `stage_manager.gd` |
 | 弧エッジ緩和係数 | 0.6 | `stage_manager.gd` |
 | 先端ペナルティ重み | 0.3 | `stage_manager.gd` |
+| ピン止め発動ホールド | 1000 ms | `input_handler.gd` |
+| スナップカラー持続 | 2.0 s | `ui_renderer.gd` |
+| プレイヤー速度ブースト | +35%/ボタン（LB/RB/LT/RT） | `input_handler.gd` |
 
 ---
 
@@ -518,10 +603,11 @@ cat_face, fish, heptagram, heptagram_silhouette, rugby_ball
 | ファイル | 役割 |
 |----------|------|
 | `scripts/game.gd` | メインゲームロジック・状態遷移 |
-| `scripts/input_handler.gd` | 入力・物理操作 |
+| `scripts/input_handler.gd` | 入力・物理操作・スナップ・ピン止め |
 | `scripts/stage_manager.gd` | ステージ生成・メトリクス・クリア判定 |
 | `scripts/ui_renderer.gd` | UI/HUD 描画 |
 | `scripts/StageSelectManager.gd` | ステージセレクト状態管理 |
+| `scripts/TransitionManager.gd` | シーン切り替えワイプアニメーション |
 | `scenes/stage_select.gd` | ステージセレクト画面 |
 | `Resources/game_config.gd` | ゲーム全体設定 |
 | `Resources/stage_config.gd` | 形状タイプ定義 |

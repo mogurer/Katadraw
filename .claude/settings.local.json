@@ -13,7 +13,11 @@
       "Bash(Sort-Object)",
       "Bash(Get-ChildItem -Path \"e:\\\\GitHub\\\\Katadraw\\\\scripts\" -Recurse -Filter \"*.gd\")",
       "Bash(Select-Object -ExpandProperty Name)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(python -c ' *)",
+      "Bash(node -e ' *)",
+      "Bash(grep -v \"//\\\\|#.*not\")",
+      "Bash(grep -v \"#.*config\\\\|//\\\\|#.*not\")"
     ]
   }
 }

@@ -2023,10 +2023,6 @@ func _draw_game(vp: Vector2) -> void:
 
 	_draw_hud(vp)
 
-	_draw_debug_circularity_overlay(vp)
-	# 近接角マーカー検証用: 全角オレンジ（C0〜Cn）の常時描画はオフ
-	# _draw_debug_corner_points_overlay()
-
 	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
 
@@ -2471,81 +2467,6 @@ func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
 				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a10),
 			])
 			_game.draw_polygon(pts, cols)
-
-
-func _draw_debug_circularity_overlay(vp: Vector2) -> void:
-	if not _game.stage_session.debug_test_mode:
-		return
-	if _game.game_state != "playing":
-		return
-	var raw: float = _game.current_circularity
-	var disp: float = _game.get_display_reproduction_rate(raw)
-	var goal: float = 100.0 - _game.clear_threshold
-	var min_p: float = _game.display_rate_min_pct
-	var ih: InputHandler = _game.input_handler
-	var phys_avg: float = ih.perf_avg_us
-	var phys_max: float = ih.perf_max_us
-	var isect_avg: float = ih.perf_avg_isect_us
-	var substep_avg: float = ih.perf_avg_substeps
-	var isect_hit: int = ih.perf_isect_triggered
-	var lines: Array[String] = [
-		"実測値: %.2f%%" % raw,
-		"表示値: %.1f%%" % disp,
-		"クリア: %.1f%%" % goal,
-		"下限:   %.1f%%" % min_p,
-		"─── 物理 (60f avg) ───",
-		"合計 avg: %5.0f μs" % phys_avg,
-		"合計 max: %5.0f μs" % phys_max,
-		"交差判定:  %5.0f μs" % isect_avg,
-		"サブステップ: %.1f" % substep_avg,
-		"交差解消: %d / f" % isect_hit,
-	]
-	var fs: int = 15
-	var pad: float = 6.0
-	var line_h: float = fs + 3.0
-	var bg_w: float = 185.0
-	var bg_h: float = line_h * lines.size() + pad * 2.0
-	var ox: float = 8.0
-	var oy: float = 8.0
-	_game.draw_rect(Rect2(ox, oy, bg_w, bg_h), Color(0.0, 0.0, 0.0, 0.52))
-	for li in range(lines.size()):
-		var col := Color(1.0, 1.0, 1.0, 0.92)
-		if li == 4:  # セパレータ行
-			col = Color(0.7, 0.7, 0.7, 0.7)
-		elif li >= 5 and li <= 7:
-			# 重い処理は赤く表示（1ms = 1000μs 超えで警告）
-			if (li == 5 and phys_avg > 1000.0) or (li == 7 and isect_avg > 300.0):
-				col = Color(1.0, 0.4, 0.3, 1.0)
-		_game.draw_string(_game.font, Vector2(ox + pad, oy + pad + fs + line_h * li), lines[li],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
-
-
-func _draw_debug_corner_points_overlay() -> void:
-	if not _game.stage_session.debug_test_mode:
-		return
-	if _game.game_state != "playing":
-		return
-	var sm: StageManager = _game.stage_manager
-
-	# HUD ガイドと同じ座標系: shape_center を基点に hud_guide_scale でスケール。
-	# guide_center_1 は重心計算方式の違い（周長重心 vs 面積重心）でずれるため使わない。
-	var center: Vector2 = _game.shape_center
-	var scale: float = sm.hud_guide_scale if GameConfig.USE_SCREEN_HUD_GUIDE else sm.guide_radius_val
-	var cos_r: float = cos(sm.correspondence_rotation)
-	var sin_r: float = sin(sm.correspondence_rotation)
-
-	# shape_corner_points: オレンジの丸 + 十字 + "C" + インデックス番号（スナップ先の角）
-	var corner_color := Color(1.0, 0.50, 0.05, 0.95)
-	for i in range(sm.shape_corner_points.size()):
-		var n: Vector2 = sm.shape_corner_points[i] as Vector2
-		var wx: float = (n.x * cos_r - n.y * sin_r) * scale
-		var wy: float = (n.x * sin_r + n.y * cos_r) * scale
-		var p: Vector2 = center + Vector2(wx, wy)
-		_game.draw_circle(p, 6.0, corner_color)
-		_game.draw_line(p + Vector2(-12, 0), p + Vector2(12, 0), corner_color, 2.0)
-		_game.draw_line(p + Vector2(0, -12), p + Vector2(0, 12), corner_color, 2.0)
-		_game.draw_string(_game.font, p + Vector2(8, -6), "C" + str(i),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.55, 0.05, 1.0))
 
 
 func _draw_right_stick_debug_line(vp: Vector2) -> void:
