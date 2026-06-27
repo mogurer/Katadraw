@@ -64,7 +64,7 @@ var min_radius: float = 0.0
 var max_radius: float = 0.0
 var clear_threshold: float = 5.0
 var num_points: int = 12
-var display_rate_min_pct: float = 50.0  # 実現率表示の下限。min_pct～目標 を 0～100 にマッピング
+var display_rate_min_pct: float = 0.0  # 実現率表示の下限。スナップ方式では 0 始まりのため 0.0 固定
 
 # --- Circle metrics (primary / group 1) ---
 var current_centroid: Vector2 = Vector2.ZERO
