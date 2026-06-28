@@ -18,7 +18,9 @@
       "Bash(node -e ' *)",
       "Bash(grep -v \"//\\\\|#.*not\")",
       "Bash(grep -v \"#.*config\\\\|//\\\\|#.*not\")",
-      "Bash(xargs grep -l \"BGMManager\\\\|TransitionManager\")"
+      "Bash(xargs grep -l \"BGMManager\\\\|TransitionManager\")",
+      "Bash(\"C:/Program Files/Godot/Godot_v4.4-stable_win64.exe\" --headless --check-only --script scripts/StageSelectManager.gd)",
+      "Bash(\"C:/Program Files/Godot/Godot_v4.4-stable_win64.exe\" --headless --check-only --script scenes/stage_select.gd)"
     ]
   }
 }

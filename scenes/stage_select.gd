@@ -62,14 +62,21 @@ const _POPUP_H         := 250.0
 # --- 自キャラ ---
 const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
 const _PAD_SPEED       := 600.0   # ゲームパッド移動速度（px/sec）
+const _SNAP_THRESHOLD: float = 0.80      # 右スティックのスナップ入力閾値（80%）
+const _SNAP_ANGLE_MAX: float = 45.0      # スナップ候補の最大角度差（度）
 
 # --- Camera2D スクロール ---
 const SCROLL_OFFSET_WEIGHT: float = 800.0  # オフセット起因のスクロール最大速度（px/s）
 const SCROLL_VEL_WEIGHT: float = 0.3       # アバター移動速度のスクロールへの反映倍率
+const SCROLL_DEAD_ZONE_X: float = 0.35  # X方向デッドゾーン半径（half_viewに対する比率）
+const SCROLL_DEAD_ZONE_Y: float = 0.25  # Y方向デッドゾーン半径（half_viewに対する比率）
 
 # --- ステージ解放フォーカス演出 ---
 const FOCUS_DURATION: float = 0.8  # 1ステージあたりのフォーカス時間（秒）
 const FOCUS_LERP: float     = 5.0  # カメラ追従の線形補間係数
+const FOCUS_MOVE_SPEED: float = 1200.0    # カメラ移動速度（px/s、リニア）
+const UNLOCK_ANIM_DURATION: float = 0.5   # ぼよよん演出の長さ（秒）
+const UNLOCK_LINE_FADE_DURATION: float = 0.3  # 接続ライン出現フェードイン時間（秒）
 
 # --- BGM 曲名表示 ---
 const _BGM_TRACK_KEYS: Array[String] = [
@@ -91,12 +98,20 @@ var _char_pos: Vector2 = Vector2(960, 540)
 var _char_target: Vector2 = Vector2(960, 540)
 var _char_moved_by_user: bool = false
 var _char_vel: Vector2 = Vector2.ZERO  # アバターの移動速度（前フレーム差分）
+var _snap_ready: bool = true  # 右スティックがニュートラルに戻ったかどうか
 
 # --- ステージ解放フォーカス演出 ---
 var _focus_queue: Array = []      # フォーカス対象ステージID配列
 var _is_focusing: bool = false    # フォーカス演出中フラグ
 var _focus_elapsed: float = 0.0   # 現在フォーカス経過時間
 var _focus_return_id: int = -1    # フォーカス演出終了後に戻るステージID
+
+# --- ステージ解放演出 ---
+var _unlock_anim_stage: int = -1              # 現在ぼよよん演出中のステージID
+var _unlock_anim_elapsed: float = 0.0         # ぼよよん演出の経過時間
+var _unlock_source_stage: int = -1            # 解放元（クリアした）ステージID
+# 接続ライン出現演出: { [min_id, max_id] -> elapsed }
+var _line_fade_progress: Dictionary = {}
 
 # --- アニメーション ---
 var _elapsed: float = 0.0
@@ -193,6 +208,12 @@ func _ready() -> void:
 	_sfx_on.stream = load("res://assets/sounds/se_on.wav")
 	_sfx_on.volume_db = -14.5
 	add_child(_sfx_on)
+	# 直前クリアで解放されたステージがあれば演出を開始する
+	var unlocked: Array[int] = StageSelectManager.last_unlocked_ids.duplicate()
+	StageSelectManager.last_unlocked_ids.clear()
+	var return_id: int = StageSelectManager.last_played_stage_id
+	_unlock_source_stage = return_id
+	start_unlock_focus(unlocked, return_id)
 	_start_bgm_label_anim.call_deferred()
 
 
@@ -204,6 +225,29 @@ func _process(delta: float) -> void:
 		_process_focus(delta)
 		queue_redraw()
 		return
+
+	# 右スティックによるスナップ移動
+	var rx: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
+	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	var r_magnitude: float = Vector2(rx, ry).length()
+
+	if r_magnitude < 0.2:
+		# ニュートラル状態に戻ったらスナップ再入力を許可
+		_snap_ready = true
+	elif r_magnitude >= _SNAP_THRESHOLD and _snap_ready and _popup_stage < 0 and not _esc_popup:
+		# 80%以上倒された かつ スナップ可能状態
+		_snap_ready = false
+		var stick_dir: Vector2 = Vector2(rx, ry).normalized()
+		var snap_target: int = _find_snap_target(stick_dir)
+		if snap_target >= 0:
+			_char_pos = StageSelectManager.get_world_pos(snap_target)
+			_char_target = _char_pos
+			_char_moved_by_user = true
+			var prev_nearest: int = _nearest
+			_nearest = snap_target
+			if _nearest != prev_nearest:
+				_sfx_hover.play()
+			queue_redraw()
 
 	# アバター移動速度を算出（前フレーム差分）
 	var prev_char_pos: Vector2 = _char_pos
@@ -386,7 +430,14 @@ func _draw() -> void:
 			continue
 		if StageSelectManager.get_state(b) == StageSelectManager.StageState.LOCKED:
 			continue
-		draw_line(_dot_pos(a), _dot_pos(b), _LINE_COLOR, _LINE_WIDTH)
+		# フェードイン中のラインはアルファを補間して描画
+		var key: String = "%d_%d" % [mini(a, b), maxi(a, b)]
+		var line_alpha: float = 1.0
+		if _line_fade_progress.has(key):
+			line_alpha = _line_fade_progress[key]
+		var line_color: Color = Color(_LINE_COLOR.r, _LINE_COLOR.g, _LINE_COLOR.b,
+									  _LINE_COLOR.a * line_alpha)
+		draw_line(_dot_pos(a), _dot_pos(b), line_color, _LINE_WIDTH)
 
 	# ステージドット（LOCKEDは描画しない）
 	for i in range(StageSelectManager.STAGE_COUNT):
@@ -395,12 +446,28 @@ func _draw() -> void:
 			continue
 		var pos: Vector2 = _dot_pos(i)
 		var is_near: bool = (i == _nearest and _popup_stage < 0 and not _esc_popup)
+
+		# ぼよよんアニメーション中の半径を計算
+		var draw_radius: float = _DOT_RADIUS
+		if i == _unlock_anim_stage and _unlock_anim_stage >= 0:
+			var t: float = _unlock_anim_elapsed / UNLOCK_ANIM_DURATION
+			var bounce: float
+			if t < 0.25:
+				bounce = lerp(1.0, 1.6, t / 0.25)
+			elif t < 0.5:
+				bounce = lerp(1.6, 0.8, (t - 0.25) / 0.25)
+			elif t < 0.75:
+				bounce = lerp(0.8, 1.2, (t - 0.5) / 0.25)
+			else:
+				bounce = lerp(1.2, 1.0, (t - 0.75) / 0.25)
+			draw_radius = _DOT_RADIUS * bounce
+
 		match state:
 			StageSelectManager.StageState.UNLOCKED:
-				draw_circle(pos, _DOT_RADIUS, _HOVER_COLOR if is_near else _UNLOCKED_COLOR)
+				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _UNLOCKED_COLOR)
 			StageSelectManager.StageState.CLEARED:
-				draw_circle(pos, _DOT_RADIUS, _HOVER_COLOR if is_near else _CLEARED_COLOR)
-				draw_circle(pos, _DOT_RADIUS * 0.35, Color.WHITE)
+				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _CLEARED_COLOR)
+				draw_circle(pos, draw_radius * 0.35, Color.WHITE)
 
 	# 自キャラ（通常時: ワールド座標レイヤーで描画）
 	if _popup_stage < 0 and not _esc_popup:
@@ -425,12 +492,6 @@ func _draw() -> void:
 	if _esc_popup:
 		_draw_esc_popup(vp)
 
-	# 自キャラ（ポップアップ表示中のみ・最前面）
-	if _popup_stage >= 0 or _esc_popup:
-		var screen_char_pos: Vector2 = get_canvas_transform() * _char_pos
-		draw_circle(screen_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
-		draw_circle(screen_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
-
 	# [DEBUG] ゾウステージ起動ドット（画面固定）
 	if _is_debug() and _zou_stage_idx >= 0:
 		draw_circle(_ZOU_DOT_POS, _ZOU_DOT_R, Color(0.15, 0.10, 0.20))
@@ -438,6 +499,13 @@ func _draw() -> void:
 	# [DEBUG] SE選択パネル（Ctrl押下中のみ画面中央に表示）
 	if _is_debug() and _ctrl_held and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
 		_draw_dbg_sfx_panel()
+
+	# 自キャラ（ポップアップ・SEパネル表示中のみ・最前面）
+	# ポップアップおよびSEパネルより後に描画することで最前面に表示する
+	if _popup_stage >= 0 or _esc_popup or (_is_debug() and _ctrl_held):
+		var screen_char_pos: Vector2 = get_canvas_transform() * _char_pos
+		draw_circle(screen_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
+		draw_circle(screen_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
 
 
 # ---------- 吹き出し ----------
@@ -784,6 +852,8 @@ func _calc_world_bounds() -> Rect2:
 func _update_camera(delta: float) -> void:
 	if _camera == null or _is_focusing:
 		return
+	if _popup_stage >= 0 or _esc_popup:
+		return
 	var viewport_size: Vector2 = get_viewport_rect().size
 	var half_view: Vector2 = viewport_size / 2.0 / _camera.zoom
 
@@ -794,17 +864,26 @@ func _update_camera(delta: float) -> void:
 		offset.y / half_view.y
 	)
 
-	# オフセット起因のスクロール速度（二乗で中心付近は遅く・端に近いほど加速）
-	var scroll_from_offset: Vector2 = Vector2(
-		sign(offset_ratio.x) * pow(absf(offset_ratio.x), 2.0),
-		sign(offset_ratio.y) * pow(absf(offset_ratio.y), 2.0)
-	) * SCROLL_OFFSET_WEIGHT
+	# 楕円デッドゾーンの内外判定
+	# (offset_ratio.x / DEAD_ZONE_X)^2 + (offset_ratio.y / DEAD_ZONE_Y)^2 > 1.0 なら外側
+	var ellipse_val: float = pow(offset_ratio.x / SCROLL_DEAD_ZONE_X, 2.0) \
+		+ pow(offset_ratio.y / SCROLL_DEAD_ZONE_Y, 2.0)
+	var outside_dead_zone: bool = ellipse_val > 1.0
 
-	# アバター移動速度起因のスクロール速度
-	var scroll_from_vel: Vector2 = _char_vel * SCROLL_VEL_WEIGHT
+	var scroll_speed: Vector2 = Vector2.ZERO
 
-	# 合算してカメラを移動
-	var scroll_speed: Vector2 = scroll_from_offset + scroll_from_vel
+	if outside_dead_zone:
+		# デッドゾーン外: オフセット起因のスクロール速度（二乗で端に近いほど加速）
+		var scroll_from_offset: Vector2 = Vector2(
+			sign(offset_ratio.x) * pow(absf(offset_ratio.x), 2.0),
+			sign(offset_ratio.y) * pow(absf(offset_ratio.y), 2.0)
+		) * SCROLL_OFFSET_WEIGHT
+
+		# アバター移動速度起因のスクロール速度
+		var scroll_from_vel: Vector2 = _char_vel * SCROLL_VEL_WEIGHT
+
+		scroll_speed = scroll_from_offset + scroll_from_vel
+
 	_camera.position += scroll_speed * delta
 
 	# カメラ位置をUNLOCKED/CLEAREDノードの範囲内にクランプ
@@ -816,11 +895,8 @@ func _update_camera(delta: float) -> void:
 func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
 	_focus_return_id = return_stage_id
 	if unlocked_ids.is_empty():
-		if return_stage_id >= 0:
-			_camera.position = StageSelectManager.get_world_pos(return_stage_id)
-			_char_pos = _camera.position
-			_char_target = _camera.position
 		return
+
 	# 時計回りにソート（直前ステージを中心とした角度順）
 	var center: Vector2 = Vector2.ZERO
 	if return_stage_id >= 0:
@@ -834,27 +910,89 @@ func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
 	_focus_queue = sorted_ids
 	_is_focusing = true
 	_focus_elapsed = 0.0
+	_unlock_anim_stage = -1
+	_unlock_anim_elapsed = 0.0
 
 
 func _process_focus(delta: float) -> void:
+	# 接続ラインのフェードイン進行（演出全体を通じて毎フレーム進行する）
+	for key in _line_fade_progress:
+		if _line_fade_progress[key] < 1.0:
+			_line_fade_progress[key] = minf(
+				_line_fade_progress[key] + delta / UNLOCK_LINE_FADE_DURATION, 1.0)
+
+	# ── フェーズ1: ぼよよん演出中 ──
+	if _unlock_anim_stage >= 0:
+		_unlock_anim_elapsed += delta
+		if _unlock_anim_elapsed >= UNLOCK_ANIM_DURATION:
+			# ぼよよん終了 → 次のステージへ
+			_unlock_anim_stage = -1
+			_unlock_anim_elapsed = 0.0
+			_focus_elapsed = 0.0
+		queue_redraw()
+		return
+
+	# ── フェーズ2: キュー終了チェック ──
 	if not _is_focusing or _focus_queue.is_empty():
 		_is_focusing = false
-		# 全ノードを巡り終えたら直前ステージへ戻る
+		# 全ノードを巡り終えたら直前ステージへ戻り、自キャラを画面中央（カメラ位置）へ揃える
 		if _focus_return_id >= 0:
 			var return_pos: Vector2 = StageSelectManager.get_world_pos(_focus_return_id)
 			_camera.position = return_pos
-			_char_pos = return_pos
-			_char_target = return_pos
 			_focus_return_id = -1
+		# 自キャラをカメラ中央（画面中央）へ配置
+		_char_pos = _camera.position
+		_char_target = _camera.position
 		return
-	_focus_elapsed += delta
-	var target_pos: Vector2 = StageSelectManager.get_world_pos(_focus_queue[0])
-	_camera.position = _camera.position.lerp(target_pos, FOCUS_LERP * delta)
-	if _focus_elapsed >= FOCUS_DURATION or _camera.position.distance_to(target_pos) < 5.0:
+
+	# ── フェーズ3: カメラ移動（リニア） ──
+	var target_id: int = _focus_queue[0]
+	var target_pos: Vector2 = StageSelectManager.get_world_pos(target_id)
+	_camera.position = _camera.position.move_toward(target_pos, FOCUS_MOVE_SPEED * delta)
+
+	if _camera.position.distance_to(target_pos) < 2.0:
+		# 到着 → ぼよよん演出開始
+		_camera.position = target_pos
 		_focus_queue.pop_front()
-		_focus_elapsed = 0.0
+		_unlock_anim_stage = target_id
+		_unlock_anim_elapsed = 0.0
+
+		# 接続ラインのフェードイン登録
+		if _unlock_source_stage >= 0:
+			var key: String = "%d_%d" % [mini(_unlock_source_stage, target_id),
+										  maxi(_unlock_source_stage, target_id)]
+			_line_fade_progress[key] = 0.0
+
+		# パーティクル生成
+		_spawn_unlock_particles(target_pos)
+
 		if _focus_queue.is_empty():
 			_is_focusing = false
+
+	queue_redraw()
+
+
+func _find_snap_target(stick_dir: Vector2) -> int:
+	var best_id: int = -1
+	var best_dist: float = INF
+	var angle_limit: float = deg_to_rad(_SNAP_ANGLE_MAX)
+
+	for i in range(StageSelectManager.STAGE_COUNT):
+		var state: int = StageSelectManager.get_state(i)
+		if state == StageSelectManager.StageState.LOCKED:
+			continue
+		var pos: Vector2 = StageSelectManager.get_world_pos(i)
+		var to_stage: Vector2 = pos - _char_pos
+		var dist: float = to_stage.length()
+		if dist < 1.0:
+			continue  # 現在地点と同じ位置は除外
+		var angle_diff: float = absf(stick_dir.angle_to(to_stage.normalized()))
+		if angle_diff <= angle_limit:
+			if dist < best_dist:
+				best_dist = dist
+				best_id = i
+
+	return best_id
 
 
 func _find_nearest_accessible() -> int:
@@ -1169,6 +1307,29 @@ func _begin_dismiss() -> void:
 	_bgm_tween.tween_callback(func() -> void:
 		_bgm_label.hide()
 		_bgm_text = ""
+	)
+
+
+func _spawn_unlock_particles(world_pos: Vector2) -> void:
+	var screen_pos: Vector2 = get_canvas_transform() * world_pos
+	var p := CPUParticles2D.new()
+	_bgm_canvas.add_child(p)
+	p.position = screen_pos
+	p.emitting = true
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.amount = 14
+	p.lifetime = 0.7
+	p.spread = 180.0
+	p.gravity = Vector2(0.0, 80.0)
+	p.initial_velocity_min = 100.0
+	p.initial_velocity_max = 220.0
+	p.scale_amount_min = 3.0
+	p.scale_amount_max = 7.0
+	p.color = Color(0.95, 0.19, 0.32, 1.0)
+	get_tree().create_timer(1.5).timeout.connect(func() -> void:
+		if is_instance_valid(p):
+			p.queue_free()
 	)
 
 

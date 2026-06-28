@@ -20,6 +20,8 @@ const _LINEAR_ZONE: Dictionary = { 0: [1], 1: [2], 2: [3] }
 var pending_stage_id: int = -1
 # ステージセレクトに戻ったときのフォーカス位置（最後にプレイしたステージID）
 var last_played_stage_id: int = -1
+# 直前クリアで新たに解放されたステージIDの一時保持（ステージセレクト画面が読み取り次第クリア）
+var last_unlocked_ids: Array[int] = []
 
 # チュートリアル済みフラグ（保存あり）
 var tutorial_shown: bool = false
@@ -107,9 +109,11 @@ func mark_cleared(stage_id: int) -> void:
 	_states[stage_id] = StageState.CLEARED
 	# 一本道ゾーンは専用リスト、それ以外は接続リストを使う
 	var unlock_targets: Array = _LINEAR_ZONE.get(stage_id, _connections.get(stage_id, []))
+	last_unlocked_ids.clear()
 	for nb_id in unlock_targets:
 		if nb_id >= 0 and nb_id < _states.size() and _states[nb_id] == StageState.LOCKED:
 			_states[nb_id] = StageState.UNLOCKED
+			last_unlocked_ids.append(nb_id)
 	_save_states()
 
 
