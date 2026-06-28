@@ -24,10 +24,6 @@ const _POPUP_BORDER    := Color(0.95, 0.19, 0.32)
 const _BTN_YES_COLOR   := Color(0.95, 0.19, 0.32)
 const _BTN_NO_COLOR    := Color(0.26, 0.21, 0.28)
 
-# --- [DEBUG] ゾウステージ起動ドット ---
-const _ZOU_DOT_POS := Vector2(40.0, 80.0)
-const _ZOU_DOT_R   := 16.0
-
 # --- [DEBUG] SE選択パネル ---
 const _DBG_PANEL_X   := 310.0
 const _DBG_PANEL_Y   := 12.0
@@ -106,6 +102,17 @@ var _is_focusing: bool = false    # フォーカス演出中フラグ
 var _focus_elapsed: float = 0.0   # 現在フォーカス経過時間
 var _focus_return_id: int = -1    # フォーカス演出終了後に戻るステージID
 
+# --- 最終ステージ演出 ---
+var _final_directing: bool = false
+var _final_direction_played: bool = false  # セッション中フラグ（セーブなし）
+var _final_overlay_alpha: float = 0.0      # 暗転オーバーレイのアルファ値
+var _final_spark_drawn: Array = []          # 描画済みエッジ Array[[from: Vector2, to: Vector2]]
+var _final_flash_pos: Vector2 = Vector2.ZERO
+var _final_flash_alpha: float = 0.0
+var _final_phase3: int = 0              # 0=inactive, 1=TAP-TO-START待ち, 2=カウントダウン
+var _final_countdown_num: int = 0       # カウントダウン表示値（3→2→1）
+var _final_phase3_input_received: bool = false
+
 # --- ステージ解放演出 ---
 var _unlock_anim_stage: int = -1              # 現在ぼよよん演出中のステージID
 var _unlock_anim_elapsed: float = 0.0         # ぼよよん演出の経過時間
@@ -138,7 +145,6 @@ var _dbg_preview: AudioStreamPlayer = null
 var _sfx_hover: AudioStreamPlayer = null
 var _sfx_click: AudioStreamPlayer = null
 var _sfx_on: AudioStreamPlayer = null
-var _zou_stage_idx: int = -1  # [DEBUG] zou.json の StageData インデックス（-1=未発見）
 
 # --- BGM 曲名表示 ---
 var _bgm_canvas: CanvasLayer = null
@@ -193,7 +199,8 @@ func _ready() -> void:
 		DebugSFXConfig.ensure_counted()
 		_dbg_preview = AudioStreamPlayer.new()
 		add_child(_dbg_preview)
-		_zou_stage_idx = _find_zou_stage_idx()
+	if _is_debug() or StageSelectManager.all_cleared:
+		StageSelectManager._zou_stage_idx = _find_zou_stage_idx()
 	_bgm_canvas = $BgmUI
 	_setup_bgm_ui()
 	_sfx_hover = AudioStreamPlayer.new()
@@ -214,6 +221,8 @@ func _ready() -> void:
 	var return_id: int = StageSelectManager.last_played_stage_id
 	_unlock_source_stage = return_id
 	start_unlock_focus(unlocked, return_id)
+	if StageSelectManager.all_cleared and not _final_direction_played:
+		_play_final_direction.call_deferred()
 	_start_bgm_label_anim.call_deferred()
 
 
@@ -223,6 +232,11 @@ func _process(delta: float) -> void:
 	# フォーカス演出中は通常の入力・描画更新をスキップ
 	if _is_focusing:
 		_process_focus(delta)
+		queue_redraw()
+		return
+
+	# 最終ステージ演出中は通常処理をスキップ（コルーチンが制御する）
+	if _final_directing:
 		queue_redraw()
 		return
 
@@ -298,6 +312,16 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# 最終ステージ演出中: Phase3入力のみ受け付け、他は全てブロック
+	if _final_directing:
+		if _final_phase3 == 1 and (
+			(event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) or
+			(event is InputEventKey and event.pressed and not event.is_echo()) or
+			(event is InputEventJoypadButton and event.pressed)
+		):
+			_final_phase3_input_received = true
+		return
+
 	if event is InputEventKey:
 		if event.keycode == KEY_CTRL:
 			_ctrl_held = event.pressed
@@ -316,10 +340,6 @@ func _input(event: InputEvent) -> void:
 	if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		# SE選択パネルはCtrl押下中のみ受け付ける
 		if _ctrl_held and _handle_dbg_sfx_click(event.position):
-			return
-		if _zou_stage_idx >= 0 and event.position.distance_to(_ZOU_DOT_POS) <= _ZOU_DOT_R:
-			StageSelectManager.pending_stage_id = _zou_stage_idx
-			TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 			return
 
 	# タイトル戻り確認ポップアップ
@@ -447,9 +467,10 @@ func _draw() -> void:
 		var pos: Vector2 = _dot_pos(i)
 		var is_near: bool = (i == _nearest and _popup_stage < 0 and not _esc_popup)
 
+		# 最終ステージ演出中はzoom逆数でドットサイズを補正
+		var draw_radius: float = _DOT_RADIUS / maxf(_camera.zoom.x, 0.01) if _final_directing else _DOT_RADIUS
 		# ぼよよんアニメーション中の半径を計算
-		var draw_radius: float = _DOT_RADIUS
-		if i == _unlock_anim_stage and _unlock_anim_stage >= 0:
+		if not _final_directing and i == _unlock_anim_stage and _unlock_anim_stage >= 0:
 			var t: float = _unlock_anim_elapsed / UNLOCK_ANIM_DURATION
 			var bounce: float
 			if t < 0.25:
@@ -469,8 +490,15 @@ func _draw() -> void:
 				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _CLEARED_COLOR)
 				draw_circle(pos, draw_radius * 0.35, Color.WHITE)
 
+	# スパーク伝播ライン（最終ステージ演出 Phase1）
+	if _final_directing:
+		for edge in _final_spark_drawn:
+			draw_line(edge[0] as Vector2, edge[1] as Vector2, Color.WHITE, 2.0)
+		if _final_flash_alpha > 0.0:
+			draw_circle(_final_flash_pos, 8.0, Color(1.0, 1.0, 1.0, _final_flash_alpha))
+
 	# 自キャラ（通常時: ワールド座標レイヤーで描画）
-	if _popup_stage < 0 and not _esc_popup:
+	if _popup_stage < 0 and not _esc_popup and not _final_directing:
 		draw_circle(_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
 		draw_circle(_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
 
@@ -478,11 +506,12 @@ func _draw() -> void:
 	draw_set_transform_matrix(get_canvas_transform().affine_inverse())
 
 	# 吹き出し（スクリーン座標で描画。dot位置はcanvas_transformで変換済み）
-	if _nearest >= 0 and _popup_stage < 0 and not _esc_popup:
+	if _nearest >= 0 and _popup_stage < 0 and not _esc_popup and not _final_directing:
 		_draw_bubble(_nearest)
 
 	# ラベル
-	draw_string(_font, Vector2(40, vp.y - 32), "ESC: タイトルへ戻る", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
+	if not _final_directing:
+		draw_string(_font, Vector2(40, vp.y - 32), "ESC: タイトルへ戻る", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
@@ -492,20 +521,24 @@ func _draw() -> void:
 	if _esc_popup:
 		_draw_esc_popup(vp)
 
-	# [DEBUG] ゾウステージ起動ドット（画面固定）
-	if _is_debug() and _zou_stage_idx >= 0:
-		draw_circle(_ZOU_DOT_POS, _ZOU_DOT_R, Color(0.15, 0.10, 0.20))
-
 	# [DEBUG] SE選択パネル（Ctrl押下中のみ画面中央に表示）
 	if _is_debug() and _ctrl_held and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
 		_draw_dbg_sfx_panel()
 
 	# 自キャラ（ポップアップ・SEパネル表示中のみ・最前面）
 	# ポップアップおよびSEパネルより後に描画することで最前面に表示する
-	if _popup_stage >= 0 or _esc_popup or (_is_debug() and _ctrl_held):
+	if (_popup_stage >= 0 or _esc_popup or (_is_debug() and _ctrl_held)) and not _final_directing:
 		var screen_char_pos: Vector2 = get_canvas_transform() * _char_pos
 		draw_circle(screen_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
 		draw_circle(screen_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
+
+	# 最終ステージ演出: 暗転オーバーレイ
+	if _final_directing and _final_overlay_alpha > 0.0:
+		draw_rect(Rect2(Vector2.ZERO, vp), Color(0.0, 0.0, 0.0, _final_overlay_alpha))
+
+	# 最終ステージ演出 Phase3: ZOUタイトル + TAP TO START / カウントダウン
+	if _final_directing and _final_phase3 >= 1:
+		_draw_final_phase3(vp)
 
 
 # ---------- 吹き出し ----------
@@ -1121,6 +1154,147 @@ func _find_zou_stage_idx() -> int:
 		if str(stages[i].get("_source_file", "")) == "zou.json":
 			return i
 	return -1
+
+
+# ---------- 最終ステージ演出 ----------
+
+func _compute_angular_walk_order(positions: Array[Vector2]) -> PackedInt32Array:
+	var n: int = positions.size()
+	var centroid: Vector2 = Vector2.ZERO
+	for p in positions:
+		centroid += p
+	centroid /= float(n)
+	var items: Array[Dictionary] = []
+	for i in range(n):
+		var d: Vector2 = positions[i] - centroid
+		items.append({"idx": i, "ang": atan2(d.y, d.x)})
+	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return (a["ang"] as float) < (b["ang"] as float)
+	)
+	var result := PackedInt32Array()
+	result.resize(n)
+	for t in range(n):
+		result[t] = items[t]["idx"] as int
+	return result
+
+
+func _draw_final_phase3(vp: Vector2) -> void:
+	var cx: float = vp.x * 0.5
+	var cy: float = vp.y * 0.5
+	# ZOUタイトル
+	var title_fs: int = 120
+	draw_string(_font_din if _font_din else _font, Vector2(cx, cy - 60.0),
+		"ZOU", HORIZONTAL_ALIGNMENT_CENTER, -1, title_fs, Color.WHITE)
+	if _final_phase3 == 1:
+		# TAP TO START（点滅: elapsed の整数秒が偶数なら表示）
+		if int(_elapsed * 2.0) % 2 == 0:
+			draw_string(_font, Vector2(cx, cy + 60.0),
+				"TAP TO START", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1.0, 1.0, 1.0, 0.85))
+	elif _final_phase3 == 2:
+		draw_string(_font_din if _font_din else _font, Vector2(cx, cy + 80.0),
+			str(_final_countdown_num), HORIZONTAL_ALIGNMENT_CENTER, -1, 80, Color.WHITE)
+
+
+func _play_final_direction() -> void:
+	_final_directing = true
+	_final_direction_played = true
+
+	# ── Prologue: 背景暗転（3秒）+ BGMフェードダウン ──
+	var dim_tween: Tween = create_tween()
+	dim_tween.tween_property(self, "_final_overlay_alpha", 0.7, 3.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+	var bgm_tween: Tween = create_tween()
+	bgm_tween.tween_method(func(v: float) -> void: BGMManager.set_volume_db(v), 0.0, -80.0, 3.0)
+	bgm_tween.tween_callback(func() -> void: BGMManager.stop())
+
+	await dim_tween.finished
+
+	# ── Phase 1: スパーク伝播＋カメラ追従（50エッジ × 0.1秒 ≈ 5秒） ──
+	var positions: Array[Vector2] = []
+	for i in range(StageSelectManager.STAGE_COUNT):
+		positions.append(StageSelectManager.get_world_pos(i))
+
+	# AABB中心
+	var aabb_min: Vector2 = positions[0]
+	var aabb_max: Vector2 = positions[0]
+	for p in positions:
+		aabb_min = Vector2(minf(aabb_min.x, p.x), minf(aabb_min.y, p.y))
+		aabb_max = Vector2(maxf(aabb_max.x, p.x), maxf(aabb_max.y, p.y))
+	var aabb_center: Vector2 = (aabb_min + aabb_max) * 0.5
+
+	# 重心周り極角ソート（反時計回り）→ 逆順で時計回り
+	var walk_order: PackedInt32Array = _compute_angular_walk_order(positions)
+	var n: int = walk_order.size()
+
+	# 起点: last_played_stage_id のインデックスを探す
+	var start_stage: int = StageSelectManager.last_played_stage_id
+	if start_stage < 0 or start_stage >= StageSelectManager.STAGE_COUNT:
+		start_stage = 0
+	var start_walk_idx: int = 0
+	for k in range(n):
+		if walk_order[k] == start_stage:
+			start_walk_idx = k
+			break
+
+	_final_spark_drawn = []
+
+	const ZOOM_START_EDGE: int = 40
+
+	for edge_i in range(n):
+		# 時計回り（降順）のエッジ
+		var from_w: int = (start_walk_idx - edge_i + n) % n
+		var to_w: int = (from_w - 1 + n) % n
+		var from_pos: Vector2 = positions[walk_order[from_w]]
+		var to_pos: Vector2 = positions[walk_order[to_w]]
+
+		# ズームアウト開始（残り10エッジ）
+		if edge_i == ZOOM_START_EDGE:
+			var zoom_tween: Tween = create_tween()
+			zoom_tween.set_parallel(true)
+			zoom_tween.tween_property(_camera, "zoom", Vector2(0.5, 0.5), 1.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+			zoom_tween.tween_property(_camera, "position", aabb_center, 1.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+		# カメラを次のポイントへ（ズームアウト前のみ）
+		if edge_i < ZOOM_START_EDGE:
+			var cam_tween: Tween = create_tween()
+			cam_tween.tween_property(_camera, "position", to_pos, 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+		# エッジ登録＋フラッシュ
+		_final_spark_drawn.append([from_pos, to_pos])
+		_final_flash_pos = from_pos
+		_final_flash_alpha = 1.0
+		var flash_tween: Tween = create_tween()
+		flash_tween.tween_property(self, "_final_flash_alpha", 0.0, 0.1)
+
+		await get_tree().create_timer(0.1).timeout
+		queue_redraw()
+
+	# ── Phase 2: ウェイト（3秒） ──
+	await get_tree().create_timer(3.0).timeout
+
+	# ── Phase 3: ステージ開始画面 ──
+	_final_phase3 = 1
+	_final_phase3_input_received = false
+	queue_redraw()
+
+	# 入力待ち
+	while not _final_phase3_input_received:
+		await get_tree().process_frame
+
+	# カウントダウン
+	_final_phase3 = 2
+	for cnt in range(3, 0, -1):
+		_final_countdown_num = cnt
+		queue_redraw()
+		await get_tree().create_timer(1.0).timeout
+
+	# ゲーム開始
+	BGMManager.set_volume_db(0.0)
+	BGMManager.play_title()
+	_final_overlay_alpha = 0.0
+	_final_phase3 = 0
+	StageSelectManager.pending_stage_id = StageSelectManager._zou_stage_idx
+	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 
 
 func _dbg_panel_rect() -> Rect2:

@@ -530,6 +530,12 @@ var _sfx_ui_out_timer: Timer = null         # [DEBUG] 斥力SE 折り返しタ�
 const _DBG_SE_IN_LOOP_SEC  := 0.5           # [DEBUG] 引力SE 折り返し間隔（秒）
 const _DBG_SE_OUT_LOOP_SEC := 0.5           # [DEBUG] 斥力SE 折り返し間隔（秒）
 
+# コナミコマンド（タイトル画面での全クリア直前状態セット）
+const _KONAMI_SEQ: Array[String] = ["up", "up", "dn", "dn", "lt", "rt", "lt", "rt", "b", "a"]
+var _konami_idx: int = 0
+var _konami_last_msec: int = 0
+var _konami_used: bool = false
+
 # --- Debug ---
 ## F2 から入る STAGE DEBUG 系でのみ有効にするデバッグフラグ
 var debug_mode: bool = false
@@ -1634,6 +1640,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "title":
+		_konami_process_input(event)
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
 			_enter_stage_debug_screen()
 		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
@@ -2790,7 +2797,64 @@ func _start_game_from_stage_select() -> void:
 	_start_stage(sid)
 
 
+func _konami_event_to_token(event: InputEvent) -> String:
+	if event is InputEventKey and event.pressed and not event.echo:
+		match event.keycode:
+			KEY_UP:    return "up"
+			KEY_DOWN:  return "dn"
+			KEY_LEFT:  return "lt"
+			KEY_RIGHT: return "rt"
+			KEY_B:     return "b"
+			KEY_A:     return "a"
+	elif event is InputEventJoypadButton and event.pressed:
+		match event.button_index:
+			JOY_BUTTON_DPAD_UP:    return "up"
+			JOY_BUTTON_DPAD_DOWN:  return "dn"
+			JOY_BUTTON_DPAD_LEFT:  return "lt"
+			JOY_BUTTON_DPAD_RIGHT: return "rt"
+			JOY_BUTTON_B:          return "b"
+			JOY_BUTTON_A:          return "a"
+	return ""
+
+
+func _konami_process_input(event: InputEvent) -> void:
+	if _konami_used:
+		return
+	var token: String = _konami_event_to_token(event)
+	if token.is_empty():
+		return
+	var now: int = Time.get_ticks_msec()
+	if _konami_idx > 0 and now - _konami_last_msec > 3000:
+		_konami_idx = 0
+	_konami_last_msec = now
+	if token == _KONAMI_SEQ[_konami_idx]:
+		_konami_idx += 1
+		if _konami_idx >= _KONAMI_SEQ.size():
+			_konami_activate()
+			_konami_idx = 0
+	else:
+		_konami_idx = 1 if token == _KONAMI_SEQ[0] else 0
+
+
+func _konami_activate() -> void:
+	_konami_used = true
+	_play_sfx(sfx_cat)
+	# 全ステージをCLEAREDにセット
+	for i in range(StageSelectManager.STAGE_COUNT):
+		StageSelectManager._states[i] = StageSelectManager.StageState.CLEARED
+	# id >= 4 からランダムに1つ選んでUNLOCKEDに戻す（全クリア直前状態）
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var pick: int = 4 + rng.randi() % (StageSelectManager.STAGE_COUNT - 4)
+	StageSelectManager._states[pick] = StageSelectManager.StageState.UNLOCKED
+	# all_cleared は false のまま（全クリア演出をトリガーしないため）
+	StageSelectManager._save_states()
+
+
 func _return_to_stage_select_preserve_bgm() -> void:
+	if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
+		get_tree().change_scene_to_file("res://scenes/game.tscn")
+		return
 	pause_active = false
 	pause_confirm_title = false
 	pause_retry_elapsed = -1.0
