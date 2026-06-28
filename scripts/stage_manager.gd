@@ -578,7 +578,9 @@ func _rebuild_initial_points_hud_triangle_bottom_snap(point_positions: Array[Vec
 	var center: Vector2 = hud_guide_center
 	var r: float = hud_guide_scale  # guide_radius_val ではなく HUD スケール（recompute_hud_guide_layout 後）
 	var sq3: float = sqrt(3.0) / 2.0
-	point_positions.append(center)                           # KATA 0: 頂上（自由）
+	# KATA 0: 頂上（center→天頂を3等分して天頂寄り2/3の位置からスタート）
+	var apex: Vector2 = center + Vector2(0.0, -1.0) * r
+	point_positions.append(center.lerp(apex, 2.0 / 3.0))
 	point_positions.append(center + Vector2(sq3,  0.5) * r) # KATA 1: 右下（事前スナップ）
 	point_positions.append(center + Vector2(-sq3, 0.5) * r) # KATA 2: 左下（事前スナップ）
 	return true

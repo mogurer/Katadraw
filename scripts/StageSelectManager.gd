@@ -178,6 +178,7 @@ func reset_all() -> void:
 	_best_times.clear()
 	_best_move_counts.clear()
 	_unlocked_bgms.clear()
+	last_played_stage_id = -1
 	_save_states()
 
 
@@ -195,6 +196,7 @@ func _save_states() -> void:
 		best_m[str(k)] = _best_move_counts[k]
 	data["best_moves"] = best_m
 	data["unlocked_bgms"] = _unlocked_bgms
+	data["last_played_stage_id"] = last_played_stage_id
 	var f: FileAccess = FileAccess.open(_SAVE_PATH, FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
@@ -227,3 +229,4 @@ func _load_states() -> void:
 	if d.has("unlocked_bgms"):
 		for bgm in d["unlocked_bgms"]:
 			_unlocked_bgms.append(str(bgm))
+	last_played_stage_id = int(d.get("last_played_stage_id", -1))

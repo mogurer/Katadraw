@@ -64,8 +64,8 @@ const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
 const _PAD_SPEED       := 600.0   # ゲームパッド移動速度（px/sec）
 
 # --- Camera2D スクロール ---
-const SCROLL_MARGIN: float = 0.20  # ビューポート端からスクロール開始する割合
-const SCROLL_SPEED: float  = 800.0 # スクロール速度（px/sec）
+const SCROLL_OFFSET_WEIGHT: float = 800.0  # オフセット起因のスクロール最大速度（px/s）
+const SCROLL_VEL_WEIGHT: float = 0.3       # アバター移動速度のスクロールへの反映倍率
 
 # --- ステージ解放フォーカス演出 ---
 const FOCUS_DURATION: float = 0.8  # 1ステージあたりのフォーカス時間（秒）
@@ -90,6 +90,7 @@ var _camera: Camera2D = null  # コードで生成する Camera2D
 var _char_pos: Vector2 = Vector2(960, 540)
 var _char_target: Vector2 = Vector2(960, 540)
 var _char_moved_by_user: bool = false
+var _char_vel: Vector2 = Vector2.ZERO  # アバターの移動速度（前フレーム差分）
 
 # --- ステージ解放フォーカス演出 ---
 var _focus_queue: Array = []      # フォーカス対象ステージID配列
@@ -110,6 +111,7 @@ var _popup_yes_hovered: bool = false
 var _popup_no_hovered: bool = false
 
 var _esc_popup: bool = false   # タイトル戻り確認ポップアップ
+var _ctrl_held: bool = false   # Ctrlキー押下中フラグ
 var _esc_popup_yes_hovered: bool = false
 var _esc_popup_no_hovered: bool = false
 
@@ -203,23 +205,35 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
+	# アバター移動速度を算出（前フレーム差分）
+	var prev_char_pos: Vector2 = _char_pos
+
 	# ゲームパッドスティック
 	var sx: float = Input.get_axis("ui_left", "ui_right")
 	var sy: float = Input.get_axis("ui_up", "ui_down")
 	var pad_active: bool = absf(sx) > 0.1 or absf(sy) > 0.1
 	if pad_active:
 		_char_pos += Vector2(sx, sy).normalized() * _PAD_SPEED * delta
-		# クランプをワールド座標範囲に変更
-		var bounds: Rect2 = _calc_world_bounds()
-		_char_pos = _char_pos.clamp(bounds.position, bounds.position + bounds.size)
+		# アバターはビューポート内に収める
+		var half_view: Vector2 = get_viewport_rect().size / 2.0 / _camera.zoom
+		var view_min: Vector2 = _camera.position - half_view
+		var view_max: Vector2 = _camera.position + half_view
+		_char_pos = _char_pos.clamp(view_min, view_max)
 		_char_target = _char_pos
 		_char_moved_by_user = true
 	else:
-		# マウス追跡
-		var new_pos: Vector2 = _char_pos.lerp(_char_target, _CHAR_LERP * delta)
+		# マウス追跡（アバターはビューポート内に収める）
+		var half_view: Vector2 = get_viewport_rect().size / 2.0 / _camera.zoom
+		var view_min: Vector2 = _camera.position - half_view
+		var view_max: Vector2 = _camera.position + half_view
+		var clamped_target: Vector2 = _char_target.clamp(view_min, view_max)
+		var new_pos: Vector2 = _char_pos.lerp(clamped_target, _CHAR_LERP * delta)
 		if new_pos.distance_to(_char_pos) > 0.5:
 			_char_moved_by_user = true
 		_char_pos = new_pos
+
+	# アバター移動速度を更新
+	_char_vel = (_char_pos - prev_char_pos) / delta
 
 	# 最近傍ステージ更新（ユーザー操作で動いたとき・ポップアップ非表示時のみ）
 	if _char_moved_by_user and _popup_stage < 0 and not _esc_popup:
@@ -240,6 +254,11 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		if event.keycode == KEY_CTRL:
+			_ctrl_held = event.pressed
+			queue_redraw()
+
 	# マウス位置 → 自キャラターゲット更新
 	if event is InputEventMouseMotion:
 		_char_target = get_canvas_transform().affine_inverse() * event.position
@@ -251,7 +270,8 @@ func _input(event: InputEvent) -> void:
 
 	# [DEBUG] デバッグクリック処理（他のUIより先に処理）
 	if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		if _handle_dbg_sfx_click(event.position):
+		# SE選択パネルはCtrl押下中のみ受け付ける
+		if _ctrl_held and _handle_dbg_sfx_click(event.position):
 			return
 		if _zou_stage_idx >= 0 and event.position.distance_to(_ZOU_DOT_POS) <= _ZOU_DOT_R:
 			StageSelectManager.pending_stage_id = _zou_stage_idx
@@ -368,23 +388,24 @@ func _draw() -> void:
 			continue
 		draw_line(_dot_pos(a), _dot_pos(b), _LINE_COLOR, _LINE_WIDTH)
 
-	# ステージドット
+	# ステージドット（LOCKEDは描画しない）
 	for i in range(StageSelectManager.STAGE_COUNT):
 		var state: int = StageSelectManager.get_state(i)
+		if state == StageSelectManager.StageState.LOCKED:
+			continue
 		var pos: Vector2 = _dot_pos(i)
 		var is_near: bool = (i == _nearest and _popup_stage < 0 and not _esc_popup)
 		match state:
-			StageSelectManager.StageState.LOCKED:
-				draw_circle(pos, _DOT_RADIUS, _LOCKED_COLOR)
 			StageSelectManager.StageState.UNLOCKED:
 				draw_circle(pos, _DOT_RADIUS, _HOVER_COLOR if is_near else _UNLOCKED_COLOR)
 			StageSelectManager.StageState.CLEARED:
 				draw_circle(pos, _DOT_RADIUS, _HOVER_COLOR if is_near else _CLEARED_COLOR)
 				draw_circle(pos, _DOT_RADIUS * 0.35, Color.WHITE)
 
-	# 自キャラ（ワールド座標・最前面）
-	draw_circle(_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
-	draw_circle(_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
+	# 自キャラ（通常時: ワールド座標レイヤーで描画）
+	if _popup_stage < 0 and not _esc_popup:
+		draw_circle(_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
+		draw_circle(_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
 
 	# ─── 再び画面固定レイヤーへ戻してUI要素を描画 ───
 	draw_set_transform_matrix(get_canvas_transform().affine_inverse())
@@ -404,12 +425,18 @@ func _draw() -> void:
 	if _esc_popup:
 		_draw_esc_popup(vp)
 
+	# 自キャラ（ポップアップ表示中のみ・最前面）
+	if _popup_stage >= 0 or _esc_popup:
+		var screen_char_pos: Vector2 = get_canvas_transform() * _char_pos
+		draw_circle(screen_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
+		draw_circle(screen_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
+
 	# [DEBUG] ゾウステージ起動ドット（画面固定）
 	if _is_debug() and _zou_stage_idx >= 0:
 		draw_circle(_ZOU_DOT_POS, _ZOU_DOT_R, Color(0.15, 0.10, 0.20))
 
-	# [DEBUG] SE選択パネル（画面固定）
-	if _is_debug() and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
+	# [DEBUG] SE選択パネル（Ctrl押下中のみ画面中央に表示）
+	if _is_debug() and _ctrl_held and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
 		_draw_dbg_sfx_panel()
 
 
@@ -736,12 +763,18 @@ func _calc_world_bounds() -> Rect2:
 	var min_y: float = INF
 	var max_x: float = -INF
 	var max_y: float = -INF
+	var found: bool = false
 	for i in range(StageSelectManager.STAGE_COUNT):
+		if StageSelectManager.get_state(i) == StageSelectManager.StageState.LOCKED:
+			continue
 		var pos: Vector2 = StageSelectManager.get_world_pos(i)
 		min_x = minf(min_x, pos.x)
 		min_y = minf(min_y, pos.y)
 		max_x = maxf(max_x, pos.x)
 		max_y = maxf(max_y, pos.y)
+		found = true
+	if not found:
+		return Rect2(Vector2.ZERO, Vector2(1920.0, 1080.0))
 	var margin: float = 200.0
 	return Rect2(min_x - margin, min_y - margin,
 				 max_x - min_x + margin * 2.0,
@@ -753,19 +786,31 @@ func _update_camera(delta: float) -> void:
 		return
 	var viewport_size: Vector2 = get_viewport_rect().size
 	var half_view: Vector2 = viewport_size / 2.0 / _camera.zoom
-	var margin: Vector2 = half_view * 2.0 * SCROLL_MARGIN
-	var rel: Vector2 = _char_pos - _camera.position
-	var scroll: Vector2 = Vector2.ZERO
-	if rel.x < -half_view.x + margin.x:
-		scroll.x = -1.0
-	elif rel.x > half_view.x - margin.x:
-		scroll.x = 1.0
-	if rel.y < -half_view.y + margin.y:
-		scroll.y = -1.0
-	elif rel.y > half_view.y - margin.y:
-		scroll.y = 1.0
-	if scroll != Vector2.ZERO:
-		_camera.position += scroll.normalized() * SCROLL_SPEED * delta
+
+	# 画面中心からのアバターのオフセットを -1〜1 に正規化
+	var offset: Vector2 = _char_pos - _camera.position
+	var offset_ratio: Vector2 = Vector2(
+		offset.x / half_view.x,
+		offset.y / half_view.y
+	)
+
+	# オフセット起因のスクロール速度（二乗で中心付近は遅く・端に近いほど加速）
+	var scroll_from_offset: Vector2 = Vector2(
+		sign(offset_ratio.x) * pow(absf(offset_ratio.x), 2.0),
+		sign(offset_ratio.y) * pow(absf(offset_ratio.y), 2.0)
+	) * SCROLL_OFFSET_WEIGHT
+
+	# アバター移動速度起因のスクロール速度
+	var scroll_from_vel: Vector2 = _char_vel * SCROLL_VEL_WEIGHT
+
+	# 合算してカメラを移動
+	var scroll_speed: Vector2 = scroll_from_offset + scroll_from_vel
+	_camera.position += scroll_speed * delta
+
+	# カメラ位置をUNLOCKED/CLEAREDノードの範囲内にクランプ
+	var cam_bounds: Rect2 = _calc_world_bounds()
+	_camera.position = _camera.position.clamp(
+		cam_bounds.position, cam_bounds.position + cam_bounds.size)
 
 
 func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
@@ -943,8 +988,11 @@ func _find_zou_stage_idx() -> int:
 func _dbg_panel_rect() -> Rect2:
 	var rows: int = maxi(DebugSFXConfig.in_count, DebugSFXConfig.out_count)
 	var pw: float = _DBG_COL_W * 2.0 + _DBG_COL_GAP + _DBG_PAD * 2.0
-	var ph: float = _DBG_HEADER_H + rows * _DBG_ITEM_H + _DBG_PAD
-	return Rect2(_DBG_PANEL_X, _DBG_PANEL_Y, pw, ph)
+	var ph: float = _DBG_HEADER_H + rows * _DBG_ITEM_H + _DBG_PAD + 18.0
+	var vp: Vector2 = get_viewport_rect().size
+	var px: float = (vp.x - pw) * 0.5
+	var py: float = (vp.y - ph) * 0.5
+	return Rect2(px, py, pw, ph)
 
 
 func _dbg_item_rect(col: int, row: int) -> Rect2:
@@ -969,6 +1017,12 @@ func _draw_dbg_sfx_panel() -> void:
 		_draw_dbg_item(0, row, row == DebugSFXConfig.in_idx)
 	for row in range(DebugSFXConfig.out_count):
 		_draw_dbg_item(1, row, row == DebugSFXConfig.out_idx)
+	# ガイドテキスト
+	var pr2: Rect2 = _dbg_panel_rect()
+	draw_string(_font, Vector2(pr2.position.x, pr2.end.y - 5.0),
+		"Ctrl キーを押している間だけ表示・操作可能",
+		HORIZONTAL_ALIGNMENT_CENTER, pr2.size.x, 10,
+		Color(0.45, 0.72, 0.80, 0.8))
 
 
 func _draw_dbg_item(col: int, row: int, selected: bool) -> void:
