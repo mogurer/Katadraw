@@ -2853,7 +2853,9 @@ func _konami_activate() -> void:
 
 func _return_to_stage_select_preserve_bgm() -> void:
 	if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
-		get_tree().change_scene_to_file("res://scenes/game.tscn")
+		StageSelectManager.zou_cleared = true
+		StageSelectManager._save_states()
+		get_tree().change_scene_to_file("res://scenes/title.tscn")
 		return
 	pause_active = false
 	pause_confirm_title = false
@@ -4886,7 +4888,10 @@ func _process(delta: float) -> void:
 				pause_retry_elapsed = -1.0
 			else:
 				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
-			BGMManager.resume_ingame()
+			if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
+				BGMManager.play_title()
+			else:
+				BGMManager.resume_ingame()
 		queue_redraw()
 
 	elif game_state == "playing":

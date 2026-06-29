@@ -109,8 +109,7 @@ var _final_overlay_alpha: float = 0.0      # 暗転オーバーレイのアル�
 var _final_spark_drawn: Array = []          # 描画済みエッジ Array[[from: Vector2, to: Vector2]]
 var _final_flash_pos: Vector2 = Vector2.ZERO
 var _final_flash_alpha: float = 0.0
-var _final_phase3: int = 0              # 0=inactive, 1=TAP-TO-START待ち, 2=カウントダウン
-var _final_countdown_num: int = 0       # カウントダウン表示値（3→2→1）
+var _final_phase3: int = 0              # 0=inactive, 1=TAP-TO-START待ち
 var _final_phase3_input_received: bool = false
 
 # --- ステージ解放演出 ---
@@ -221,7 +220,7 @@ func _ready() -> void:
 	var return_id: int = StageSelectManager.last_played_stage_id
 	_unlock_source_stage = return_id
 	start_unlock_focus(unlocked, return_id)
-	if StageSelectManager.all_cleared and not _final_direction_played:
+	if StageSelectManager.all_cleared and not _final_direction_played and not StageSelectManager.zou_cleared:
 		_play_final_direction.call_deferred()
 	_start_bgm_label_anim.call_deferred()
 
@@ -1190,9 +1189,6 @@ func _draw_final_phase3(vp: Vector2) -> void:
 		if int(_elapsed * 2.0) % 2 == 0:
 			draw_string(_font, Vector2(cx, cy + 60.0),
 				"TAP TO START", HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(1.0, 1.0, 1.0, 0.85))
-	elif _final_phase3 == 2:
-		draw_string(_font_din if _font_din else _font, Vector2(cx, cy + 80.0),
-			str(_final_countdown_num), HORIZONTAL_ALIGNMENT_CENTER, -1, 80, Color.WHITE)
 
 
 func _play_final_direction() -> void:
@@ -1280,13 +1276,6 @@ func _play_final_direction() -> void:
 	# 入力待ち
 	while not _final_phase3_input_received:
 		await get_tree().process_frame
-
-	# カウントダウン
-	_final_phase3 = 2
-	for cnt in range(3, 0, -1):
-		_final_countdown_num = cnt
-		queue_redraw()
-		await get_tree().create_timer(1.0).timeout
 
 	# ゲーム開始
 	BGMManager.set_volume_db(0.0)
