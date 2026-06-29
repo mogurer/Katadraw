@@ -109,8 +109,7 @@ var _final_overlay_alpha: float = 0.0      # 暗転オーバーレイのアル�
 var _final_spark_drawn: Array = []          # 描画済みエッジ Array[[from: Vector2, to: Vector2]]
 var _final_flash_pos: Vector2 = Vector2.ZERO
 var _final_flash_alpha: float = 0.0
-var _final_phase3: int = 0              # 0=inactive, 1=TAP-TO-START待ち, 2=カウントダウン
-var _final_countdown_num: int = 0       # カウントダウン表示値（3→2→1）
+var _final_phase3: int = 0              # 0=inactive, 1=TAP-TO-START待ち
 var _final_phase3_input_received: bool = false
 var _final_morph_phase: int = 0   # 0=inactive, 1=morphing, 2=shrinking
 var _final_morph_t: float = 0.0   # 0→1 モーフ進行
@@ -245,7 +244,7 @@ func _ready() -> void:
 	var return_id: int = StageSelectManager.last_played_stage_id
 	_unlock_source_stage = return_id
 	start_unlock_focus(unlocked, return_id)
-	if StageSelectManager.all_cleared and not _final_direction_played and not StageSelectManager.zou_cleared:
+	if StageSelectManager.all_cleared and not _final_direction_played and not StageSelectManager.zou_cleared and not StageSelectManager.zou_cleared:
 		_play_final_direction.call_deferred()
 	if StageSelectManager.zou_cleared:
 		_zou_world_pos = (StageSelectManager.get_world_pos(28) + StageSelectManager.get_world_pos(35)) * 0.5
