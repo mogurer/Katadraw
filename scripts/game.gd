@@ -55,6 +55,13 @@ var font: Font
 var font_bold: Font
 var font_din: Font
 
+# --- ZOU スタッフロール ---
+const _ZOU_ROLL_TOTAL_LINES: int = 11  # ui_renderer.gd の ZOU_STAFF_ROLL_LINES.size() と一致させること
+var _zou_roll_started: bool = false
+var _zou_roll_index: int = 0
+var _zou_roll_last_time: float = 0.0
+var _zou_ending_start: float = 0.0
+
 # --- Circle Metrics (primary / group 1) ---
 var current_centroid: Vector2 = Vector2.ZERO
 var current_avg_radius: float = 0.0
@@ -227,6 +234,9 @@ var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像
 var config_reset_hovered: bool = false
 var config_reset_confirm: bool = false
 var config_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
+var config_zou_reset_hovered: bool = false
+var config_zou_reset_confirm: bool = false
+var config_zou_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
 ## コンフィグ画面レイアウト（ui_renderer._draw_config とヒット判定で共通）
 const CONFIG_MENU_BASE_Y_RATIO := 0.28
 const CONFIG_MENU_SPACING := 103.5
@@ -241,6 +251,9 @@ const CONFIG_MENU_LABEL_GAP_TO_ARROW := 20.0
 const CONFIG_RESET_BTN_FS := 28
 const CONFIG_RESET_BTN_W  := 130.0
 const CONFIG_RESET_BTN_MARGIN := 36.0
+## STAGE60 ZOU トグルボタンのフォントサイズと幅（左下に単独配置、全クリア後のみ表示）
+const CONFIG_ZOU_RESET_BTN_FS := 22
+const CONFIG_ZOU_RESET_BTN_W  := 260.0
 ## コンフィグ 0〜3 行のホバー拡大（set_btn_hover / get_btn_scale と同一 ID）
 const CONFIG_ROW_BTN_IDS: Array[String] = [
 	"cfg_row_display_mode",
@@ -813,7 +826,12 @@ func _update_player_hover() -> void:
 
 	if game_state == "config":
 		if _menu_hover_holdoff_frames <= 0:
-			if config_reset_confirm:
+			if config_zou_reset_confirm:
+				if pos.x < vp.x / 2.0:
+					config_zou_reset_confirm_index = 0
+				else:
+					config_zou_reset_confirm_index = 1
+			elif config_reset_confirm:
 				if pos.x < vp.x / 2.0:
 					config_reset_confirm_index = 0
 				else:
@@ -835,6 +853,10 @@ func _update_player_hover() -> void:
 					if pos.y >= btn_cy - btn_h_act * 0.5 - 5.0 and pos.y <= btn_cy + btn_h_act * 0.5 + 5.0:
 						config_index = act_i
 				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
+				if StageSelectManager.all_cleared:
+					config_zou_reset_hovered = get_config_zou_reset_button_rect(vp).has_point(pos)
+				else:
+					config_zou_reset_hovered = false
 		return
 
 	if game_state == "playing" and pause_active:
@@ -1252,6 +1274,8 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	hints_triggered = [false, false]
 	guide_count_played = 0
 	_metrics_dirty = true
+	_zou_roll_started = false
+	_zou_roll_index = 0
 	queue_redraw()
 
 
@@ -1290,7 +1314,11 @@ func _stage_display_number_text() -> String:
 func _check_clear() -> void:
 	if game_state != "playing":
 		return
-	if input_handler.is_snap_clear():
+	var _snap_ok: bool = input_handler.is_snap_clear()
+	if not _snap_ok and current_stage == StageSelectManager._zou_stage_idx:
+		# 複雑な魚形は巡回順一致が困難なため、全コーナー占有のみで判定
+		_snap_ok = input_handler.is_all_corners_occupied()
+	if _snap_ok:
 		is_dragging = false
 		game_state = "cleared"
 		input_handler.release_mouse_grab()
@@ -1302,7 +1330,10 @@ func _check_clear() -> void:
 		ui_renderer.spawn_particles(current_centroid)
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
-		BGMManager.play_clear()
+		if current_stage == StageSelectManager._zou_stage_idx:
+			BGMManager.stop()
+		else:
+			BGMManager.play_clear()
 		if not GameConfig.IS_DEMO:
 			StageSelectManager.mark_cleared(current_stage)
 			var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
@@ -1763,6 +1794,19 @@ func _input(event: InputEvent) -> void:
 			queue_redraw()
 		return
 
+	if game_state == "zou_ending":
+		var is_any_key: bool = (
+			(event is InputEventKey and event.pressed and not event.echo)
+			or (event is InputEventJoypadButton and event.pressed)
+			or (event is InputEventMouseButton and event.pressed)
+		)
+		if is_any_key and (Time.get_ticks_msec() / 1000.0 - _zou_ending_start) >= 1.0:
+			TransitionManager.play_triangle(func():
+				BGMManager.resume_stage_select()
+				get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+			)
+		return
+
 	if game_state == "cleared":
 		# デバッグ用: [S] でバランス調整画面を開く
 		if (
@@ -1978,6 +2022,44 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	var items_count: int = 8
 	var moved: bool = false
 
+	# ---------- STAGE60 RESET 確認ダイアログ ----------
+	if config_zou_reset_confirm:
+		var vp2: Vector2 = get_viewport_rect().size
+		var cbtn_gap: float = vp2.x * 0.10
+		var cbtn_cy: float = vp2.y * 0.60
+		var cbtn_w: float = vp2.x * 0.16
+
+		var is_back2: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
+		)
+		if is_back2:
+			config_zou_reset_confirm = false
+			queue_redraw()
+			return
+
+		var do_confirm2: bool = is_confirm_key or is_confirm_pad
+		if is_confirm_click:
+			var cx: float = vp2.x / 2.0
+			var bh: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+			var click_pos: Vector2 = input_handler.player_position
+			if click_pos.y >= cbtn_cy - bh / 2.0 and click_pos.y <= cbtn_cy + bh / 2.0:
+				if click_pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
+					config_zou_reset_confirm_index = 0
+					do_confirm2 = true
+				elif click_pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
+					config_zou_reset_confirm_index = 1
+					do_confirm2 = true
+		if do_confirm2:
+			if config_zou_reset_confirm_index == 0:
+				StageSelectManager.reset_zou_cleared()
+				_play_sfx(sfx_window_close)
+			else:
+				_play_sfx(sfx_window_close)
+			config_zou_reset_confirm = false
+			queue_redraw()
+		return
+
 	# ---------- RESET 確認ダイアログ ----------
 	if config_reset_confirm:
 		var vp2: Vector2 = get_viewport_rect().size
@@ -2026,6 +2108,8 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	if is_back:
 		config_reset_hovered = false
 		config_reset_confirm = false
+		config_zou_reset_hovered = false
+		config_zou_reset_confirm = false
 		game_state = "menu"
 		_reset_ui_menu_stick_navigation()
 		queue_redraw()
@@ -2048,13 +2132,21 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 				moved = true
 
 	if is_confirm_click:
-		# RESET ボタンクリック（メインリストより先に判定）
+		# RESET / STAGE60 RESET ボタンクリック（メインリストより先に判定）
 		var vp_r: Vector2 = get_viewport_rect().size
 		var click_pos: Vector2 = input_handler.player_position
 		if get_config_reset_button_rect(vp_r).has_point(click_pos):
 			config_reset_confirm = true
 			config_reset_confirm_index = 1
 			_play_sfx(sfx_window_open)
+			queue_redraw()
+			return
+		if StageSelectManager.all_cleared and get_config_zou_reset_button_rect(vp_r).has_point(click_pos):
+			if StageSelectManager.zou_cleared:
+				StageSelectManager.reset_zou_cleared()
+			else:
+				StageSelectManager.mark_zou_cleared()
+			_play_sfx(sfx_window_close)
 			queue_redraw()
 			return
 		var adj: Dictionary = _hit_config_value_arrows(click_pos)
@@ -2091,6 +2183,8 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
 			config_reset_hovered = false
 			config_reset_confirm = false
+			config_zou_reset_hovered = false
+			config_zou_reset_confirm = false
 			TransitionManager.play_diagonal(func():
 				game_state = "menu"
 				_reset_ui_menu_stick_navigation()
@@ -2530,6 +2624,17 @@ func get_config_reset_button_rect(vp: Vector2) -> Rect2:
 	)
 
 
+## コンフィグ左下の STAGE60 RESET ボタン領域を返す（全クリア後のみ使用）。
+func get_config_zou_reset_button_rect(vp: Vector2) -> Rect2:
+	var btn_h: float = (font.get_ascent(CONFIG_ZOU_RESET_BTN_FS) + font.get_descent(CONFIG_ZOU_RESET_BTN_FS)) * 1.5
+	return Rect2(
+		CONFIG_RESET_BTN_MARGIN,
+		vp.y - btn_h - CONFIG_RESET_BTN_MARGIN,
+		CONFIG_ZOU_RESET_BTN_W,
+		btn_h
+	)
+
+
 ## 画面モード・カーソル制限・言語・BGM/SE の ◀▶ クリック。戻り値: ok, item(0〜4), delta(±1)
 func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 	var vp: Vector2 = get_viewport_rect().size
@@ -2852,9 +2957,6 @@ func _konami_activate() -> void:
 
 
 func _return_to_stage_select_preserve_bgm() -> void:
-	if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
-		get_tree().change_scene_to_file("res://scenes/game.tscn")
-		return
 	pause_active = false
 	pause_confirm_title = false
 	pause_retry_elapsed = -1.0
@@ -2865,6 +2967,13 @@ func _return_to_stage_select_preserve_bgm() -> void:
 
 func _advance_stage() -> void:
 	if not GameConfig.IS_DEMO:
+		if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
+			# ZOU クリア: エンディング画面へ
+			StageSelectManager.mark_zou_cleared()
+			_zou_ending_start = Time.get_ticks_msec() / 1000.0
+			game_state = "zou_ending"
+			queue_redraw()
+			return
 		# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
 		BGMManager.resume_stage_select()
 		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
@@ -4940,6 +5049,18 @@ func _process(delta: float) -> void:
 			input_handler.cat_anim_triggered = false
 			_play_sfx(sfx_cat)
 			ui_renderer.start_cat_anim()
+		# ZOU スタッフロール: 進行 20% 以降、10 秒ごとに次のクレジット行を表示
+		if current_stage == StageSelectManager._zou_stage_idx:
+			var now_roll: float = Time.get_ticks_msec() / 1000.0
+			if not _zou_roll_started and input_handler.get_snap_score() >= 0.2:
+				_zou_roll_started = true
+				_zou_roll_index = 0
+				_zou_roll_last_time = now_roll
+				queue_redraw()
+			elif _zou_roll_started and _zou_roll_index < _ZOU_ROLL_TOTAL_LINES and (now_roll - _zou_roll_last_time) >= 10.0:
+				_zou_roll_index += 1
+				_zou_roll_last_time = now_roll
+				queue_redraw()
 		# 描画の分離: 以下のいずれかの場合のみ queue_redraw を発行する。
 		# moved=true のとき input_handler.update_drag_physics が既に発行済みのため重複しても問題ない。
 		var _has_particles: bool = not ui_renderer.spore_particles.is_empty()
@@ -4956,6 +5077,9 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "results":
+		queue_redraw()
+
+	elif game_state == "zou_ending":
 		queue_redraw()
 
 

@@ -312,12 +312,12 @@ func _draw_morph_polygon(
 		var tris: PackedInt32Array = Geometry2D.triangulate_polygon(screen_pts)
 		var fill_col := Color(0.26, 0.21, 0.28, 0.22 * fill_alpha)
 		for ti in range(0, tris.size(), 3):
-			var tri: PackedVector2Array = PackedVector2Array([
-				screen_pts[tris[ti]],
-				screen_pts[tris[ti + 1]],
-				screen_pts[tris[ti + 2]],
-			])
-			_game.draw_colored_polygon(tri, fill_col)
+			var p0: Vector2 = screen_pts[tris[ti]]
+			var p1: Vector2 = screen_pts[tris[ti + 1]]
+			var p2: Vector2 = screen_pts[tris[ti + 2]]
+			if absf((p1 - p0).cross(p2 - p0)) < 0.01:
+				continue
+			_game.draw_colored_polygon(PackedVector2Array([p0, p1, p2]), fill_col)
 
 	for edge in K_EDGES:
 		var a: int = edge[0]

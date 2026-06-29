@@ -2927,6 +2927,15 @@ func is_snap_clear() -> bool:
 	return true
 
 
+## 全頂点が占有されているか（巡回順チェックなし）
+func is_all_corners_occupied() -> bool:
+	var n_corners: int = _game.stage_manager.shape_corner_points.size()
+	var n: int = _game.point_positions.size()
+	if n_corners == 0 or n == 0 or n != n_corners:
+		return false
+	return _snap_corner_occupant.size() == n_corners
+
+
 ## スコア (0.0〜1.0) = (A + B) / (2N)
 ## A: 頂点に乗っているポイント数、B: 最良サイクル順で一致しているポイント数
 func get_snap_score() -> float:

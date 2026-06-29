@@ -29,6 +29,9 @@ var tutorial_shown: bool = false
 # 全ステージクリア済みフラグ（保存あり）
 var all_cleared: bool = false
 
+# ZOU クリア済みフラグ（保存あり）
+var zou_cleared: bool = false
+
 # zou.json のステージインデックス（stage_select.gd が ready で設定する）
 var _zou_stage_idx: int = -1
 
@@ -113,6 +116,16 @@ func get_state(stage_id: int) -> int:
 	return _states[stage_id]
 
 
+func mark_zou_cleared() -> void:
+	zou_cleared = true
+	_save_states()
+
+
+func reset_zou_cleared() -> void:
+	zou_cleared = false
+	_save_states()
+
+
 func mark_cleared(stage_id: int) -> void:
 	if stage_id < 0 or stage_id >= STAGE_COUNT:
 		return
@@ -192,6 +205,7 @@ func reset_all() -> void:
 	_states[0] = StageState.UNLOCKED
 	tutorial_shown = false
 	all_cleared = false
+	zou_cleared = false
 	pending_stage_id = -1
 	_best_times.clear()
 	_best_move_counts.clear()
@@ -206,6 +220,7 @@ func _save_states() -> void:
 		data[str(i)] = _states[i]
 	data["tutorial_shown"] = tutorial_shown
 	data["all_cleared"] = all_cleared
+	data["zou_cleared"] = zou_cleared
 	var best_t: Dictionary = {}
 	for k in _best_times:
 		best_t[str(k)] = _best_times[k]
@@ -238,6 +253,7 @@ func _load_states() -> void:
 	if d.has("tutorial_shown"):
 		tutorial_shown = bool(d["tutorial_shown"])
 	all_cleared = bool(d.get("all_cleared", false))
+	zou_cleared = bool(d.get("zou_cleared", false))
 	if d.has("best_times"):
 		var bt: Dictionary = d["best_times"] as Dictionary
 		for k in bt:

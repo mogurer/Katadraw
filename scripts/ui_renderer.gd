@@ -485,10 +485,16 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_guide_countdown(vp)
 		"playing":
 			_draw_game(vp)
+			if _game.current_stage == StageSelectManager._zou_stage_idx:
+				_draw_zou_staff_roll(vp)
 		"cleared":
 			_draw_game(vp)
+			if _game.current_stage == StageSelectManager._zou_stage_idx:
+				_draw_zou_staff_roll(vp)
 			_draw_clear_overlay(vp)
 			_draw_particles()
+		"zou_ending":
+			_draw_zou_ending(vp)
 		"results":
 			_draw_results(vp)
 		"stage_debug":
@@ -506,7 +512,7 @@ func draw(state: String, vp: Vector2) -> void:
 	#if _game.stage_session.debug_test_mode and state == "playing":
 		#_draw_debug_log_button(vp)
 
-	if not _game.pause_active and state != "logo" and state != "title_intro":
+	if not _game.pause_active and state != "logo" and state != "title_intro" and state != "zou_ending":
 		var _show_avatar: bool = true
 		if state == "title":
 			var _t: float = Time.get_ticks_msec() / 1000.0 - _game.title_start_time
@@ -1440,6 +1446,17 @@ func _draw_config(vp: Vector2) -> void:
 	var is_reset_off: bool = not _game.config_reset_hovered
 	_draw_auto_button_with_shadow(reset_center, "RESET", _game.CONFIG_RESET_BTN_FS, 1.0, is_reset_off, _game.CONFIG_RESET_BTN_W)
 
+	# --- STAGE60 RESET ボタン（左下固定、全クリア後のみ表示）---
+	if StageSelectManager.all_cleared:
+		var zou_reset_rect: Rect2 = _game.get_config_zou_reset_button_rect(vp)
+		var zou_reset_center := Vector2(
+			zou_reset_rect.position.x + zou_reset_rect.size.x * 0.5,
+			zou_reset_rect.position.y + zou_reset_rect.size.y * 0.5
+		)
+		var is_zou_reset_off: bool = not _game.config_zou_reset_hovered
+		var zou_btn_label: String = "STAGE60: ZOU ON" if StageSelectManager.zou_cleared else "STAGE60: ZOU OFF"
+		_draw_auto_button_with_shadow(zou_reset_center, zou_btn_label, _game.CONFIG_ZOU_RESET_BTN_FS, 1.0, is_zou_reset_off, _game.CONFIG_ZOU_RESET_BTN_W)
+
 	# --- RESET 確認ダイアログ ---
 	if _game.config_reset_confirm:
 		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.40))
@@ -1461,6 +1478,28 @@ func _draw_config(vp: Vector2) -> void:
 		var no_off: bool  = _game.config_reset_confirm_index != 1
 		_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
 		_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off,  cbtn_w)
+
+	# --- STAGE60 RESET 確認ダイアログ ---
+	if _game.config_zou_reset_confirm:
+		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.40))
+		var cx2: float = vp.x / 2.0
+		var cy2: float = vp.y / 2.0
+		var dlg_w2: float = 640.0
+		var dlg_h2: float = 260.0
+		var dlg_rect2 := Rect2(cx2 - dlg_w2 * 0.5, cy2 - dlg_h2 * 0.5, dlg_w2, dlg_h2)
+		_game.draw_rect(dlg_rect2.grow(4.0), Color(0.95, 0.19, 0.32))
+		_game.draw_rect(dlg_rect2, Color(1.0, 0.98, 0.96))
+		var msg_y2: float = cy2 - dlg_h2 * 0.12
+		_game.draw_string(_game.font, Vector2(cx2 - dlg_w2 * 0.5, msg_y2),
+			"STAGE60のクリアデータをリセットしますか？",
+			HORIZONTAL_ALIGNMENT_CENTER, dlg_w2, 28, Color(0.26, 0.21, 0.28))
+		var cbtn_gap2: float = vp.x * 0.10
+		var cbtn_cy2: float = vp.y * 0.60
+		var cbtn_w2: float = vp.x * 0.16
+		var yes_off2: bool = _game.config_zou_reset_confirm_index != 0
+		var no_off2: bool  = _game.config_zou_reset_confirm_index != 1
+		_draw_auto_button_with_shadow(Vector2(cx2 - cbtn_gap2, cbtn_cy2), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off2, cbtn_w2)
+		_draw_auto_button_with_shadow(Vector2(cx2 + cbtn_gap2, cbtn_cy2), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off2,  cbtn_w2)
 
 
 func _draw_credit(vp: Vector2) -> void:
@@ -1847,6 +1886,62 @@ func _draw_controls_content(origin: Vector2, width: float, start_y: float, fs_h:
 		_game.draw_string(_game.font, Vector2(rx, y), tr(item[0]), HORIZONTAL_ALIGNMENT_LEFT, kw, fs, key_c)
 		_game.draw_string(_game.font, Vector2(rx + kw + 10.0, y), tr(item[1]), HORIZONTAL_ALIGNMENT_LEFT, col_w, fs, text_c)
 		y += line_h
+
+
+const ZOU_STAFF_ROLL_LINES: PackedStringArray = [
+	"Producer / Director : Kionachi",
+	"Planner : Hirame Kumokura",
+	"Stage Editing / Web Design : Irori Hibachi",
+	"Title Music Composition / Sound Effect Design : tigerlily",
+	"Music Support : Diverse System",
+	"  Clockwork Prophet / Solvrae",
+	"  Micro'n'Macro / taqumi",
+	"  TRANSFER / ZiXS",
+	"  Thinking Time / U-Ruri",
+	"  Small Routines / Yebisu303",
+	"Licenced by Diverse System (works.16)",
+]
+
+
+func _draw_zou_staff_roll(vp: Vector2) -> void:
+	if not _game._zou_roll_started:
+		return
+	var idx: int = _game._zou_roll_index
+	if idx >= ZOU_STAFF_ROLL_LINES.size():
+		return
+	var fnt: Font = _game.font_din if _game.font_din != null else _game.font
+	const FS: int = 24
+	const DISPLAY_SEC: float = 10.0
+	const CROSS_SEC: float = 3.0
+	var x: float = vp.x * 0.5 - 600.0
+	var y: float = 36.0 + fnt.get_ascent(FS)
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var elapsed: float = now - _game._zou_roll_last_time
+	var fade_start: float = DISPLAY_SEC - CROSS_SEC
+	var cur_alpha: float
+	var next_alpha: float
+	if elapsed < fade_start:
+		cur_alpha = 1.0
+		next_alpha = 0.0
+	else:
+		var t: float = clampf((elapsed - fade_start) / CROSS_SEC, 0.0, 1.0)
+		cur_alpha = 1.0 - t
+		next_alpha = t
+	_game.draw_string(fnt, Vector2(x, y), ZOU_STAFF_ROLL_LINES[idx],
+		HORIZONTAL_ALIGNMENT_CENTER, -1, FS, Color(0.26, 0.21, 0.28, 0.75 * cur_alpha))
+	if next_alpha > 0.0 and idx + 1 < ZOU_STAFF_ROLL_LINES.size():
+		_game.draw_string(fnt, Vector2(x, y), ZOU_STAFF_ROLL_LINES[idx + 1],
+			HORIZONTAL_ALIGNMENT_CENTER, -1, FS, Color(0.26, 0.21, 0.28, 0.75 * next_alpha))
+
+
+func _draw_zou_ending(vp: Vector2) -> void:
+	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color.WHITE)
+	var fnt: Font = _game.font_din if _game.font_din != null else _game.font
+	const FS: int = 30
+	var y: float = vp.y * 0.5 + fnt.get_ascent(FS) * 0.5 - fnt.get_descent(FS) * 0.5
+	_game.draw_string(fnt, Vector2(0.0, y),
+		"production work : 2026 Meseed Software",
+		HORIZONTAL_ALIGNMENT_CENTER, vp.x, FS, Color.BLACK)
 
 
 func _draw_rules(vp: Vector2) -> void:
@@ -2640,7 +2735,7 @@ func _draw_guide_info(vp: Vector2) -> void:
 					guide_shape_scale = 0.88  # 家・オカリナ（複雑シルエット）
 	if e4 > 0.001:
 		_stage_renderer.draw_guide_shape_fit_max(
-			Vector2(play_cx, shape_cy),
+			Vector2(play_cx - 30.0, shape_cy),
 			intro_shape_w * e4 * guide_shape_scale,
 			intro_shape_h * e4 * guide_shape_scale,
 			e4,
@@ -2745,8 +2840,8 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 	var draw_w: float = btn_w * sc
 	var draw_h: float = btn_h * sc
 
-	# スケールまたはアルファが0以下なら描画スキップ
-	if sc < 0.001 or alpha < 0.001:
+	# スケールまたはアルファが極小なら描画スキップ（サブピクセル多角形は triangulation failed になる）
+	if sc < 0.01 or alpha < 0.001 or draw_w < 2.0 or draw_h < 2.0:
 		return Rect2(center.x - btn_w / 2.0, center.y - btn_h / 2.0, btn_w, btn_h)
 
 	var rect := Rect2(center.x - draw_w / 2.0, center.y - draw_h / 2.0, draw_w, draw_h)
