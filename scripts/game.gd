@@ -1330,7 +1330,7 @@ func _check_clear() -> void:
 		ui_renderer.spawn_particles(current_centroid)
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
-		if current_stage == StageSelectManager._zou_stage_idx:
+		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:
 			BGMManager.stop()
 		else:
 			BGMManager.play_clear()
@@ -1801,10 +1801,7 @@ func _input(event: InputEvent) -> void:
 			or (event is InputEventMouseButton and event.pressed)
 		)
 		if is_any_key and (Time.get_ticks_msec() / 1000.0 - _zou_ending_start) >= 1.0:
-			TransitionManager.play_triangle(func():
-				BGMManager.resume_stage_select()
-				get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
-			)
+			_trigger_zou_ending_return()
 		return
 
 	if game_state == "cleared":
@@ -2968,16 +2965,31 @@ func _return_to_stage_select_preserve_bgm() -> void:
 func _advance_stage() -> void:
 	if not GameConfig.IS_DEMO:
 		if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
-			# ZOU クリア: エンディング画面へ
-			StageSelectManager.mark_zou_cleared()
-			_zou_ending_start = Time.get_ticks_msec() / 1000.0
-			game_state = "zou_ending"
-			queue_redraw()
+			if not StageSelectManager.zou_cleared:
+				# 初回クリア: エンディング画面へ
+				StageSelectManager.mark_zou_cleared()
+				_zou_ending_start = Time.get_ticks_msec() / 1000.0
+				game_state = "zou_ending"
+				queue_redraw()
+			else:
+				# リプレイ: 通常ステージと同様にステージセレクトへ
+				BGMManager.resume_stage_select()
+				TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
 			return
 		# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
 		BGMManager.resume_stage_select()
 		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
 		return
+
+
+func _trigger_zou_ending_return() -> void:
+	if game_state != "zou_ending":
+		return
+	game_state = "zou_transition"
+	TransitionManager.play_triangle(func():
+		BGMManager.play_ingame()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	)
 	if current_stage < GameConfig.get_max_stage_index():
 		_start_stage(current_stage + 1)
 	else:
@@ -4995,10 +5007,7 @@ func _process(delta: float) -> void:
 				pause_retry_elapsed = -1.0
 			else:
 				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
-			if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
-				BGMManager.play_title()
-			else:
-				BGMManager.resume_ingame()
+			BGMManager.resume_ingame()
 		queue_redraw()
 
 	elif game_state == "playing":
@@ -5052,15 +5061,15 @@ func _process(delta: float) -> void:
 			input_handler.cat_anim_triggered = false
 			_play_sfx(sfx_cat)
 			ui_renderer.start_cat_anim()
-		# ZOU スタッフロール: 進行 20% 以降、10 秒ごとに次のクレジット行を表示
-		if current_stage == StageSelectManager._zou_stage_idx:
+		# ZOU スタッフロール: 初回クリア前（zou_cleared=false）のみ表示
+		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:
 			var now_roll: float = Time.get_ticks_msec() / 1000.0
 			if not _zou_roll_started and input_handler.get_snap_score() >= 0.2:
 				_zou_roll_started = true
 				_zou_roll_index = 0
 				_zou_roll_last_time = now_roll
 				queue_redraw()
-			elif _zou_roll_started and _zou_roll_index < _ZOU_ROLL_TOTAL_LINES and (now_roll - _zou_roll_last_time) >= 10.0:
+			elif _zou_roll_started and _zou_roll_index < _ZOU_ROLL_TOTAL_LINES and (now_roll - _zou_roll_last_time) >= 18.0:
 				_zou_roll_index += 1
 				_zou_roll_last_time = now_roll
 				queue_redraw()
@@ -5083,6 +5092,8 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "zou_ending":
+		if Time.get_ticks_msec() / 1000.0 - _zou_ending_start >= 20.0:
+			_trigger_zou_ending_return()
 		queue_redraw()
 
 

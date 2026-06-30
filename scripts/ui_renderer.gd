@@ -1912,23 +1912,25 @@ func _draw_zou_staff_roll(vp: Vector2) -> void:
 	var fnt: Font = _game.font_din if _game.font_din != null else _game.font
 	const FS: int = 24
 	const DISPLAY_SEC: float = 10.0
-	const CROSS_SEC: float = 3.0
+	const FADEOUT_SEC: float = 3.0
+	const GAP_SEC: float = 2.0
+	const FADEIN_SEC: float = 3.0
 	var x: float = vp.x * 0.5 - 600.0
 	var y: float = 36.0 + fnt.get_ascent(FS)
-	var now: float = Time.get_ticks_msec() / 1000.0
-	var elapsed: float = now - _game._zou_roll_last_time
-	var fade_start: float = DISPLAY_SEC - CROSS_SEC
-	var cur_alpha: float
-	var next_alpha: float
-	if elapsed < fade_start:
+	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _game._zou_roll_last_time
+	var cur_alpha: float = 0.0
+	var next_alpha: float = 0.0
+	if elapsed < DISPLAY_SEC:
 		cur_alpha = 1.0
-		next_alpha = 0.0
+	elif elapsed < DISPLAY_SEC + FADEOUT_SEC:
+		cur_alpha = 1.0 - (elapsed - DISPLAY_SEC) / FADEOUT_SEC
+	elif elapsed < DISPLAY_SEC + FADEOUT_SEC + GAP_SEC:
+		pass  # 無音期間
 	else:
-		var t: float = clampf((elapsed - fade_start) / CROSS_SEC, 0.0, 1.0)
-		cur_alpha = 1.0 - t
-		next_alpha = t
-	_game.draw_string(fnt, Vector2(x, y), ZOU_STAFF_ROLL_LINES[idx],
-		HORIZONTAL_ALIGNMENT_CENTER, -1, FS, Color(0.26, 0.21, 0.28, 0.75 * cur_alpha))
+		next_alpha = clampf((elapsed - DISPLAY_SEC - FADEOUT_SEC - GAP_SEC) / FADEIN_SEC, 0.0, 1.0)
+	if cur_alpha > 0.0:
+		_game.draw_string(fnt, Vector2(x, y), ZOU_STAFF_ROLL_LINES[idx],
+			HORIZONTAL_ALIGNMENT_CENTER, -1, FS, Color(0.26, 0.21, 0.28, 0.75 * cur_alpha))
 	if next_alpha > 0.0 and idx + 1 < ZOU_STAFF_ROLL_LINES.size():
 		_game.draw_string(fnt, Vector2(x, y), ZOU_STAFF_ROLL_LINES[idx + 1],
 			HORIZONTAL_ALIGNMENT_CENTER, -1, FS, Color(0.26, 0.21, 0.28, 0.75 * next_alpha))
@@ -1936,12 +1938,25 @@ func _draw_zou_staff_roll(vp: Vector2) -> void:
 
 func _draw_zou_ending(vp: Vector2) -> void:
 	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color.WHITE)
-	var fnt: Font = _game.font_din if _game.font_din != null else _game.font
-	const FS: int = 30
-	var y: float = vp.y * 0.5 + fnt.get_ascent(FS) * 0.5 - fnt.get_descent(FS) * 0.5
-	_game.draw_string(fnt, Vector2(0.0, y),
-		"production work : 2026 Meseed Software",
-		HORIZONTAL_ALIGNMENT_CENTER, vp.x, FS, Color.BLACK)
+	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _game._zou_ending_start
+	var alpha: float
+	if elapsed < 1.0:
+		alpha = 0.0
+	elif elapsed < 4.0:
+		alpha = (elapsed - 1.0) / 3.0
+	elif elapsed < 14.0:
+		alpha = 1.0
+	elif elapsed < 17.0:
+		alpha = 1.0 - (elapsed - 14.0) / 3.0
+	else:
+		alpha = 0.0
+	if alpha > 0.001:
+		var fnt: Font = _game.font_din if _game.font_din != null else _game.font
+		const FS: int = 30
+		var y: float = vp.y * 0.5 + fnt.get_ascent(FS) * 0.5 - fnt.get_descent(FS) * 0.5
+		_game.draw_string(fnt, Vector2(0.0, y),
+			"production work : 2026 Meseed Software",
+			HORIZONTAL_ALIGNMENT_CENTER, vp.x, FS, Color(0.0, 0.0, 0.0, alpha))
 
 
 func _draw_rules(vp: Vector2) -> void:
