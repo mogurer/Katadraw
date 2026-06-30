@@ -324,7 +324,7 @@ func _process(delta: float) -> void:
 	_char_vel = (_char_pos - prev_char_pos) / delta
 
 	# 最近傍ステージ更新（ユーザー操作で動いたとき・ポップアップ非表示時のみ）
-	if _char_moved_by_user and _popup_stage < 0 and not _esc_popup and not _zou_popup:
+	if _char_moved_by_user and _popup_stage < 0 and not _esc_popup:
 		_char_moved_by_user = false
 		var prev_nearest: int = _nearest
 		_nearest = _find_nearest_accessible()
@@ -376,8 +376,6 @@ func _input(event: InputEvent) -> void:
 		_char_moved_by_user = true
 		if _esc_popup:
 			_update_esc_popup_hover(event.position)
-		elif _zou_popup:
-			_update_zou_popup_hover(event.position)
 		elif _popup_stage >= 0:
 			_update_popup_hover(event.position)
 
@@ -404,25 +402,6 @@ func _input(event: InputEvent) -> void:
 				queue_redraw()
 			elif event.button_index == JOY_BUTTON_A:
 				_handle_esc_popup_confirm(_esc_popup_yes_hovered)
-		return
-
-	# ZOU ポップアップ
-	if _zou_popup:
-		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			_handle_zou_popup_click(event.position)
-			return
-		if event is InputEventKey and event.pressed and not event.echo:
-			if event.keycode == KEY_ESCAPE:
-				_zou_popup = false
-				queue_redraw()
-			elif event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
-				_handle_zou_popup_confirm(_zou_yes_hovered)
-		if event is InputEventJoypadButton and event.pressed:
-			if event.button_index == JOY_BUTTON_B:
-				_zou_popup = false
-				queue_redraw()
-			elif event.button_index == JOY_BUTTON_A:
-				_handle_zou_popup_confirm(_zou_yes_hovered)
 		return
 
 	# ステージ選択確認ポップアップ
@@ -455,9 +434,9 @@ func _input(event: InputEvent) -> void:
 			and (event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER))
 	)
 	if is_confirm and _zou_near and StageSelectManager.zou_cleared:
-		_zou_popup = true
-		_zou_yes_hovered = true
-		_zou_no_hovered = false
+		_popup_stage = StageSelectManager._zou_stage_idx
+		_popup_yes_hovered = true
+		_popup_no_hovered = false
 		_sfx_click.play()
 		queue_redraw()
 		return
@@ -586,16 +565,12 @@ func _draw() -> void:
 		draw_string(_font, Vector2(40, vp.y - 32), "ESC: タイトルへ戻る", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
 
 	# ZOU バブル（近接時）
-	if StageSelectManager.zou_cleared and _zou_near and not _zou_popup and _popup_stage < 0 and not _esc_popup and not _final_directing:
+	if StageSelectManager.zou_cleared and _zou_near and _popup_stage < 0 and not _esc_popup and not _final_directing:
 		_draw_bubble(StageSelectManager._zou_stage_idx)
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
 		_draw_popup(vp)
-
-	# ZOU ポップアップ
-	if _zou_popup:
-		_draw_zou_popup(vp)
 
 	# タイトル戻り確認ポップアップ
 	if _esc_popup:
@@ -607,7 +582,7 @@ func _draw() -> void:
 
 	# 自キャラ（ポップアップ・SEパネル表示中のみ・最前面）
 	# ポップアップおよびSEパネルより後に描画することで最前面に表示する
-	if (_popup_stage >= 0 or _esc_popup or _zou_popup or (_is_debug() and _ctrl_held)) and not _final_directing:
+	if (_popup_stage >= 0 or _esc_popup or (_is_debug() and _ctrl_held)) and not _final_directing:
 		var screen_char_pos: Vector2 = get_canvas_transform() * _char_pos
 		draw_circle(screen_char_pos, _CHAR_RADIUS, _CHAR_COLOR)
 		draw_circle(screen_char_pos, _CHAR_RADIUS * 0.55, _BG_COLOR)
@@ -999,7 +974,7 @@ func _calc_world_bounds() -> Rect2:
 func _update_camera(delta: float) -> void:
 	if _camera == null or _is_focusing:
 		return
-	if _popup_stage >= 0 or _esc_popup or _zou_popup:
+	if _popup_stage >= 0 or _esc_popup:
 		return
 	var viewport_size: Vector2 = get_viewport_rect().size
 	var half_view: Vector2 = viewport_size / 2.0 / _camera.zoom
@@ -1435,13 +1410,13 @@ func _play_final_direction() -> void:
 		await get_tree().create_timer(0.1).timeout
 		queue_redraw()
 
-	# ── Phase 1b: ズームアウト（1.0秒）→ 2秒待機 ──
+	# ── Phase 1b: ズームアウト（1.0秒）→ 1秒待機 ──
 	var zoom_tw_ph1b: Tween = create_tween()
 	zoom_tw_ph1b.set_parallel(true)
 	zoom_tw_ph1b.tween_property(_camera, "zoom", Vector2(0.3, 0.3), 1.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	zoom_tw_ph1b.tween_property(_camera, "position", aabb_center, 1.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	await zoom_tw_ph1b.finished
-	await get_tree().create_timer(2.0).timeout
+	await get_tree().create_timer(1.0).timeout
 
 	# ── Phase 1c: モーフィング（1.5秒）──
 	var src_w: Array[Vector2] = []
