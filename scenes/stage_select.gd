@@ -1495,7 +1495,7 @@ func _play_final_direction() -> void:
 	# ── Phase 5: BGM開始 → ゲーム遷移 ──
 	_final_morph_phase = 0
 	BGMManager.set_volume_db(0.0)
-	BGMManager.play_title()
+	BGMManager.stop()
 	_final_overlay_alpha = 0.0
 	StageSelectManager.pending_stage_id = StageSelectManager._zou_stage_idx
 	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
