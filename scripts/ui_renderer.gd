@@ -58,9 +58,9 @@ const SPORE_GLOW_LAYERS: Array[Array] = [
 
 # --- 選択していないポイント・線 ---
 const APP_VERSION: String = "v0.50.03"
-const LINE_COLOR := Color(0.26, 0.21, 0.28)
+const LINE_COLOR := Color("#433647")
 const LINE_COLOR_2 := Color(0.55, 0.20, 0.30)
-const POINT_COLOR := Color(0.26, 0.21, 0.28)
+const POINT_COLOR := Color("#433647")
 const POINT_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_RADIUS := 9.0
 const POINT_RADIUS_HOVER := 13.0
@@ -2083,9 +2083,7 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var r: float = _point_radius_by_guide(i)
-		var base_c: Color = POINT_COLOR
-		var alpha: float = _game._point_accuracy_alpha(i)
-		_game.draw_circle(pos, r, Color(base_c.r, base_c.g, base_c.b, alpha))
+		_game.draw_circle(pos, r, POINT_COLOR)
 		# デバッグ: 再接続発火ポイントを赤円でハイライト
 		if _dbg_hl.has(i):
 			var _exp: int = _dbg_hl[i] as int
@@ -2206,14 +2204,10 @@ func _draw_game(vp: Vector2) -> void:
 			skip_fill_circle = true
 		elif i == _game.hovered_index:
 			# ホバー時も通常表示（赤いポイントは廃止）
-			var alpha: float = _game._point_accuracy_alpha(i)
-			var base_c: Color = _stage_renderer.get_point_base_color(i)
-			color = Color(base_c.r, base_c.g, base_c.b, alpha)
+			color = _stage_renderer.get_point_base_color(i)
 			radius = r_guide
 		else:
-			var alpha: float = _game._point_accuracy_alpha(i)
-			var base_c: Color = _stage_renderer.get_point_base_color(i)
-			color = Color(base_c.r, base_c.g, base_c.b, alpha)
+			color = _stage_renderer.get_point_base_color(i)
 			radius = r_guide
 		if not skip_fill_circle:
 			if _cat_phase != 0 and _game.input_handler.is_point_free(i):
