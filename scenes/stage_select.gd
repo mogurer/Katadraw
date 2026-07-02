@@ -694,14 +694,12 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN,
 	var cw: float = iw - str_w    # 129px
 	draw_rect(Rect2(cx, iy, cw, ih), _BUBBLE_BG)
 
-	# ─── 左縦ストライプ（全高）: 上部赤 + 下部ダーク ───
-	var red_h: float = ih * 0.38 - 20.0   # 下部を20pxカット
-	draw_rect(Rect2(ix, iy,         str_w, red_h),      _BUBBLE_RED)
-	draw_rect(Rect2(ix, iy + red_h, str_w, ih - red_h), _BUBBLE_DARK)
+	# ─── 左縦ストライプ（全高・ダークのみ）───
+	draw_rect(Rect2(ix, iy, str_w, ih), _BUBBLE_DARK)
 
 	# ─── ストライプ内 トライアングル（▷◁▷◁▷ 下から 100%→20%） ───
 	var para_zone_bot: float = iy + _BUBBLE_HDR_H + _BUBBLE_FIG_H
-	var tri_count_b: int  = 5
+	var tri_count_b: int  = 10
 	var tri_mid_b: float  = ix + str_w * 0.5
 	var shape_h_b: float  = str_w * 1.155
 	var half_h_b: float   = shape_h_b * 0.5
@@ -711,7 +709,7 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN,
 	var first_cy_b: float = last_cy_b - float(tri_count_b - 1) * spacing_b
 	for tri_i_b in range(tri_count_b):
 		var cy_b: float   = first_cy_b + float(tri_i_b) * spacing_b
-		var tri_a_b: float = float(tri_i_b + 1) * 0.20
+		var tri_a_b: float = float(tri_i_b + 1) * 0.10
 		var tri_col: Color = Color(_BUBBLE_RED.r, _BUBBLE_RED.g, _BUBBLE_RED.b, bub_alpha * tri_a_b)
 		var pts_b: PackedVector2Array
 		if tri_i_b % 2 == 0:  # ▷ 右向き（左辺フラット）

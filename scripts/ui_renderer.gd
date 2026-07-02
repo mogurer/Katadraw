@@ -3198,19 +3198,18 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	# ─── 左ストライプ ───
 	var red_h: float = card_h * 0.375 + 30.0
 	_game.draw_rect(Rect2(card_x, card_y, stripe_w, card_h), c_dark)
-	_game.draw_rect(Rect2(card_x, card_y, stripe_w, red_h), c_red)
 
 	# ストライプ下部の斜め平行四辺形パターン（5個・下詰め）
 	var diag_top: float = card_y + red_h
 	var diag_bot: float = card_y + card_h - bar_h
 	var stripe_right: float = card_x + stripe_w
 	# SVG準拠の矢印形状（5角形）: ▷◁▷◁▷ を縦に連ねる
-	var tri_count: int = 5
+	var tri_count: int = 10
 	const TRI_SCALE: float = 0.8
 	var tri_mid_x: float = card_x + stripe_w * 0.5 - 1.0
-	var tri_sw: float    = stripe_w * TRI_SCALE          # スケール後の実効幅
-	var tri_left: float  = tri_mid_x - tri_sw * 0.5     # 左辺（中央揃え）
-	var tri_right: float = tri_mid_x + tri_sw * 0.5     # 右辺（中央揃え）
+	var tri_sw: float    = stripe_w * TRI_SCALE
+	var tri_left: float  = tri_mid_x - tri_sw * 0.5
+	var tri_right: float = tri_mid_x + tri_sw * 0.5
 	var shape_h: float   = tri_sw * 1.155
 	var half_h: float    = shape_h * 0.5
 	var notch_h: float   = shape_h * 0.25
@@ -3219,7 +3218,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var first_cy: float  = last_cy - float(tri_count - 1) * spacing_v
 	for tri_i in range(tri_count):
 		var cy: float = first_cy + float(tri_i) * spacing_v
-		var tri_a: float = float(tri_i + 1) * 0.20  # 上から 20%→40%→60%→80%→100%
+		var tri_a: float = float(tri_i + 1) * 0.10  # 上から 10%→20%→...→100%
 		var tri_color: Color = Color(c_red.r, c_red.g, c_red.b, c_red.a * tri_a)
 		var pts: PackedVector2Array
 		if tri_i % 2 == 0:  # ▷ 右向き（左辺フラット）
@@ -3261,7 +3260,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var kata_asc: float = fdt.get_ascent(kata_fs)
 	var kata_dsc: float = fdt.get_descent(kata_fs)
 	var kata_cx: float = card_x + (kata_asc + kata_dsc) * 0.55
-	var kata_cy: float = diag_top + stripe_w * 0.25 + kata_w * 0.5
+	var kata_cy: float = card_y + stripe_w * 0.25 + kata_w * 0.5
 	var kata_pivot := Vector2(kata_cx, kata_cy)
 	var kata_xf: Transform2D = Transform2D(0.0, kata_pivot) * Transform2D(PI * 0.5, Vector2.ZERO) * Transform2D(0.0, -kata_pivot)
 	_game.draw_set_transform_matrix(kata_xf)

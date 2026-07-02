@@ -4856,9 +4856,6 @@ func _flush_debug_input_log() -> void:
 # =============================================================================
 
 func _process_pad(delta: float) -> void:
-	# イントロ演出中はパッド処理もスキップ
-	if game_state == "playing" and not ui_renderer.is_stage_intro_done():
-		return
 	var prev_grab: bool = input_handler.grab_input_active
 	input_handler.process_pad(delta)
 	# プレイヤー円が影響を与え始めた瞬間にキャッチSE
@@ -4966,6 +4963,8 @@ func _process(delta: float) -> void:
 			_play_sfx(sfx_count)
 		if elapsed >= 3.0:
 			game_state = "playing"
+			if input_handler.get_last_input_method() == "mouse":
+				playing_mouse_steers_player = true
 			_dwell_times  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 			_dwell_counts = [0,   0,   0,   0,   0,   0,   0,   0,   0,   0  ]
 			_dwell_prev_bucket = clampi(int(current_circularity / 10.0), 0, 9)
