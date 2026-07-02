@@ -633,9 +633,15 @@ func draw_ideal_filled(rect: Rect2, fill_color: Color, line_color: Color, line_w
 	for pts in transformed_loops:
 		for i in range(pts.size()):
 			_game.draw_line(pts[i], pts[(i + 1) % pts.size()], line_color, line_width, true)
-	# 頂点ドット: 実際の角頂点のみ（補間点を除く）
-	var key_world: Array = _game.stage_manager.get_corner_positions_world()
-	for w in key_world:
+	# 頂点ドット: 線と同じ current_centroid 基準で計算してズレを防ぐ
+	var cos_rd: float = cos(_game.correspondence_rotation)
+	var sin_rd: float = sin(_game.correspondence_rotation)
+	var sc_d: float   = _game.correspondence_scale
+	for cp in _game.stage_manager.shape_corner_points:
+		var p: Vector2 = cp as Vector2
+		var tx: float = (p.x * cos_rd - p.y * sin_rd) * sc_d
+		var ty: float = (p.x * sin_rd + p.y * cos_rd) * sc_d
+		var w: Vector2 = _game.current_centroid + Vector2(tx, ty)
 		var dp: Vector2 = (w - center_src) * scale + center_dst
 		_game.draw_circle(dp, dot_radius, line_color)
 

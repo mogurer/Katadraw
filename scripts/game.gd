@@ -1819,29 +1819,17 @@ func _input(event: InputEvent) -> void:
 		# 通常プレイ（debug_test_mode が true でもデバッグオーバーレイ目的の場合）はステージセレクトへ。
 		if _pbd_return_after_test:
 			if is_confirm_key or is_confirm_pad:
-				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					BGMManager.stop()  # BGMManager に移行
-					_return_to_title_or_stage_debug_from_test()
-					queue_redraw()
-				, false)
-				queue_redraw()
-			elif is_confirm_click and _hit_cleared_button(input_handler.player_position):
-				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					BGMManager.stop()  # BGMManager に移行
-					_return_to_title_or_stage_debug_from_test()
-					queue_redraw()
-				, false)
+				BGMManager.stop()
+				_return_to_title_or_stage_debug_from_test()
 				queue_redraw()
 			return
-		if is_confirm_key or is_confirm_pad:
-			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-				_advance_stage()
-			, false)
-			queue_redraw()
-		elif is_confirm_click and _hit_cleared_button(input_handler.player_position):
-			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-				_advance_stage()
-			, false)
+		var is_any_advance: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode != KEY_PRINT)
+			or (event is InputEventJoypadButton and event.pressed)
+			or (event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT))
+		)
+		if is_any_advance:
+			_advance_stage()
 			queue_redraw()
 		return
 
@@ -2507,26 +2495,6 @@ func _rules_exit_to_caller() -> void:
 
 func _hit_rules_button(pos: Vector2) -> bool:
 	return get_rules_next_button_rect().has_point(pos)
-
-
-func _hit_cleared_button(pos: Vector2) -> bool:
-	var vp: Vector2 = get_viewport_rect().size
-	var card_w: float = vp.x * 0.745 * 0.85
-	var card_h: float = vp.y * 0.77 * 0.85
-	var card_x: float = (vp.x - card_w) * 0.5
-	var stripe_w: float = card_w * 0.046
-	var bar_h: float = card_h * 0.1734
-	var bar_y: float = (vp.y - card_h) * 0.5 + card_h - bar_h + 25.0
-	var btn_h_pad: float = card_w * 0.042
-	var btn_v_top: float = bar_h * 0.08
-	var btn_v_bottom: float = bar_h * 0.429
-	var btn_rect := Rect2(
-		card_x + stripe_w + btn_h_pad,
-		bar_y + btn_v_top,
-		card_w - stripe_w - btn_h_pad * 2.0,
-		bar_h - btn_v_top - btn_v_bottom
-	)
-	return btn_rect.has_point(pos)
 
 
 func _hit_results_button(pos: Vector2) -> bool:

@@ -315,7 +315,7 @@ func _draw_morph_polygon(
 			var p0: Vector2 = screen_pts[tris[ti]]
 			var p1: Vector2 = screen_pts[tris[ti + 1]]
 			var p2: Vector2 = screen_pts[tris[ti + 2]]
-			if absf((p1 - p0).cross(p2 - p0)) < 0.01:
+			if absf((p1 - p0).cross(p2 - p0)) < 1.0:
 				continue
 			_game.draw_colored_polygon(PackedVector2Array([p0, p1, p2]), fill_col)
 

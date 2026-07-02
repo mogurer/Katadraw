@@ -11,7 +11,7 @@ const _GAME_SCENE := "res://scenes/game.tscn"
 
 # --- 色 ---
 const _BG_COLOR       := Color(1.0, 0.937, 0.89)
-const _LINE_COLOR      := Color(0.80, 0.70, 0.67)
+const _LINE_COLOR      := Color(0.263, 0.212, 0.278)
 const _LOCKED_COLOR    := Color(0.72, 0.62, 0.60)
 const _UNLOCKED_COLOR  := Color(0.95, 0.19, 0.32)
 const _CLEARED_COLOR   := Color(0.95, 0.19, 0.32, 0.55)
@@ -39,7 +39,7 @@ const _DBG_TXT       := Color(0.25, 0.35, 0.40)
 
 # --- サイズ ---
 const _DOT_RADIUS      := 20.0
-const _LINE_WIDTH      := 2.0
+const _LINE_WIDTH      := 4.0
 const _CHAR_RADIUS     := 14.0
 const _PROX_DIST       := 140.0   # 吹き出し表示する距離（px）
 const _BUBBLE_W        := 225.0   # バブル固定幅 (150 × 1.5)
@@ -49,6 +49,13 @@ const _BUBBLE_FIG_H    := 117.0   # 図形エリア高さ (78 × 1.5)
 const _BUBBLE_ROW_H    := 52.5    # BESTレコード各行高さ (35 × 1.5)
 const _BUBBLE_STRIPE_W := 22.5    # 左縦ストライプ幅 (15 × 1.5)
 const _BUBBLE_LABEL_W  := 67.5    # BEST行ラベルセル幅 (45 × 1.5)
+const BUBBLE_OPEN_DUR:  float = 0.18   # 出現アニメーション時間
+const BUBBLE_CLOSE_DUR: float = 0.12   # 消滅アニメーション時間
+const BORDER_CYCLE:          float = 2.0    # ボーダーライン周期（秒）
+const BORDER_ANIM_DUR:       float = 1.0    # ボーダーライン走行時間（秒）
+const BORDER_LINE_LEN:       float = 200.0  # バブルボーダーラインの長さ（px）
+const POPUP_BORDER_LINE_LEN: float = 350.0  # ダイアログボーダーラインの長さ（px）
+const BORDER_WAIT:           float = BORDER_CYCLE - BORDER_ANIM_DUR  # 待機時間 = 1.0秒
 const _BUBBLE_DARK     := Color(0.26, 0.21, 0.28)
 const _BUBBLE_RED      := Color(0.95, 0.19, 0.32)
 const _BUBBLE_VAL_BG   := Color(0.87, 0.85, 0.85)
@@ -135,6 +142,15 @@ var _anim_amp:   Array[float] = []
 
 # --- 状態 ---
 var _nearest: int = -1        # 最近傍ステージ ID
+
+# --- バブルアニメーション（スケール＋フェード）---
+# phase: 0=非表示, 1=出現中, 2=全開, 3=消滅中
+var _bubble_phase: int = 0
+var _bubble_t: float = 0.0
+var _bubble_stage_id: int = -1
+var _border_phase_t: float = 0.0   # ボーダーアニメーションタイマー（0..BORDER_CYCLE）
+var _popup_border_phase_t: float = BORDER_WAIT  # ポップアップボーダーアニメーションタイマー
+
 var _popup_stage: int = -1    # 確認ポップアップ対象（-1 = 非表示）
 var _popup_yes_hovered: bool = false
 var _popup_no_hovered: bool = false
@@ -258,6 +274,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_elapsed += delta
+	_process_bubble(delta)
+	_process_popup_border(delta)
 
 	# フォーカス演出中は通常の入力・描画更新をスキップ
 	if _is_focusing:
@@ -534,6 +552,10 @@ func _draw() -> void:
 				bounce = lerp(1.2, 1.0, (t - 0.75) / 0.25)
 			draw_radius = _DOT_RADIUS * bounce
 
+		# HOVERドット: 1.5倍に拡大
+		if is_near:
+			draw_radius *= 1.5
+
 		match state:
 			StageSelectManager.StageState.UNLOCKED:
 				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _UNLOCKED_COLOR)
@@ -556,17 +578,14 @@ func _draw() -> void:
 	# ─── 再び画面固定レイヤーへ戻してUI要素を描画 ───
 	draw_set_transform_matrix(get_canvas_transform().affine_inverse())
 
-	# 吹き出し（スクリーン座標で描画。dot位置はcanvas_transformで変換済み）
-	if _nearest >= 0 and _popup_stage < 0 and not _esc_popup and not _final_directing and not _zou_near:
-		_draw_bubble(_nearest)
+	# 吹き出し（スケール＋フェードアニメーション）
+	if _bubble_phase > 0 and _bubble_stage_id >= 0:
+		var params: Vector2 = _get_bubble_draw_params()
+		_draw_bubble(_bubble_stage_id, NAN, NAN, params.x, params.y)
 
 	# ラベル
 	if not _final_directing:
 		draw_string(_font, Vector2(40, vp.y - 32), "ESC: タイトルへ戻る", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
-
-	# ZOU バブル（近接時）
-	if StageSelectManager.zou_cleared and _zou_near and _popup_stage < 0 and not _esc_popup and not _final_directing:
-		_draw_bubble(StageSelectManager._zou_stage_idx)
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
@@ -624,7 +643,8 @@ func _draw() -> void:
 
 # ---------- 吹き出し ----------
 
-func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -> void:
+func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN,
+		bub_scale: float = 1.0, bub_alpha: float = 1.0) -> void:
 	# _draw_bubble はスクリーン座標セクションで呼ばれる。ワールド座標を画面座標へ変換する。
 	var dot: Vector2 = get_canvas_transform() * _dot_pos(stage_id)
 	var bw: float = _BUBBLE_W
@@ -644,6 +664,18 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -
 		by = fixed_by
 		draw_tail = false
 
+	# スケール変換（バブル中心を軸・均等スケール）
+	if bub_scale != 1.0:
+		var cx: float = bx + bw * 0.5
+		var cy: float = by + bh * 0.5
+		var s: float = bub_scale
+		var scale_xform := Transform2D(
+			Vector2(s, 0.0),
+			Vector2(0.0, s),
+			Vector2(cx * (1.0 - s), cy * (1.0 - s))
+		)
+		draw_set_transform_matrix(get_canvas_transform().affine_inverse() * scale_xform)
+
 	var bd: float    = 4.5
 	var str_w: float = _BUBBLE_STRIPE_W   # 縦ストライプ幅 = 15px
 	var ix: float    = bx + bd
@@ -652,7 +684,7 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -
 	var ih: float    = bh - bd * 2.0      # 194px
 
 	# ─── ドロップシャドウ ───
-	draw_rect(Rect2(bx + 12.5, by + 12.5, bw, bh), Color(0.26, 0.21, 0.28, 0.30))
+	draw_rect(Rect2(bx + 12.5, by + 12.5, bw, bh), Color(0.26, 0.21, 0.28, 0.30 * bub_alpha))
 
 	# ─── 外枠 ───
 	draw_rect(Rect2(bx, by, bw, bh), _BUBBLE_DARK)
@@ -667,24 +699,38 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -
 	draw_rect(Rect2(ix, iy,         str_w, red_h),      _BUBBLE_RED)
 	draw_rect(Rect2(ix, iy + red_h, str_w, ih - red_h), _BUBBLE_DARK)
 
-	# ─── ストライプ内 平行四辺形（ダーク部・間隔を1/3に縮小して中央揃え） ───
-	var para_zone_top: float = iy + red_h
+	# ─── ストライプ内 トライアングル（▷◁▷◁▷ 下から 100%→20%） ───
 	var para_zone_bot: float = iy + _BUBBLE_HDR_H + _BUBBLE_FIG_H
-	var para_count: int = 5
-	var para_full_step: float = (para_zone_bot - para_zone_top) / 4.0   # 元の3個分の間隔基準を維持
-	var para_step: float = para_full_step / 3.0 * 2.0   # 間隔は既存と同じ
-	var para_h: float    = para_full_step * 0.50        # 高さは元のままを維持
-	var para_skew: float = str_w * 0.55
-	var cluster_h: float = para_step * float(para_count - 1) + para_skew + para_h
-	var cluster_y: float = (para_zone_top + para_zone_bot) * 0.5 - cluster_h * 0.5 + 90.0   # 90px下に移動
-	for pi in range(para_count):
-		var py: float = cluster_y + float(pi) * para_step
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(ix + str_w, py),
-			Vector2(ix,         py + para_skew),
-			Vector2(ix,         py + para_skew + para_h),
-			Vector2(ix + str_w, py + para_h),
-		]), _BUBBLE_RED)
+	var tri_count_b: int  = 5
+	var tri_mid_b: float  = ix + str_w * 0.5
+	var shape_h_b: float  = str_w * 1.155
+	var half_h_b: float   = shape_h_b * 0.5
+	var notch_h_b: float  = shape_h_b * 0.25
+	var spacing_b: float  = str_w * 0.712
+	var last_cy_b: float  = para_zone_bot - half_h_b - 5.0 + 100.0
+	var first_cy_b: float = last_cy_b - float(tri_count_b - 1) * spacing_b
+	for tri_i_b in range(tri_count_b):
+		var cy_b: float   = first_cy_b + float(tri_i_b) * spacing_b
+		var tri_a_b: float = float(tri_i_b + 1) * 0.20
+		var tri_col: Color = Color(_BUBBLE_RED.r, _BUBBLE_RED.g, _BUBBLE_RED.b, bub_alpha * tri_a_b)
+		var pts_b: PackedVector2Array
+		if tri_i_b % 2 == 0:  # ▷ 右向き（左辺フラット）
+			pts_b = PackedVector2Array([
+				Vector2(ix,          cy_b - half_h_b),
+				Vector2(tri_mid_b,   cy_b - notch_h_b),
+				Vector2(ix + str_w,  cy_b),
+				Vector2(tri_mid_b,   cy_b + notch_h_b),
+				Vector2(ix,          cy_b + half_h_b),
+			])
+		else:                  # ◁ 左向き（右辺フラット）
+			pts_b = PackedVector2Array([
+				Vector2(ix + str_w, cy_b - half_h_b),
+				Vector2(ix + str_w, cy_b + half_h_b),
+				Vector2(tri_mid_b,  cy_b + notch_h_b),
+				Vector2(ix,         cy_b),
+				Vector2(tri_mid_b,  cy_b - notch_h_b),
+			])
+		draw_colored_polygon(pts_b, tri_col)
 
 	# ─── プレイ済み（クリア済み）判定 ───
 	var has_rec: bool = StageSelectManager.get_best_time(stage_id) >= 0.0
@@ -739,9 +785,9 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -
 	_draw_bubble_best_row(box_x, rows_top + row_h + box_gap, box_w, row_h, label_w, "BEST", "TRY",   "COUNT", bm_str)
 
 	# ─── しっぽ ───
+	var tail_base_x: float = clampf(dot.x - _DOT_RADIUS * 0.5, bx + 12.0, bx + bw - 12.0)
 	if draw_tail:
 		var tail_tip: Vector2 = dot + Vector2(-_DOT_RADIUS * 0.5, -_DOT_RADIUS * 0.5)
-		var tail_base_x: float = clampf(tail_tip.x, bx + 12.0, bx + bw - 12.0)
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(tail_base_x - 9.0, by + bh),
 			Vector2(tail_base_x + 9.0, by + bh),
@@ -754,6 +800,19 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN) -
 	draw_circle(Vector2(bx + bw - 1.0, by + 1.0),      corner_r, _BUBBLE_DARK)
 	draw_circle(Vector2(bx + 1.0,      by + bh - 1.0), corner_r, _BUBBLE_DARK)
 	draw_circle(Vector2(bx + bw - 1.0, by + bh - 1.0), corner_r, _BUBBLE_DARK)
+
+	# ─── ボーダーラインアニメーション（時計回り、しっぽ付け根スタート）───
+	if draw_tail and _border_phase_t >= BORDER_WAIT:
+		var anim_t: float = minf((_border_phase_t - BORDER_WAIT) / BORDER_ANIM_DUR, 1.0)
+		var perimeter: float = 2.0 * (bw + bh)
+		var head_d: float = anim_t * (perimeter + BORDER_LINE_LEN)
+		var tail_d: float = head_d - BORDER_LINE_LEN
+		_draw_border_line(bx, by, bw, bh, tail_base_x, tail_d, head_d,
+				Color(0.95, 0.19, 0.32, bub_alpha))
+
+	# スクリーン座標系を復元
+	if bub_scale != 1.0:
+		draw_set_transform_matrix(get_canvas_transform().affine_inverse())
 
 
 func _draw_bubble_best_row(bx: float, by: float, bw: float, bh: float, lw: float,
@@ -900,6 +959,14 @@ func _draw_popup(vp: Vector2) -> void:
 
 	_draw_popup_btn(yr, "はい",   _popup_yes_hovered)
 	_draw_popup_btn(nr, "いいえ", _popup_no_hovered)
+
+	if _popup_border_phase_t >= BORDER_WAIT:
+		var anim_t: float = minf((_popup_border_phase_t - BORDER_WAIT) / BORDER_ANIM_DUR, 1.0)
+		var perimeter: float = 2.0 * (pr.size.x + pr.size.y)
+		var head_d: float = anim_t * (perimeter + POPUP_BORDER_LINE_LEN)
+		var tail_d: float = head_d - POPUP_BORDER_LINE_LEN
+		_draw_border_line_topleft(pr.position.x, pr.position.y, pr.size.x, pr.size.y,
+				tail_d, head_d, Color(0.95, 0.19, 0.32))
 
 
 func _update_popup_hover(pos: Vector2) -> void:
@@ -1117,6 +1184,183 @@ func _find_snap_target(stick_dir: Vector2) -> int:
 	return best_id
 
 
+# ---------- バブルアニメーション ----------
+
+func _ease_out_back(t: float) -> float:
+	const c1 := 1.70158
+	const c3 := c1 + 1.0
+	return 1.0 + c3 * pow(t - 1.0, 3.0) + c1 * pow(t - 1.0, 2.0)
+
+
+func _ease_in_cubic(t: float) -> float:
+	return t * t * t
+
+
+func _get_bubble_want_id() -> int:
+	if _popup_stage >= 0 or _esc_popup or _final_directing or _is_focusing:
+		return -1
+	if StageSelectManager.zou_cleared and _zou_near:
+		return StageSelectManager._zou_stage_idx
+	if _nearest >= 0 and not _zou_near:
+		return _nearest
+	return -1
+
+
+func _get_bubble_draw_params() -> Vector2:
+	# returns Vector2(scale, alpha)
+	var t: float
+	match _bubble_phase:
+		1:  # 出現中
+			t = minf(_bubble_t / BUBBLE_OPEN_DUR, 1.0)
+			return Vector2(_ease_out_back(t), t)
+		2:  # 全開
+			return Vector2(1.0, 1.0)
+		3:  # 消滅中
+			t = minf(_bubble_t / BUBBLE_CLOSE_DUR, 1.0)
+			var inv: float = 1.0 - _ease_in_cubic(t)
+			return Vector2(inv, inv)
+		_:
+			return Vector2.ZERO
+
+
+func _process_bubble(delta: float) -> void:
+	var want_id: int = _get_bubble_want_id()
+	match _bubble_phase:
+		0:  # 非表示
+			if want_id >= 0:
+				_bubble_stage_id = want_id
+				_bubble_phase = 1
+				_bubble_t = 0.0
+		1:  # 出現中
+			_bubble_t += delta
+			if want_id < 0:
+				_bubble_phase = 3
+				_bubble_t = 0.0
+			elif want_id != _bubble_stage_id:
+				_bubble_stage_id = want_id
+				_bubble_t = 0.0
+			elif _bubble_t >= BUBBLE_OPEN_DUR:
+				_bubble_t = 0.0
+				_bubble_phase = 2
+		2:  # 全開
+			if want_id < 0:
+				_bubble_phase = 3
+				_bubble_t = 0.0
+			elif want_id != _bubble_stage_id:
+				_bubble_stage_id = want_id
+				_bubble_phase = 1
+				_bubble_t = 0.0
+		3:  # 消滅中
+			_bubble_t += delta
+			if want_id >= 0:
+				_bubble_stage_id = want_id
+				_bubble_phase = 1
+				_bubble_t = 0.0
+			elif _bubble_t >= BUBBLE_CLOSE_DUR:
+				_bubble_t = 0.0
+				_bubble_phase = 0
+				_bubble_stage_id = -1
+
+	# ボーダーラインタイマー: 全開中のみ進行、それ以外はリセット
+	if _bubble_phase == 2:
+		_border_phase_t = fmod(_border_phase_t + delta, BORDER_CYCLE)
+	else:
+		_border_phase_t = 0.0
+
+
+# ---------- ボーダーラインアニメーション ----------
+
+# 外周上の距離 d（しっぽ付け根=0、時計回り）をスクリーン座標に変換
+func _get_perimeter_pos(d: float, bx: float, by: float, bw: float, bh: float,
+		start_x: float) -> Vector2:
+	var d0: float = (bx + bw) - start_x   # 底辺右端まで
+	var d1: float = d0 + bh               # 右辺上端まで
+	var d2: float = d1 + bw               # 上辺左端まで
+	var d3: float = d2 + bh               # 左辺下端まで
+	if d < d0:
+		return Vector2(start_x + d, by + bh)
+	elif d < d1:
+		return Vector2(bx + bw, by + bh - (d - d0))
+	elif d < d2:
+		return Vector2(bx + bw - (d - d1), by)
+	elif d < d3:
+		return Vector2(bx, by + (d - d2))
+	else:
+		return Vector2(bx + (d - d3), by + bh)
+
+
+# 外周上の tail_d〜head_d 区間に赤ラインを描画（コーナーで折れ曲がる）
+func _draw_border_line(bx: float, by: float, bw: float, bh: float,
+		start_x: float, tail_d: float, head_d: float, color: Color) -> void:
+	var perimeter: float = 2.0 * (bw + bh)
+	# コーナー地点（start_xからの累積距離）
+	var d0: float = (bx + bw) - start_x
+	var d1: float = d0 + bh
+	var d2: float = d1 + bw
+	var d3: float = d2 + bh
+	# 外周範囲内にクランプ
+	var vis_tail: float = maxf(tail_d, 0.0)
+	var vis_head: float = minf(head_d, perimeter)
+	if vis_tail >= vis_head:
+		return
+	# コーナーをブレークポイントとして収集し、線分ごとに描画
+	var bp: Array[float] = [vis_tail, vis_head]
+	for corner in [d0, d1, d2, d3]:
+		if corner > vis_tail and corner < vis_head:
+			bp.append(corner)
+	bp.sort()
+	for i in range(bp.size() - 1):
+		var from_pos: Vector2 = _get_perimeter_pos(bp[i],     bx, by, bw, bh, start_x)
+		var to_pos:   Vector2 = _get_perimeter_pos(bp[i + 1], bx, by, bw, bh, start_x)
+		draw_line(from_pos, to_pos, color, 7.0, true)
+
+
+func _process_popup_border(delta: float) -> void:
+	if _popup_stage >= 0 or _esc_popup:
+		_popup_border_phase_t = fmod(_popup_border_phase_t + delta, BORDER_CYCLE)
+	else:
+		_popup_border_phase_t = BORDER_WAIT
+
+
+func _get_perimeter_pos_topleft(d: float, bx: float, by: float, bw: float, bh: float) -> Vector2:
+	var d0: float = bw
+	var d1: float = d0 + bh
+	var d2: float = d1 + bw
+	var d3: float = d2 + bh
+	if d < d0:
+		return Vector2(bx + d, by)
+	elif d < d1:
+		return Vector2(bx + bw, by + (d - d0))
+	elif d < d2:
+		return Vector2(bx + bw - (d - d1), by + bh)
+	elif d < d3:
+		return Vector2(bx, by + bh - (d - d2))
+	else:
+		return Vector2(bx + (d - d3), by)
+
+
+func _draw_border_line_topleft(bx: float, by: float, bw: float, bh: float,
+		tail_d: float, head_d: float, color: Color) -> void:
+	var perimeter: float = 2.0 * (bw + bh)
+	var d0: float = bw
+	var d1: float = d0 + bh
+	var d2: float = d1 + bw
+	var d3: float = d2 + bh
+	var vis_tail: float = maxf(tail_d, 0.0)
+	var vis_head: float = minf(head_d, perimeter)
+	if vis_tail >= vis_head:
+		return
+	var bp: Array[float] = [vis_tail, vis_head]
+	for corner in [d0, d1, d2, d3]:
+		if corner > vis_tail and corner < vis_head:
+			bp.append(corner)
+	bp.sort()
+	for i in range(bp.size() - 1):
+		var from_pos: Vector2 = _get_perimeter_pos_topleft(bp[i],     bx, by, bw, bh)
+		var to_pos:   Vector2 = _get_perimeter_pos_topleft(bp[i + 1], bx, by, bw, bh)
+		draw_line(from_pos, to_pos, color, 5.0, true)
+
+
 func _find_nearest_accessible() -> int:
 	var best: int = -1
 	var best_d: float = _PROX_DIST
@@ -1150,6 +1394,14 @@ func _draw_esc_popup(vp: Vector2) -> void:
 
 	_draw_popup_btn(yr, "はい",   _esc_popup_yes_hovered)
 	_draw_popup_btn(nr, "いいえ", _esc_popup_no_hovered)
+
+	if _popup_border_phase_t >= BORDER_WAIT:
+		var anim_t: float = minf((_popup_border_phase_t - BORDER_WAIT) / BORDER_ANIM_DUR, 1.0)
+		var perimeter: float = 2.0 * (pr.size.x + pr.size.y)
+		var head_d: float = anim_t * (perimeter + POPUP_BORDER_LINE_LEN)
+		var tail_d: float = head_d - POPUP_BORDER_LINE_LEN
+		_draw_border_line_topleft(pr.position.x, pr.position.y, pr.size.x, pr.size.y,
+				tail_d, head_d, Color(0.95, 0.19, 0.32))
 
 
 func _update_esc_popup_hover(pos: Vector2) -> void:
