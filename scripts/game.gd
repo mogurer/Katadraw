@@ -2932,7 +2932,7 @@ func _return_to_stage_select_preserve_bgm() -> void:
 
 func _advance_stage() -> void:
 	if not GameConfig.IS_DEMO:
-		if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
+		if StageSelectManager._zou_stage_idx >= 0 and StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
 			if not StageSelectManager.zou_cleared:
 				# 初回クリア: エンディング画面へ
 				StageSelectManager.mark_zou_cleared()

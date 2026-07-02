@@ -1407,6 +1407,10 @@ func _draw_config(vp: Vector2) -> void:
 	var big_y: float = _font_din_config_logo.get_ascent(big_fs) - 170.0
 	_game.draw_string(_font_din_config_logo, Vector2(-20.0, big_y), "CONFIG", HORIZONTAL_ALIGNMENT_LEFT, -1, big_fs, Color(0.26, 0.21, 0.28, 0.2))
 
+	# 装飾トライアングル（左下）
+	var deco_w: float = 500.0
+	_draw_tri_deco(Vector2(20.0, vp.y - deco_w * 0.9495 - 20.0), deco_w, Color(0.26, 0.21, 0.28, 0.2))
+
 	var text_c := Color(0.26, 0.21, 0.28)
 	var sel_c := Color(0.95, 0.19, 0.32)
 	var val_c := Color(0.26, 0.21, 0.28)
@@ -4022,3 +4026,20 @@ func _draw_bounding_box() -> void:
 	])
 	_game.draw_colored_polygon(diamond, anchor_fill)
 	_game.draw_polyline(PackedVector2Array([diamond[0], diamond[1], diamond[2], diamond[3], diamond[0]]), anchor_border, 3.0, true)
+
+
+func _draw_tri_deco(origin: Vector2, w: float, color: Color) -> void:
+	var h: float = w * 0.9495  # SVG bbox 475.5 / 500.85
+	var shapes: Array = [
+		[Vector2(0.2886,0.1754), Vector2(0.2886,0.3510), Vector2(0.1442,0.2633), Vector2(0.0000,0.1754), Vector2(0.1442,0.0877), Vector2(0.2886,0.0000)],
+		[Vector2(0.0010,0.3918), Vector2(0.0010,0.2165), Vector2(0.1454,0.3041), Vector2(0.2896,0.3918), Vector2(0.1454,0.4795), Vector2(0.0010,0.5672)],
+		[Vector2(0.6101,0.1968), Vector2(0.4659,0.2847), Vector2(0.3218,0.3722), Vector2(0.3216,0.1969), Vector2(0.3216,0.0213), Vector2(0.4659,0.1091)],
+		[Vector2(0.3557,0.3918), Vector2(0.5000,0.3040), Vector2(0.6442,0.2163), Vector2(0.6442,0.3918), Vector2(0.6443,0.5673), Vector2(0.4999,0.4794)],
+		[Vector2(0.7114,0.6081), Vector2(0.8557,0.5202), Vector2(0.9999,0.4326), Vector2(0.9999,0.6080), Vector2(1.0000,0.7836), Vector2(0.8557,0.6958)],
+		[Vector2(0.0010,0.8244), Vector2(0.0010,0.6490), Vector2(0.1454,0.7367), Vector2(0.2896,0.8244), Vector2(0.1454,0.9121), Vector2(0.0010,1.0000)],
+	]
+	for shape in shapes:
+		var pts := PackedVector2Array()
+		for p in shape:
+			pts.append(origin + Vector2((p as Vector2).x * w, (p as Vector2).y * h))
+		_game.draw_colored_polygon(pts, color)

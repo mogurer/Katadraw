@@ -79,7 +79,7 @@ const FOCUS_DURATION: float = 0.8  # 1ステージあたりのフォーカス時
 const FOCUS_LERP: float     = 5.0  # カメラ追従の線形補間係数
 const FOCUS_MOVE_SPEED: float = 1200.0    # カメラ移動速度（px/s、リニア）
 const UNLOCK_ANIM_DURATION: float = 0.5   # ぼよよん演出の長さ（秒）
-const UNLOCK_LINE_FADE_DURATION: float = 0.3  # 接続ライン出現フェードイン時間（秒）
+const UNLOCK_LINE_FADE_DURATION: float = 2.5  # 描線アニメーション時間（秒）
 
 # --- BGM 曲名表示 ---
 const _BGM_TRACK_KEYS: Array[String] = [
@@ -133,6 +133,9 @@ var _unlock_anim_elapsed: float = 0.0         # ぼよよん演出の経過時�
 var _unlock_source_stage: int = -1            # 解放元（クリアした）ステージID
 # 接続ライン出現演出: { [min_id, max_id] -> elapsed }
 var _line_fade_progress: Dictionary = {}
+var _line_draw_from: Dictionary = {}   # key → 描線の始点ステージID
+var _line_pending_keys: Dictionary = {}  # まだ進行を開始しないキー（カメラ到着前）
+var _newly_unlocked_ids: Array[int] = []  # 今回の解放演出で出現したステージID一覧
 
 # --- アニメーション ---
 var _elapsed: float = 0.0
@@ -276,6 +279,18 @@ func _process(delta: float) -> void:
 	_elapsed += delta
 	_process_bubble(delta)
 	_process_popup_border(delta)
+
+	# 描線アニメーション進行（フォーカス演出終了後も継続するため常時実行）
+	var _line_any_active: bool = false
+	for _lk in _line_fade_progress:
+		if _line_pending_keys.has(_lk):
+			continue  # カメラ未到着の線はまだ進めない
+		if _line_fade_progress[_lk] < 1.0:
+			_line_fade_progress[_lk] = minf(
+				_line_fade_progress[_lk] + delta / UNLOCK_LINE_FADE_DURATION, 1.0)
+			_line_any_active = true
+	if _line_any_active and not _is_focusing:
+		queue_redraw()
 
 	# フォーカス演出中は通常の入力・描画更新をスキップ
 	if _is_focusing:
@@ -519,14 +534,20 @@ func _draw() -> void:
 			continue
 		if StageSelectManager.get_state(b) == StageSelectManager.StageState.LOCKED:
 			continue
-		# フェードイン中のラインはアルファを補間して描画
+		# 描線アニメーション: 解放元ドットから新ドットへ線が伸びる
 		var key: String = "%d_%d" % [mini(a, b), maxi(a, b)]
-		var line_alpha: float = 1.0
+		var from_pt: Vector2
+		var to_pt: Vector2
 		if _line_fade_progress.has(key):
-			line_alpha = _line_fade_progress[key]
-		var line_color: Color = Color(_LINE_COLOR.r, _LINE_COLOR.g, _LINE_COLOR.b,
-									  _LINE_COLOR.a * line_alpha)
-		draw_line(_dot_pos(a), _dot_pos(b), line_color, _LINE_WIDTH)
+			var t: float = _line_fade_progress[key]
+			var src_id: int = _line_draw_from.get(key, a)
+			var dst_id: int = b if src_id == a else a
+			from_pt = _dot_pos(src_id)
+			to_pt = from_pt.lerp(_dot_pos(dst_id), t)
+		else:
+			from_pt = _dot_pos(a)
+			to_pt = _dot_pos(b)
+		draw_line(from_pt, to_pt, _LINE_COLOR, _LINE_WIDTH)
 
 	# ステージドット（LOCKEDは描画しない）
 	for i in range(StageSelectManager.STAGE_COUNT):
@@ -582,6 +603,11 @@ func _draw() -> void:
 	if _bubble_phase > 0 and _bubble_stage_id >= 0:
 		var params: Vector2 = _get_bubble_draw_params()
 		_draw_bubble(_bubble_stage_id, NAN, NAN, params.x, params.y)
+
+	# 装飾トライアングル（左下）
+	if not _final_directing:
+		var deco_w: float = 500.0
+		_draw_tri_deco(Vector2(20.0, vp.y - deco_w * 0.9495 - 20.0), deco_w, Color(0.26, 0.21, 0.28, 0.2))
 
 	# ラベル
 	if not _final_directing:
@@ -1084,6 +1110,25 @@ func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
 	if unlocked_ids.is_empty():
 		return
 
+	_newly_unlocked_ids = unlocked_ids.duplicate()
+
+	# 事前登録: カメラ到着前に線が全体表示されることを防ぐ（progress=0 で pending 状態に置く）
+	if return_stage_id >= 0:
+		for uid in _newly_unlocked_ids:
+			var pre_key: String = "%d_%d" % [mini(return_stage_id, uid), maxi(return_stage_id, uid)]
+			_line_fade_progress[pre_key] = 0.0
+			_line_draw_from[pre_key] = return_stage_id
+			_line_pending_keys[pre_key] = true
+	for conn in StageSelectManager.get_connections():
+		var _ca: int = conn[0]
+		var _cb: int = conn[1]
+		if _newly_unlocked_ids.has(_ca) and _newly_unlocked_ids.has(_cb):
+			var inter_pre_key: String = "%d_%d" % [_ca, _cb]
+			if not _line_pending_keys.has(inter_pre_key):
+				_line_fade_progress[inter_pre_key] = 0.0
+				_line_draw_from[inter_pre_key] = _ca
+				_line_pending_keys[inter_pre_key] = true
+
 	# 時計回りにソート（直前ステージを中心とした角度順）
 	var center: Vector2 = Vector2.ZERO
 	if return_stage_id >= 0:
@@ -1102,12 +1147,6 @@ func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
 
 
 func _process_focus(delta: float) -> void:
-	# 接続ラインのフェードイン進行（演出全体を通じて毎フレーム進行する）
-	for key in _line_fade_progress:
-		if _line_fade_progress[key] < 1.0:
-			_line_fade_progress[key] = minf(
-				_line_fade_progress[key] + delta / UNLOCK_LINE_FADE_DURATION, 1.0)
-
 	# ── フェーズ1: ぼよよん演出中 ──
 	if _unlock_anim_stage >= 0:
 		_unlock_anim_elapsed += delta
@@ -1144,11 +1183,30 @@ func _process_focus(delta: float) -> void:
 		_unlock_anim_stage = target_id
 		_unlock_anim_elapsed = 0.0
 
-		# 接続ラインのフェードイン登録
+		# 接続ラインの描画アニメーション開始（pending 解除 = カメラ到着のタイミングで進行開始）
 		if _unlock_source_stage >= 0:
 			var key: String = "%d_%d" % [mini(_unlock_source_stage, target_id),
 										  maxi(_unlock_source_stage, target_id)]
 			_line_fade_progress[key] = 0.0
+			_line_draw_from[key] = _unlock_source_stage
+			_line_pending_keys.erase(key)
+
+		# 新規解放ステージ同士を結ぶ線：pending 解除または新規登録
+		for conn in StageSelectManager.get_connections():
+			var ca: int = conn[0]
+			var cb: int = conn[1]
+			if ca != target_id and cb != target_id:
+				continue
+			var other_id: int = cb if ca == target_id else ca
+			if not _newly_unlocked_ids.has(other_id):
+				continue
+			var inter_key: String = "%d_%d" % [ca, cb]
+			if _line_pending_keys.has(inter_key):
+				_line_draw_from[inter_key] = target_id  # 描く方向を到着順に合わせる
+				_line_pending_keys.erase(inter_key)
+			elif not _line_fade_progress.has(inter_key):
+				_line_fade_progress[inter_key] = 0.0
+				_line_draw_from[inter_key] = target_id
 
 		# パーティクル生成
 		_spawn_unlock_particles(target_pos)
@@ -1528,6 +1586,23 @@ func _draw_popup_btn(rect: Rect2, label: String, hovered: bool) -> void:
 		_draw_rect_border_with_corners_local(rect, Color(0.26, 0.21, 0.28), BTN_BW)
 		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
 			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, Color(0.26, 0.21, 0.28))
+
+
+func _draw_tri_deco(origin: Vector2, w: float, color: Color) -> void:
+	var h: float = w * 0.9495  # SVG bbox 475.5 / 500.85
+	var shapes: Array = [
+		[Vector2(0.2886,0.1754), Vector2(0.2886,0.3510), Vector2(0.1442,0.2633), Vector2(0.0000,0.1754), Vector2(0.1442,0.0877), Vector2(0.2886,0.0000)],
+		[Vector2(0.0010,0.3918), Vector2(0.0010,0.2165), Vector2(0.1454,0.3041), Vector2(0.2896,0.3918), Vector2(0.1454,0.4795), Vector2(0.0010,0.5672)],
+		[Vector2(0.6101,0.1968), Vector2(0.4659,0.2847), Vector2(0.3218,0.3722), Vector2(0.3216,0.1969), Vector2(0.3216,0.0213), Vector2(0.4659,0.1091)],
+		[Vector2(0.3557,0.3918), Vector2(0.5000,0.3040), Vector2(0.6442,0.2163), Vector2(0.6442,0.3918), Vector2(0.6443,0.5673), Vector2(0.4999,0.4794)],
+		[Vector2(0.7114,0.6081), Vector2(0.8557,0.5202), Vector2(0.9999,0.4326), Vector2(0.9999,0.6080), Vector2(1.0000,0.7836), Vector2(0.8557,0.6958)],
+		[Vector2(0.0010,0.8244), Vector2(0.0010,0.6490), Vector2(0.1454,0.7367), Vector2(0.2896,0.8244), Vector2(0.1454,0.9121), Vector2(0.0010,1.0000)],
+	]
+	for shape in shapes:
+		var pts := PackedVector2Array()
+		for p in shape:
+			pts.append(origin + Vector2((p as Vector2).x * w, (p as Vector2).y * h))
+		draw_colored_polygon(pts, color)
 
 
 # ---------- [DEBUG] SE選択パネル ----------
