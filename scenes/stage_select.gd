@@ -11,18 +11,18 @@ const _GAME_SCENE := "res://scenes/game.tscn"
 
 # --- 色 ---
 const _BG_COLOR       := Color(1.0, 0.937, 0.89)
-const _LINE_COLOR      := Color(0.263, 0.212, 0.278)
+const _LINE_COLOR      := GameConfig.INK_COLOR
 const _LOCKED_COLOR    := Color(0.72, 0.62, 0.60)
 const _UNLOCKED_COLOR  := Color(0.95, 0.19, 0.32)
 const _CLEARED_COLOR   := Color(0.95, 0.19, 0.32, 0.55)
 const _HOVER_COLOR     := Color(1.0, 0.10, 0.20)
-const _CHAR_COLOR      := Color(0.26, 0.21, 0.28)
+const _CHAR_COLOR      := GameConfig.INK_COLOR
 const _BUBBLE_BG       := Color(1.0, 0.98, 0.96)
 const _BUBBLE_BORDER   := Color(0.95, 0.19, 0.32)
 const _POPUP_BG        := Color(1.0, 0.98, 0.96)
 const _POPUP_BORDER    := Color(0.95, 0.19, 0.32)
 const _BTN_YES_COLOR   := Color(0.95, 0.19, 0.32)
-const _BTN_NO_COLOR    := Color(0.26, 0.21, 0.28)
+const _BTN_NO_COLOR    := GameConfig.INK_COLOR
 
 # --- [DEBUG] SE選択パネル ---
 const _DBG_PANEL_X   := 310.0
@@ -56,7 +56,7 @@ const BORDER_ANIM_DUR:       float = 1.0    # ボーダーライン走行時間�
 const BORDER_LINE_LEN:       float = 200.0  # バブルボーダーラインの長さ（px）
 const POPUP_BORDER_LINE_LEN: float = 350.0  # ダイアログボーダーラインの長さ（px）
 const BORDER_WAIT:           float = BORDER_CYCLE - BORDER_ANIM_DUR  # 待機時間 = 1.0秒
-const _BUBBLE_DARK     := Color(0.26, 0.21, 0.28)
+const _BUBBLE_DARK     := GameConfig.INK_COLOR
 const _BUBBLE_RED      := Color(0.95, 0.19, 0.32)
 const _BUBBLE_VAL_BG   := Color(0.87, 0.85, 0.85)
 const _POPUP_W         := 700.0
@@ -190,6 +190,34 @@ var _bgm_label: Label = null
 var _bgm_text: String = ""
 var _bgm_tween: Tween = null
 
+# --- BGM 拡大パネル ---
+var _bgm_expanded_panel: PanelContainer = null
+var _bgm_expanded_prev_btn: Button = null
+var _bgm_expanded_next_btn: Button = null
+var _bgm_expanded_name_label: Label = null
+var _bgm_right_click_held: bool = false
+var _bgm_x_btn_held: bool = false
+var _bgm_lr_collapse_timer: float = -1.0
+var _bgm_expand_tween: Tween = null
+var _bgm_expanded: bool = false
+
+# --- 入力モード ---
+var _input_mode: int = 0  # 0 = KBM、1 = コントローラ
+
+# --- BGM 青ゾーン色 ---
+const _BGM_ZONE_COLOR := Color("#4477CC")
+const _BGM_ZONE_DOT_RADIUS := _DOT_RADIUS * 1.5
+
+# --- BGM 解禁演出 ---
+var _bgm_unlock_directing: bool = false
+var _bgm_unlock_phase: int = 0        # 0=inactive 1=cam移動 2=展開待ち 3=待機 4=収納待ち
+var _bgm_unlock_elapsed: float = 0.0
+var _bgm_unlock_zone_center: Vector2 = Vector2.ZERO
+var _bgm_unlock_bgm_id: String = ""
+var _bgm_unlock_skip_count: int = 0
+var _bgm_unlock_cam_start: Vector2 = Vector2.ZERO
+var _bgm_unlock_pending: bool = false  # フォーカス演出終了後に開始するフラグ
+
 
 func _ready() -> void:
 	var mplus: Font = load("res://assets/fonts/Mplus2-Medium.otf")
@@ -266,12 +294,27 @@ func _ready() -> void:
 	if StageSelectManager.all_cleared and not _final_direction_played and not StageSelectManager.zou_cleared and not StageSelectManager.zou_cleared:
 		_play_final_direction.call_deferred()
 	if StageSelectManager.zou_cleared:
-		_zou_world_pos = (StageSelectManager.get_world_pos(28) + StageSelectManager.get_world_pos(35)) * 0.5
+		_zou_world_pos = StageSelectManager.get_grid_world_pos(1, 8)
 		# ZOU クリア後にステージセレクトへ戻ったとき、キャラをマップ中央付近に配置
 		if StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
 			_char_pos = _zou_world_pos
 			_char_target = _zou_world_pos
 			_camera.position = _zou_world_pos
+	# BGM 解放状態を同期してから新解放チェック
+	BGMManager.set_unlocked_bgm_ids(StageSelectManager.get_unlocked_bgm_ids())
+	var newly_unlocked_bgms: Array[String] = StageSelectManager.check_bgm_unlocks()
+	if newly_unlocked_bgms.size() > 0:
+		var bgm_id: String = newly_unlocked_bgms[0]
+		var zone_idx: int = _get_zone_idx_for_bgm(bgm_id)
+		if zone_idx >= 0:
+			_bgm_unlock_bgm_id = bgm_id
+			_bgm_unlock_zone_center = StageSelectManager.get_bgm_zone_centers()[zone_idx]
+			if _is_focusing:
+				_bgm_unlock_pending = true
+			else:
+				_start_bgm_unlock_sequence()
+	# 矢印ボタン表示（解放トラック1種のみなら非表示）
+	_update_bgm_button_labels()
 	_start_bgm_label_anim.call_deferred()
 
 
@@ -279,6 +322,14 @@ func _process(delta: float) -> void:
 	_elapsed += delta
 	_process_bubble(delta)
 	_process_popup_border(delta)
+
+	# BGM 拡大パネル L/R タイマー
+	if _bgm_lr_collapse_timer > 0.0:
+		_bgm_lr_collapse_timer -= delta
+		if _bgm_lr_collapse_timer <= 0.0:
+			_bgm_lr_collapse_timer = -1.0
+			if not _bgm_right_click_held and not _bgm_x_btn_held:
+				_bgm_do_collapse()
 
 	# 描線アニメーション進行（フォーカス演出終了後も継続するため常時実行）
 	var _line_any_active: bool = false
@@ -295,6 +346,41 @@ func _process(delta: float) -> void:
 	# フォーカス演出中は通常の入力・描画更新をスキップ
 	if _is_focusing:
 		_process_focus(delta)
+		queue_redraw()
+		return
+
+	# BGM 解禁演出
+	if _bgm_unlock_directing:
+		_bgm_unlock_elapsed += delta
+		match _bgm_unlock_phase:
+			1:  # カメラスライド（0.5s EASE_OUT QUAD）
+				var t: float = minf(_bgm_unlock_elapsed / 0.5, 1.0)
+				var et: float = 1.0 - pow(1.0 - t, 2.0)
+				_camera.position = _bgm_unlock_cam_start.lerp(_bgm_unlock_zone_center, et)
+				if t >= 1.0:
+					_camera.position = _bgm_unlock_zone_center
+					_bgm_unlock_phase = 2
+					_bgm_unlock_elapsed = 0.0
+					_spawn_bgm_unlock_particles(_bgm_unlock_zone_center)
+					_bgm_do_expand()
+					BGMManager.unlock_bgm(_bgm_unlock_bgm_id)
+					_bgm_update_expanded_label()
+					_update_bgm_button_labels()
+			2:  # 展開アニメーション待ち（0.15s）
+				if _bgm_unlock_elapsed >= 0.15:
+					_bgm_unlock_phase = 3
+					_bgm_unlock_elapsed = 0.0
+			3:  # 表示待機（0.5s）
+				if _bgm_unlock_elapsed >= 0.5:
+					_bgm_unlock_phase = 4
+					_bgm_unlock_elapsed = 0.0
+					_bgm_do_collapse()
+			4:  # 収納アニメーション待ち（0.15s）
+				if _bgm_unlock_elapsed >= 0.15:
+					_bgm_unlock_directing = false
+					_bgm_unlock_phase = 0
+					_char_pos = _camera.position
+					_char_target = _camera.position
 		queue_redraw()
 		return
 
@@ -382,6 +468,14 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# 入力モード自動切替
+	if event is InputEventMouseButton and event.pressed:
+		_set_input_mode(0)
+	elif event is InputEventKey and event.pressed:
+		_set_input_mode(0)
+	elif event is InputEventJoypadButton and event.pressed:
+		_set_input_mode(1)
+
 	# 最終ステージ演出中: Phase3入力のみ受け付け、他は全てブロック
 	if _final_directing:
 		if _final_phase3 == 1:
@@ -396,6 +490,20 @@ func _input(event: InputEvent) -> void:
 				(event is InputEventJoypadButton and event.pressed)
 			):
 				_final_phase3_input_received = true
+		return
+
+	# BGM 解禁演出中: スキップ入力のみ受け付け
+	if _bgm_unlock_directing:
+		var is_skip: bool = (
+			(event is InputEventMouseButton and event.pressed and
+				(event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT))
+			or (event is InputEventJoypadButton and event.pressed and
+				(event.button_index == JOY_BUTTON_A or event.button_index == JOY_BUTTON_X))
+		)
+		if is_skip:
+			_bgm_unlock_skip_count += 1
+			if _bgm_unlock_skip_count >= 2:
+				_bgm_unlock_skip()
 		return
 
 	if event is InputEventKey:
@@ -489,14 +597,63 @@ func _input(event: InputEvent) -> void:
 		_sfx_click.play()
 		queue_redraw()
 
+	# Q/E キーでBGM切り替え（ポップアップ非表示中のみ）
+	if event is InputEventKey and event.pressed and not event.echo and _popup_stage < 0 and not _esc_popup:
+		if event.keycode == KEY_Q:
+			BGMManager.select_prev_bgm()
+			_start_bgm_label_anim()
+			_bgm_lr_collapse_timer = 0.5
+			if not _bgm_expanded:
+				_bgm_do_expand()
+		elif event.keycode == KEY_E:
+			BGMManager.select_next_bgm()
+			_start_bgm_label_anim()
+			_bgm_lr_collapse_timer = 0.5
+			if not _bgm_expanded:
+				_bgm_do_expand()
+
+	# 右クリック保持で BGM 拡大パネル表示
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and _popup_stage < 0 and not _esc_popup:
+		if event.pressed:
+			_bgm_right_click_held = true
+			_bgm_do_expand()
+		else:
+			_bgm_right_click_held = false
+			if not _bgm_x_btn_held:
+				_bgm_do_collapse()
+
 	# L/R ボタンでBGM切り替え（ポップアップ非表示中のみ）
-	if event is InputEventJoypadButton and event.pressed:
+	if event is InputEventJoypadButton and event.pressed and _popup_stage < 0 and not _esc_popup:
 		if event.button_index == JOY_BUTTON_LEFT_SHOULDER:
 			BGMManager.select_prev_bgm()
 			_start_bgm_label_anim()
+			_bgm_lr_collapse_timer = 0.5
+			if not _bgm_expanded:
+				_bgm_do_expand()
 		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			BGMManager.select_next_bgm()
 			_start_bgm_label_anim()
+			_bgm_lr_collapse_timer = 0.5
+			if not _bgm_expanded:
+				_bgm_do_expand()
+		# X ボタン保持で BGM 拡大パネル表示
+		elif event.button_index == JOY_BUTTON_X:
+			_bgm_x_btn_held = true
+			_bgm_do_expand()
+		# Start ボタンで ESC ポップアップ
+		elif event.button_index == JOY_BUTTON_START:
+			if not _esc_popup and _popup_stage < 0 and not _final_directing:
+				_esc_popup = true
+				_esc_popup_yes_hovered = false
+				_esc_popup_no_hovered = false
+				_sfx_click.play()
+				queue_redraw()
+
+	# X ボタンリリースで収納
+	if event is InputEventJoypadButton and not event.pressed and event.button_index == JOY_BUTTON_X:
+		_bgm_x_btn_held = false
+		if not _bgm_right_click_held:
+			_bgm_do_collapse()
 
 
 func _draw() -> void:
@@ -518,7 +675,7 @@ func _draw() -> void:
 		var logo_dsc: float = _font_din_logo.get_descent(logo_fs)
 		var stage_y: float  = logo_asc - 170.0
 		var select_y: float = stage_y + logo_dsc + 10.0 + logo_asc - 300.0
-		var logo_col := Color(0.26, 0.21, 0.28, 0.2)
+		var logo_col := Color(GameConfig.INK_COLOR,0.2)
 		draw_string(_font_din_logo, Vector2(logo_x, stage_y),  "STAGE",  HORIZONTAL_ALIGNMENT_LEFT, -1, logo_fs, logo_col)
 		draw_string(_font_din_logo, Vector2(logo_x, select_y), "SELECT", HORIZONTAL_ALIGNMENT_LEFT, -1, logo_fs, logo_col)
 
@@ -548,6 +705,18 @@ func _draw() -> void:
 			from_pt = _dot_pos(a)
 			to_pt = _dot_pos(b)
 		draw_line(from_pt, to_pt, _LINE_COLOR, _LINE_WIDTH)
+
+	# BGM 解禁ゾーン: 青い線・点
+	if not _final_directing:
+		var zones: Array = StageSelectManager._bgm_zones
+		var centers: Array[Vector2] = StageSelectManager.get_bgm_zone_centers()
+		for zi in range(mini(zones.size(), centers.size())):
+			var center: Vector2 = centers[zi]
+			for sid in zones[zi].get("required_stages", []):
+				var sid_int: int = int(sid)
+				if StageSelectManager.get_state(sid_int) == StageSelectManager.StageState.CLEARED:
+					draw_line(StageSelectManager.get_world_pos(sid_int), center, _BGM_ZONE_COLOR, _LINE_WIDTH, true)
+			draw_circle(center, _BGM_ZONE_DOT_RADIUS, _BGM_ZONE_COLOR)
 
 	# ステージドット（LOCKEDは描画しない）
 	for i in range(StageSelectManager.STAGE_COUNT):
@@ -587,7 +756,7 @@ func _draw() -> void:
 	# ZOU ドット（zou_cleared かつ演出終了後）
 	if StageSelectManager.zou_cleared and not _final_directing:
 		const ZOU_R: float = _DOT_RADIUS * 2.0
-		var zou_col: Color = _HOVER_COLOR if _zou_near else Color(0.26, 0.21, 0.28)
+		var zou_col: Color = _HOVER_COLOR if _zou_near else GameConfig.INK_COLOR
 		draw_circle(_zou_world_pos, ZOU_R, zou_col)
 		draw_circle(_zou_world_pos, ZOU_R * 0.35, Color.WHITE)
 
@@ -607,11 +776,12 @@ func _draw() -> void:
 	# 装飾トライアングル（左下）
 	if not _final_directing:
 		var deco_w: float = 500.0
-		_draw_tri_deco(Vector2(20.0, vp.y - deco_w * 0.9495 - 20.0), deco_w, Color(0.26, 0.21, 0.28, 0.2))
+		_draw_tri_deco(Vector2(20.0, vp.y - deco_w * 0.9495 - 20.0), deco_w, Color(GameConfig.INK_COLOR,0.2))
 
 	# ラベル
 	if not _final_directing:
-		draw_string(_font, Vector2(40, vp.y - 32), "ESC: タイトルへ戻る", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
+		var title_hint: String = "Start: タイトルへ戻る" if _input_mode == 1 else "ESC: タイトルへ戻る"
+		draw_string(_font, Vector2(40, vp.y - 32), title_hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
@@ -710,7 +880,7 @@ func _draw_bubble(stage_id: int, fixed_bx: float = NAN, fixed_by: float = NAN,
 	var ih: float    = bh - bd * 2.0      # 194px
 
 	# ─── ドロップシャドウ ───
-	draw_rect(Rect2(bx + 12.5, by + 12.5, bw, bh), Color(0.26, 0.21, 0.28, 0.30 * bub_alpha))
+	draw_rect(Rect2(bx + 12.5, by + 12.5, bw, bh), Color(GameConfig.INK_COLOR,0.30 * bub_alpha))
 
 	# ─── 外枠 ───
 	draw_rect(Rect2(bx, by, bw, bh), _BUBBLE_DARK)
@@ -960,7 +1130,7 @@ func _stage_popup_rects(vp: Vector2) -> Dictionary:
 
 
 func _draw_popup(vp: Vector2) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(GameConfig.INK_COLOR,0.50))
 	var r: Dictionary = _stage_popup_rects(vp)
 	var pr: Rect2 = r["popup"]
 	var yr: Rect2 = r["yes"]
@@ -971,9 +1141,9 @@ func _draw_popup(vp: Vector2) -> void:
 	var bubble_by: float = pr.position.y - _BUBBLE_H - 20.0
 	_draw_bubble(_popup_stage, bubble_bx, bubble_by)
 
-	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(0.26, 0.21, 0.28, 0.25))
+	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(GameConfig.INK_COLOR,0.25))
 	draw_rect(pr, Color(1.0, 1.0, 1.0))
-	_draw_rect_border_with_corners_local(pr, Color(0.26, 0.21, 0.28), 5.75)
+	_draw_rect_border_with_corners_local(pr, GameConfig.INK_COLOR, 5.75)
 
 	# 問いかけ文（ESCダイアログと同一レイアウト）
 	var q_fs: int = 42
@@ -1213,6 +1383,9 @@ func _process_focus(delta: float) -> void:
 
 		if _focus_queue.is_empty():
 			_is_focusing = false
+			if _bgm_unlock_pending:
+				_bgm_unlock_pending = false
+				_start_bgm_unlock_sequence()
 
 	queue_redraw()
 
@@ -1434,16 +1607,16 @@ func _find_nearest_accessible() -> int:
 # ---------- タイトル戻りポップアップ ----------
 
 func _draw_esc_popup(vp: Vector2) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(GameConfig.INK_COLOR,0.50))
 	var r: Dictionary = _popup_rects(vp)
 	var pr: Rect2 = r["popup"]
 	var yr: Rect2 = r["yes"]
 	var nr: Rect2 = r["no"]
 	var cy: float  = pr.position.y + pr.size.y * 0.5
 
-	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(0.26, 0.21, 0.28, 0.25))
+	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(GameConfig.INK_COLOR,0.25))
 	draw_rect(pr, Color(1.0, 1.0, 1.0))
-	_draw_rect_border_with_corners_local(pr, Color(0.26, 0.21, 0.28), 5.75)
+	_draw_rect_border_with_corners_local(pr, GameConfig.INK_COLOR, 5.75)
 
 	draw_string(_font_din, Vector2(pr.position.x, cy - 45.0), "タイトル画面へ戻りますか？",
 		HORIZONTAL_ALIGNMENT_CENTER, pr.size.x, 42, Color(0.95, 0.19, 0.32))
@@ -1505,14 +1678,14 @@ func _draw_rect_border_with_corners_local(rect: Rect2, color: Color, bw: float) 
 
 
 func _draw_zou_popup(vp: Vector2) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.50))
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(GameConfig.INK_COLOR,0.50))
 	var r: Dictionary = _popup_rects(vp)
 	var pr: Rect2 = r["popup"]
 	var yr: Rect2 = r["yes"]
 	var nr: Rect2 = r["no"]
-	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(0.26, 0.21, 0.28, 0.25))
+	draw_rect(Rect2(pr.position + Vector2(15.0, 15.0), pr.size), Color(GameConfig.INK_COLOR,0.25))
 	draw_rect(pr, Color(1.0, 1.0, 1.0))
-	_draw_rect_border_with_corners_local(pr, Color(0.26, 0.21, 0.28), 5.75)
+	_draw_rect_border_with_corners_local(pr, GameConfig.INK_COLOR, 5.75)
 	var q_fs: int = 42
 	var dialog_cy: float = pr.position.y + pr.size.y * 0.5
 	draw_string(_font_din if _font_din != null else _font,
@@ -1572,20 +1745,20 @@ func _draw_popup_btn(rect: Rect2, label: String, hovered: bool) -> void:
 		])
 		var so := Vector2(12.5, 12.5)
 		draw_colored_polygon(PackedVector2Array([pts[0]+so, pts[1]+so, pts[2]+so, pts[3]+so]),
-			Color(0.26, 0.21, 0.28, 0.30))
+			Color(GameConfig.INK_COLOR,0.30))
 		draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.9))
 		for i in range(4):
-			draw_line(pts[i], pts[(i + 1) % 4], Color(0.26, 0.21, 0.28), BTN_BW, true)
+			draw_line(pts[i], pts[(i + 1) % 4], GameConfig.INK_COLOR, BTN_BW, true)
 		for c in pts:
-			draw_circle(c, dot_r, Color(0.26, 0.21, 0.28))
+			draw_circle(c, dot_r, GameConfig.INK_COLOR)
 		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
 			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, Color(1.0, 0.937, 0.89))
 	else:
-		draw_rect(Rect2(rect.position + Vector2(12.5, 12.5), rect.size), Color(0.26, 0.21, 0.28, 0.30))
+		draw_rect(Rect2(rect.position + Vector2(12.5, 12.5), rect.size), Color(GameConfig.INK_COLOR,0.30))
 		draw_rect(rect, Color(1.0, 0.937, 0.89))
-		_draw_rect_border_with_corners_local(rect, Color(0.26, 0.21, 0.28), BTN_BW)
+		_draw_rect_border_with_corners_local(rect, GameConfig.INK_COLOR, BTN_BW)
 		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
-			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, Color(0.26, 0.21, 0.28))
+			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, GameConfig.INK_COLOR)
 
 
 func _draw_tri_deco(origin: Vector2, w: float, color: Color) -> void:
@@ -1661,8 +1834,8 @@ func _draw_final_phase3(vp: Vector2) -> void:
 	_final_phase3_btn_rect = btn
 	var bg_color: Color = Color(0.95, 0.19, 0.32) if _final_phase3_hover else Color.WHITE
 	draw_rect(btn, bg_color, true)
-	draw_rect(btn, Color(0.26, 0.21, 0.28), false, 3.0)
-	var text_color: Color = Color.WHITE if _final_phase3_hover else Color(0.26, 0.21, 0.28)
+	draw_rect(btn, GameConfig.INK_COLOR, false, 3.0)
+	var text_color: Color = Color.WHITE if _final_phase3_hover else GameConfig.INK_COLOR
 	var text_cx: float = cx - 185.0
 	var text_y: float = cy + fnt.get_ascent(FS) * 0.5 - fnt.get_descent(FS) * 0.5
 	draw_string(fnt, Vector2(text_cx, text_y), text,
@@ -1983,7 +2156,7 @@ func _setup_bgm_ui() -> void:
 	_bgm_container.add_theme_constant_override("separation", 8)
 	anchor.add_child(_bgm_container)
 
-	_btn_prev = _mk_bgm_btn("◀[L]")
+	_btn_prev = _mk_bgm_btn("◀[Q]")
 	_bgm_container.add_child(_btn_prev)
 	_bgm_container.add_child(_mk_note_label())
 
@@ -1998,11 +2171,55 @@ func _setup_bgm_ui() -> void:
 
 	_bgm_container.add_child(_mk_note_label())
 
-	_btn_next = _mk_bgm_btn("[R]▶")
+	_btn_next = _mk_bgm_btn("[E]▶")
 	_bgm_container.add_child(_btn_next)
 
 	_btn_prev.pressed.connect(_on_bgm_btn_prev)
 	_btn_next.pressed.connect(_on_bgm_btn_next)
+
+	# 拡大パネル（右クリック / X ボタン保持で表示）
+	var exp_anchor := Control.new()
+	exp_anchor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	exp_anchor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bgm_canvas.add_child(exp_anchor)
+
+	_bgm_expanded_panel = PanelContainer.new()
+	_bgm_expanded_panel.anchor_left   = 0.5
+	_bgm_expanded_panel.anchor_right  = 0.5
+	_bgm_expanded_panel.anchor_top    = 0.5
+	_bgm_expanded_panel.anchor_bottom = 0.5
+	_bgm_expanded_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_bgm_expanded_panel.grow_vertical   = Control.GROW_DIRECTION_BOTH
+	_bgm_expanded_panel.visible = false
+	exp_anchor.add_child(_bgm_expanded_panel)
+	_bgm_expanded_panel.resized.connect(func() -> void:
+		_bgm_expanded_panel.pivot_offset = _bgm_expanded_panel.size / 2.0
+	)
+
+	var exp_hbox := HBoxContainer.new()
+	exp_hbox.add_theme_constant_override("separation", 24)
+	_bgm_expanded_panel.add_child(exp_hbox)
+
+	_bgm_expanded_prev_btn = Button.new()
+	_bgm_expanded_prev_btn.text = "◀[Q]"
+	_bgm_expanded_prev_btn.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE * 4)
+	_bgm_expanded_prev_btn.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	exp_hbox.add_child(_bgm_expanded_prev_btn)
+
+	_bgm_expanded_name_label = Label.new()
+	_bgm_expanded_name_label.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE * 3)
+	_bgm_expanded_name_label.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	_bgm_expanded_name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	exp_hbox.add_child(_bgm_expanded_name_label)
+
+	_bgm_expanded_next_btn = Button.new()
+	_bgm_expanded_next_btn.text = "[E]▶"
+	_bgm_expanded_next_btn.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE * 4)
+	_bgm_expanded_next_btn.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	exp_hbox.add_child(_bgm_expanded_next_btn)
+
+	_bgm_expanded_prev_btn.pressed.connect(_on_bgm_btn_prev)
+	_bgm_expanded_next_btn.pressed.connect(_on_bgm_btn_next)
 
 
 func _start_bgm_label_anim() -> void:
@@ -2111,3 +2328,131 @@ func _on_bgm_btn_prev() -> void:
 func _on_bgm_btn_next() -> void:
 	BGMManager.select_next_bgm()
 	_start_bgm_label_anim()
+
+
+# --- BGM 拡大パネル制御 ---
+
+func _bgm_do_expand() -> void:
+	if _bgm_expanded or BGMManager.get_unlocked_track_count() <= 1:
+		return
+	_bgm_expanded = true
+	_bgm_update_expanded_label()
+	_bgm_expanded_panel.visible = true
+	_bgm_expanded_panel.scale = Vector2(0.25, 0.25)
+	_bgm_expanded_panel.modulate.a = 0.0
+	if _bgm_expand_tween:
+		_bgm_expand_tween.kill()
+	_bgm_expand_tween = create_tween()
+	_bgm_expand_tween.tween_property(_bgm_expanded_panel, "scale", Vector2.ONE, 0.15)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_bgm_expand_tween.parallel().tween_property(_bgm_expanded_panel, "modulate:a", 1.0, 0.15)
+
+
+func _bgm_do_collapse() -> void:
+	if not _bgm_expanded:
+		return
+	_bgm_expanded = false
+	if _bgm_expand_tween:
+		_bgm_expand_tween.kill()
+	_bgm_expand_tween = create_tween()
+	_bgm_expand_tween.tween_property(_bgm_expanded_panel, "scale", Vector2(0.25, 0.25), 0.15)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_bgm_expand_tween.parallel().tween_property(_bgm_expanded_panel, "modulate:a", 0.0, 0.15)
+	_bgm_expand_tween.tween_callback(func() -> void: _bgm_expanded_panel.visible = false)
+
+
+func _bgm_update_expanded_label() -> void:
+	if not _bgm_expanded_name_label:
+		return
+	var idx := BGMManager.get_ingame_track_idx()
+	if idx >= 0 and idx < _BGM_TRACK_KEYS.size():
+		_bgm_expanded_name_label.text = tr(_BGM_TRACK_KEYS[idx])
+	var show_arrows: bool = BGMManager.get_unlocked_track_count() > 1
+	if _bgm_expanded_prev_btn:
+		_bgm_expanded_prev_btn.visible = show_arrows
+	if _bgm_expanded_next_btn:
+		_bgm_expanded_next_btn.visible = show_arrows
+
+
+# --- 入力モード切替 ---
+
+func _set_input_mode(mode: int) -> void:
+	if _input_mode == mode:
+		return
+	_input_mode = mode
+	_update_bgm_button_labels()
+	queue_redraw()
+
+
+func _update_bgm_button_labels() -> void:
+	var is_kb: bool = (_input_mode == 0)
+	var show_arrows: bool = BGMManager.get_unlocked_track_count() > 1
+	if _btn_prev:
+		_btn_prev.text = "◀[Q]" if is_kb else "◀[L]"
+		_btn_prev.visible = show_arrows
+	if _btn_next:
+		_btn_next.text = "[E]▶" if is_kb else "[R]▶"
+		_btn_next.visible = show_arrows
+	if _bgm_expanded_prev_btn:
+		_bgm_expanded_prev_btn.text = "◀[Q]" if is_kb else "◀[L]"
+	if _bgm_expanded_next_btn:
+		_bgm_expanded_next_btn.text = "[E]▶" if is_kb else "[R]▶"
+
+
+# --- BGM 解禁ゾーン ---
+
+func _start_bgm_unlock_sequence() -> void:
+	_bgm_unlock_directing = true
+	_bgm_unlock_phase = 1
+	_bgm_unlock_elapsed = 0.0
+	_bgm_unlock_skip_count = 0
+	_bgm_unlock_cam_start = _camera.position
+
+
+func _bgm_unlock_skip() -> void:
+	_bgm_unlock_directing = false
+	_bgm_unlock_phase = 0
+	_camera.position = _bgm_unlock_zone_center
+	_char_pos = _camera.position
+	_char_target = _camera.position
+	BGMManager.unlock_bgm(_bgm_unlock_bgm_id)
+	_update_bgm_button_labels()
+	if _bgm_expanded:
+		if _bgm_expand_tween:
+			_bgm_expand_tween.kill()
+		_bgm_expanded = false
+		_bgm_expanded_panel.visible = false
+
+
+func _get_zone_idx_for_bgm(bgm_id: String) -> int:
+	var zones: Array = StageSelectManager._bgm_zones
+	for i in range(zones.size()):
+		if str(zones[i].get("unlocks_bgm", "")) == bgm_id:
+			return i
+	return -1
+
+
+func _spawn_bgm_unlock_particles(world_pos: Vector2) -> void:
+	var screen_pos: Vector2 = get_canvas_transform() * world_pos
+	var p := CPUParticles2D.new()
+	_bgm_canvas.add_child(p)
+	p.position = screen_pos
+	p.emitting = true
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.amount = 180
+	p.lifetime = 1.2
+	p.direction = Vector2.UP
+	p.spread = 180.0
+	p.gravity = Vector2(0.0, 200.0)
+	p.initial_velocity_min = 80.0
+	p.initial_velocity_max = 200.0
+	p.scale_amount_min = 3.0
+	p.scale_amount_max = 7.0
+	p.color = _BGM_ZONE_COLOR
+	var t := Timer.new()
+	t.wait_time = 2.0
+	t.one_shot = true
+	p.add_child(t)
+	t.timeout.connect(p.queue_free)
+	t.start()

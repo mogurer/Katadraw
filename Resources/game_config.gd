@@ -5,6 +5,10 @@
 
 class_name GameConfig
 
+# --- ブランドカラー ---
+## ゲーム内の「インク色」（濃い紫）の正規定数。頂点・辺・自キャラ・UI 枠など全域で参照する。
+const INK_COLOR := Color("#433647")
+
 # --- 体験版 / 製品版 ---
 # true: 体験版（3ステージ）、false: 製品版（全ステージ）
 const EXPERIENCE_VERSION := false

@@ -43,6 +43,7 @@ var _connections: Dictionary = {}   # { id: [隣接id, ...] }
 var _grid_pos: Dictionary = {}      # { id: Vector2i(col, row) }
 var _y_offset: Dictionary = {}      # { id: float }
 var _bgm_zones: Array = []          # BGM解禁ゾーン定義
+var _bgm_zone_centers: Array[Vector2] = []  # 各ゾーン中心のワールド座標
 
 # 進行状態
 var _states: Array[int] = []
@@ -79,6 +80,10 @@ func _load_manifest() -> void:
 		_grid_pos[id] = Vector2i(int(gp[0]), int(gp[1]))
 		_y_offset[id] = float(entry.get("y_offset", 0))
 	_bgm_zones = d.get("bgm_unlock_zones", [])
+	_bgm_zone_centers.clear()
+	for zone in _bgm_zones:
+		var cgp: Array = zone.get("center_grid_pos", [0, 0])
+		_bgm_zone_centers.append(get_grid_world_pos(int(cgp[0]), int(cgp[1])))
 
 
 func _load_stage_names() -> void:
@@ -87,6 +92,21 @@ func _load_stage_names() -> void:
 	var stages: Array = StageData.get_stages()
 	for i in range(mini(stages.size(), STAGE_COUNT)):
 		_stage_names[i] = str(stages[i].get("guide_type_label", ""))
+
+
+## グリッド座標からワールド座標を返す
+func get_grid_world_pos(col: int, row: int, y_offset: float = 0.0) -> Vector2:
+	return Vector2(col * X_PITCH * SQRT3, row * X_PITCH + y_offset)
+
+
+## BGM解禁ゾーンの中心ワールド座標一覧を返す
+func get_bgm_zone_centers() -> Array[Vector2]:
+	return _bgm_zone_centers
+
+
+## 解放済みBGM ID一覧を返す（複製）
+func get_unlocked_bgm_ids() -> Array:
+	return _unlocked_bgms.duplicate()
 
 
 ## ステージのワールド座標を返す（ぷるぷるアニメーション適用前の基準座標）

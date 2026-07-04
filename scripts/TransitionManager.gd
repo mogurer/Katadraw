@@ -171,7 +171,7 @@ class _DrawNode extends Node2D:
 		for k in range(3):
 			var a: float = base_angle + rotation_offset + TAU * float(k) / 3.0
 			pts.append(Vector2(cx + cos(a) * r, cy + sin(a) * r))
-		draw_colored_polygon(pts, Color(0.26, 0.21, 0.28))
+		draw_colored_polygon(pts, GameConfig.INK_COLOR)
 		for k in range(3):
 			draw_line(pts[k], pts[(k + 1) % 3], Color.WHITE, LINE_W, true)
 		for k in range(3):
@@ -190,9 +190,9 @@ class _DrawNode extends Node2D:
 		draw_colored_polygon(pts, Color(0.95, 0.19, 0.32))
 		# KATAスタイル：黒い線と点
 		for k in range(6):
-			draw_line(pts[k], pts[(k + 1) % 6], Color.BLACK, LINE_W, true)
+			draw_line(pts[k], pts[(k + 1) % 6], GameConfig.INK_COLOR, LINE_W, true)
 		for k in range(6):
-			draw_circle(pts[k], DOT_R, Color.BLACK)
+			draw_circle(pts[k], DOT_R, GameConfig.INK_COLOR)
 
 	# 斜めワイプ 左→右（Aワイプ）
 	func _draw_diagonal(vp: Vector2, t: float) -> void:
@@ -202,4 +202,4 @@ class _DrawNode extends Node2D:
 		pts.append(Vector2(clampf(k, 0.0, vp.x), 0.0))
 		pts.append(Vector2(clampf(k + vp.y, 0.0, vp.x), vp.y))
 		pts.append(Vector2(0.0, vp.y))
-		draw_colored_polygon(pts, Color(0.26, 0.21, 0.28))
+		draw_colored_polygon(pts, GameConfig.INK_COLOR)

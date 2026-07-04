@@ -113,6 +113,10 @@ const TRACKS: Array[Dictionary] = [
 
 const _INGAME_TRACK_COUNT: int = 5
 
+const _BGM_ID_TO_TRACK_IDX: Dictionary = {
+	"01-06": 1, "01-08": 2, "02-03": 3, "02-09": 4
+}
+
 # ---------- Constants ----------
 
 const _BASE_VOLUME_DB: float = -8.5
@@ -123,6 +127,7 @@ const _COUNTDOWN_VOLUME_REDUCE_DB: float = -3.0  # カウントダウン中の�
 # ---------- State ----------
 
 var _ingame_track_idx: int = 0  # 現在選択中のインゲームBGM（0〜_INGAME_TRACK_COUNT-1）
+var _unlocked_track_indices: PackedInt32Array = PackedInt32Array([0])  # 解放済みトラックインデックス
 var _track_idx: int = 0
 var _motif_idx: int = 0
 var _in_intro: bool = false
@@ -351,21 +356,59 @@ func resume_stage_select() -> void:
 	_sync_volume()
 
 
-## ステージセレクト: 次のインゲームBGMへ切り替え（先頭から再生）。
+## ステージセレクト: 次のインゲームBGMへ切り替え（解放済みトラックのみ）。
 func select_next_bgm() -> void:
-	_ingame_track_idx = (_ingame_track_idx + 1) % _INGAME_TRACK_COUNT
+	var cur_pos: int = _unlocked_track_indices.find(_ingame_track_idx)
+	if cur_pos < 0:
+		cur_pos = 0
+	cur_pos = (cur_pos + 1) % _unlocked_track_indices.size()
+	_ingame_track_idx = _unlocked_track_indices[cur_pos]
 	play_ingame()
 
 
-## ステージセレクト: 前のインゲームBGMへ切り替え（先頭から再生）。
+## ステージセレクト: 前のインゲームBGMへ切り替え（解放済みトラックのみ）。
 func select_prev_bgm() -> void:
-	_ingame_track_idx = (_ingame_track_idx - 1 + _INGAME_TRACK_COUNT) % _INGAME_TRACK_COUNT
+	var cur_pos: int = _unlocked_track_indices.find(_ingame_track_idx)
+	if cur_pos < 0:
+		cur_pos = 0
+	cur_pos = (cur_pos - 1 + _unlocked_track_indices.size()) % _unlocked_track_indices.size()
+	_ingame_track_idx = _unlocked_track_indices[cur_pos]
 	play_ingame()
 
 
 ## 現在のインゲームBGMインデックスを返す（0〜_INGAME_TRACK_COUNT-1）。
 func get_ingame_track_idx() -> int:
 	return _ingame_track_idx
+
+
+## 解放済みBGM IDリストをセット（ステージセレクト起動時に呼ぶ）。
+func set_unlocked_bgm_ids(ids: Array) -> void:
+	_unlocked_track_indices = PackedInt32Array([0])
+	for id in ids:
+		if _BGM_ID_TO_TRACK_IDX.has(id):
+			var idx: int = _BGM_ID_TO_TRACK_IDX[id]
+			if not _unlocked_track_indices.has(idx):
+				_unlocked_track_indices.append(idx)
+	_unlocked_track_indices.sort()
+	if not _unlocked_track_indices.has(_ingame_track_idx):
+		_ingame_track_idx = 0
+
+
+## 新たに解放されたBGM IDをアンロックし、即座にそのトラックへ切り替える。
+func unlock_bgm(bgm_id: String) -> void:
+	if not _BGM_ID_TO_TRACK_IDX.has(bgm_id):
+		return
+	var idx: int = _BGM_ID_TO_TRACK_IDX[bgm_id]
+	if not _unlocked_track_indices.has(idx):
+		_unlocked_track_indices.append(idx)
+		_unlocked_track_indices.sort()
+	_ingame_track_idx = idx
+	play_ingame()
+
+
+## 解放済みトラック数を返す（矢印ボタン表示制御用）。
+func get_unlocked_track_count() -> int:
+	return _unlocked_track_indices.size()
 
 
 ## 全停止・状態リセット。

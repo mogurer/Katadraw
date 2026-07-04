@@ -300,8 +300,8 @@ func _draw_morph_polygon(
 	fill_alpha: float,
 	white_dot_scale: float = 1.0
 ) -> void:
-	var dot_color := Color(0.26, 0.21, 0.28)
-	var line_color := Color(0.26, 0.21, 0.28)
+	var dot_color := GameConfig.INK_COLOR
+	var line_color := GameConfig.INK_COLOR
 	var line_width: float = 3.0
 
 	var screen_pts: PackedVector2Array = PackedVector2Array()
@@ -310,7 +310,7 @@ func _draw_morph_polygon(
 
 	if fill_alpha > 0.001 and screen_pts.size() >= 3:
 		var tris: PackedInt32Array = Geometry2D.triangulate_polygon(screen_pts)
-		var fill_col := Color(0.26, 0.21, 0.28, 0.22 * fill_alpha)
+		var fill_col := Color(GameConfig.INK_COLOR,0.22 * fill_alpha)
 		for ti in range(0, tris.size(), 3):
 			var p0: Vector2 = screen_pts[tris[ti]]
 			var p1: Vector2 = screen_pts[tris[ti + 1]]
@@ -547,8 +547,8 @@ func _draw_ti_k_complete(
 	white_dot_scale: float = 1.0
 ) -> void:
 	"""Kの完成形を描画（白点変化・変形対応）。white_dot_scale は右上○の倍率（Phase4 以降で 1.5 など）。"""
-	var dot_color := Color(0.26, 0.21, 0.28)
-	var line_color := Color(0.26, 0.21, 0.28)
+	var dot_color := GameConfig.INK_COLOR
+	var line_color := GameConfig.INK_COLOR
 	var line_width: float = 3.0
 
 	# P2（右上先端）の変形位置を計算（初期位置→ロゴ最終位置）

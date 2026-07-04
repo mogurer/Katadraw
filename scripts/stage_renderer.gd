@@ -447,9 +447,9 @@ func draw_clear_metrics(tx: float, y: float, tw: float) -> void:
 	var circ_display: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
 	match _game.stage_type:
 		"triangle", "square", "rhombus", "hexagon", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
-			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
+			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, GameConfig.INK_COLOR)
 		_:
-			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
+			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, GameConfig.INK_COLOR)
 
 
 # --- ユーティリティ ---
