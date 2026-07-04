@@ -18,6 +18,7 @@ const _HUD_GUIDE_GLOW_LAYERS := 8
 const _PROX_GRID_CELL := 80.0
 
 var _game: Node2D
+var _draw_canvas: Node2D = null  # draw calls の転送先（設定時は draw_* のみここへ、property access は _game）
 var _renderer: UIRenderer
 
 ## 近接表示用ガイド辺空間グリッド（フレームをまたいで再利用）
@@ -626,14 +627,15 @@ func draw_ideal_filled(rect: Rect2, fill_color: Color, line_color: Color, line_w
 		for v in loop:
 			pts.append((v - center_src) * scale + center_dst)
 		transformed_loops.append(pts)
+	var dc: Node2D = _draw_canvas if _draw_canvas != null else _game
 	# 塗りつぶし
 	for pts in transformed_loops:
-		_game.draw_colored_polygon(pts, fill_color)
+		dc.draw_colored_polygon(pts, fill_color)
 	# 輪郭線
 	for pts in transformed_loops:
 		for i in range(pts.size()):
-			_game.draw_line(pts[i], pts[(i + 1) % pts.size()], line_color, line_width, true)
-	# 頂点ドット: 線と同じ current_centroid 基準で計算してズレを防ぐ
+			dc.draw_line(pts[i], pts[(i + 1) % pts.size()], line_color, line_width, true)
+	# 頂点ドット
 	var cos_rd: float = cos(_game.correspondence_rotation)
 	var sin_rd: float = sin(_game.correspondence_rotation)
 	var sc_d: float   = _game.correspondence_scale
@@ -643,7 +645,7 @@ func draw_ideal_filled(rect: Rect2, fill_color: Color, line_color: Color, line_w
 		var ty: float = (p.x * sin_rd + p.y * cos_rd) * sc_d
 		var w: Vector2 = _game.current_centroid + Vector2(tx, ty)
 		var dp: Vector2 = (w - center_src) * scale + center_dst
-		_game.draw_circle(dp, dot_radius, line_color)
+		dc.draw_circle(dp, dot_radius, line_color)
 
 
 ## 保存済みループを rect 内にスケールして重ね描き（リザルト一覧サムネイル用）

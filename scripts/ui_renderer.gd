@@ -151,6 +151,7 @@ const _CAT_MORPH_OUT_SEC: float = 0.2
 const _CAT_WIGGLE_DEG: float = 5.0
 const _CAT_WIGGLE_FREQ: float = 5.0
 var _cat_texture: Texture2D = null
+var _tri_deco_texture: Texture2D = null
 
 # --- Animation state ---
 var _prev_state: String = ""          # 前フレームのゲームステート
@@ -188,6 +189,7 @@ var _countdown_scales: Dictionary = {} # カウントダウン数字 → スケ�
 var _countdown_prev: int = -1
 
 var _clear_anim_time: float = -1.0    # クリア演出の開始時刻
+var _clear_card_canvas: Node2D = null  # 透視シェーダー付き Node2D（game.gd が設定）
 var _pause_anim_time: float = -1.0    # ポーズ開演出の開始時刻
 var _pause_closing: bool = false       # ポーズ閉じ中
 var _stage_intro_time: float = -1.0   # ステージ開始演出の開始時刻
@@ -228,6 +230,7 @@ func _init(game: Node2D) -> void:
 	title_intro = TitleIntroAnimator.new(_game, Callable(self, "suppress_hover_sfx"))
 	_stage_renderer = StageRenderer.new(game, self)
 	_cat_texture = load("res://assets/UI/cat.png") as Texture2D
+	_tri_deco_texture = load("res://assets/UI/tri_deco.svg") as Texture2D
 
 
 func capture_stage_result_shapes() -> Dictionary:
@@ -442,6 +445,10 @@ func on_state_changed(new_state: String) -> void:
 		_guide_typewriter_done = false
 	if new_state == "cleared":
 		_clear_anim_time = Time.get_ticks_msec() / 1000.0
+		if _clear_card_canvas != null:
+			_clear_card_canvas.visible = true
+	elif _clear_card_canvas != null and _clear_card_canvas.visible:
+		_clear_card_canvas.visible = false
 	if new_state == "playing":
 		_stage_intro_time = Time.get_ticks_msec() / 1000.0
 		_hud_time_dock_left = false
@@ -2230,58 +2237,60 @@ func _draw_game(vp: Vector2) -> void:
 		_stage_renderer.draw_hint_shape(_game.hint_alpha)
 
 	# 1.5. 完成済みオブジェクトの塗りつぶし（線の下に描画）
-	_draw_clear_fill()
+	if _game.game_state != "cleared":
+		_draw_clear_fill()
 
 	# 1.6 コントローラ操作ヒント（con_bt_non.png / con_bt_*1.png の切り替え）: 図形・自キャラより下に重ねる
 	_draw_stage_playing_controller_hint(vp)
 
-	# 2. ユーザーの図形（線・ポイント・エフェクト）
-	_stage_renderer.draw_stage_lines()
+	# 2. ユーザーの図形（線・ポイント・エフェクト）—クリア後は非表示
+	if _game.game_state != "cleared":
+		_stage_renderer.draw_stage_lines()
 
-	_refresh_guide_point_distance_bounds()
-	var focus_idx: int = _game.input_handler.get_player_focus_index()
-	for i in range(n):
-		var pos: Vector2 = _game.point_positions[i]
-		var color: Color
-		var radius: float
-		var r_guide: float = _point_radius_by_guide(i)
-		var d_outline: float = INF
-		if i < _guide_point_distances.size():
-			d_outline = _guide_point_distances[i]
-		var on_guide_outline: bool = (
-			not _game._is_locked(i)
-			and not is_inf(d_outline)
-			and d_outline <= InputHandler.GUIDE_ATTRACT_FREE_EDGE_DIST_PX
-		)
-		var skip_fill_circle: bool = false
-		if _game._is_locked(i):
-			color = Color(0.40, 0.33, 0.38, 0.5)
-			radius = r_guide
-		elif on_guide_outline and not (_cat_phase != 0 and _game.input_handler.is_point_free(i)):
-			if _snap_color_effects.has(i):
-				var snap_t: float = clampf(_snap_color_effects[i] / SNAP_COLOR_DUR, 0.0, 1.0)
-				var snap_col: Color = Color(0.95, 0.19, 0.32).lerp(Color.BLACK, snap_t)
-				var snap_r: float = StageRenderer.HUD_GUIDE_LINE_WIDTH_PX * 2.5
-				_game.draw_circle(pos, snap_r, snap_col)
+		_refresh_guide_point_distance_bounds()
+		var focus_idx: int = _game.input_handler.get_player_focus_index()
+		for i in range(n):
+			var pos: Vector2 = _game.point_positions[i]
+			var color: Color
+			var radius: float
+			var r_guide: float = _point_radius_by_guide(i)
+			var d_outline: float = INF
+			if i < _guide_point_distances.size():
+				d_outline = _guide_point_distances[i]
+			var on_guide_outline: bool = (
+				not _game._is_locked(i)
+				and not is_inf(d_outline)
+				and d_outline <= InputHandler.GUIDE_ATTRACT_FREE_EDGE_DIST_PX
+			)
+			var skip_fill_circle: bool = false
+			if _game._is_locked(i):
+				color = Color(0.40, 0.33, 0.38, 0.5)
+				radius = r_guide
+			elif on_guide_outline and not (_cat_phase != 0 and _game.input_handler.is_point_free(i)):
+				if _snap_color_effects.has(i):
+					var snap_t: float = clampf(_snap_color_effects[i] / SNAP_COLOR_DUR, 0.0, 1.0)
+					var snap_col: Color = Color(0.95, 0.19, 0.32).lerp(Color.BLACK, snap_t)
+					var snap_r: float = StageRenderer.HUD_GUIDE_LINE_WIDTH_PX * 2.5
+					_game.draw_circle(pos, snap_r, snap_col)
+				else:
+					_draw_guide_snapped_point_black_disc(pos)
+				skip_fill_circle = true
+			elif i == _game.hovered_index:
+				# ホバー時も通常表示（赤いポイントは廃止）
+				color = _stage_renderer.get_point_base_color(i)
+				radius = r_guide
 			else:
-				_draw_guide_snapped_point_black_disc(pos)
-			skip_fill_circle = true
-		elif i == _game.hovered_index:
-			# ホバー時も通常表示（赤いポイントは廃止）
-			color = _stage_renderer.get_point_base_color(i)
-			radius = r_guide
-		else:
-			color = _stage_renderer.get_point_base_color(i)
-			radius = r_guide
-		if not skip_fill_circle:
-			if _cat_phase != 0 and _game.input_handler.is_point_free(i):
-				_draw_cat_anim_point(pos, radius)
-			else:
-				_game.draw_circle(pos, radius, color)
-		if i == focus_idx and _game.input_handler.grab_input_active:
-			_draw_point_position_effect(pos, r_guide)
+				color = _stage_renderer.get_point_base_color(i)
+				radius = r_guide
+			if not skip_fill_circle:
+				if _cat_phase != 0 and _game.input_handler.is_point_free(i):
+					_draw_cat_anim_point(pos, radius)
+				else:
+					_game.draw_circle(pos, radius, color)
+			if i == focus_idx and _game.input_handler.grab_input_active:
+				_draw_point_position_effect(pos, r_guide)
 
-	_draw_spore_particles()
+		_draw_spore_particles()
 
 	# 3. 実現率（最上層）: 掴み中は常に / 掴まないでも一致度が動いた直後。自キャラのやや右上
 	if _game.game_state == "playing":
@@ -2307,9 +2316,6 @@ func _draw_game(vp: Vector2) -> void:
 	_draw_square_stage_repulse_demo(vp)
 	_draw_hexagon_stage_attract_demo(vp)
 
-	if _game.game_state == "cleared":
-		_stage_renderer.draw_ideal_shape()
-
 	# C案 ステージ開始演出: 白フラッシュ後にKATAフェードイン
 	if _game.game_state == "playing" and not is_stage_intro_done():
 		var t: float = get_stage_intro_progress()
@@ -2322,7 +2328,8 @@ func _draw_game(vp: Vector2) -> void:
 		if flash_a > 0.001:
 			_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(1.0, 1.0, 1.0, flash_a))
 
-	_draw_hud(vp)
+	if _game.game_state != "cleared":
+		_draw_hud(vp)
 
 	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
@@ -2866,13 +2873,14 @@ func _draw_ui_panel(vp: Vector2) -> void:
 
 
 
-func _draw_rect_border_with_corners(rect: Rect2, color: Color, border_w: float) -> void:
+func _draw_rect_border_with_corners(rect: Rect2, color: Color, border_w: float, canvas: Node2D = null) -> void:
+	var c: Node2D = canvas if canvas != null else _game
 	var dot_r: float = border_w * 1.25
-	_game.draw_rect(rect, color, false, border_w)
-	_game.draw_circle(rect.position, dot_r, color)
-	_game.draw_circle(Vector2(rect.end.x, rect.position.y), dot_r, color)
-	_game.draw_circle(Vector2(rect.position.x, rect.end.y), dot_r, color)
-	_game.draw_circle(rect.end, dot_r, color)
+	c.draw_rect(rect, color, false, border_w)
+	c.draw_circle(rect.position, dot_r, color)
+	c.draw_circle(Vector2(rect.end.x, rect.position.y), dot_r, color)
+	c.draw_circle(Vector2(rect.position.x, rect.end.y), dot_r, color)
+	c.draw_circle(rect.end, dot_r, color)
 
 
 func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_FONT_SIZE, alpha: float = 1.0, is_off: bool = false, fixed_w: float = -1.0) -> Rect2:
@@ -3166,14 +3174,35 @@ func _draw_clear_fill() -> void:
 
 
 func _draw_clear_overlay(vp: Vector2) -> void:
-	# クリア演出アニメーション（スケール0.8→1.0 + フェードイン 0.3秒）
 	var clear_elapsed: float = Time.get_ticks_msec() / 1000.0 - _clear_anim_time if _clear_anim_time > 0.0 else 10.0
 	var clear_t: float = clampf(clear_elapsed / 0.3, 0.0, 1.0)
-	var clear_ease: float = _ease_out_cubic(clear_t)
-	var clear_scale: float = lerp(0.8, 1.0, clear_ease)
-	var a: float = clear_ease
-
+	var a: float = _ease_out_cubic(clear_t)
+	# 背景ディムは _game に描画（透視変換の対象外）
 	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.26, 0.21, 0.28, 0.35 * a))
+	# tri_deco 背景デコレーション（左右）
+	if _tri_deco_texture != null:
+		const SVG_W: float = 1920.0
+		const SVG_H: float = 1080.0
+		var deco_alpha: float = 0.1 * a
+		var size_l := Vector2(SVG_W * 7.0, SVG_H * 7.0)
+		var size_r := Vector2(SVG_W * 5.0, SVG_H * 5.0)
+		var center_l := Vector2(vp.x * 0.3, vp.y * 0.5 - 10.0 * clear_elapsed)
+		var center_r := Vector2(vp.x * 0.7, vp.y * 0.5 + 20.0 * clear_elapsed)
+		_game.draw_texture_rect(_tri_deco_texture, Rect2(center_l - size_l * 0.5, size_l), false, Color(1, 1, 1, deco_alpha))
+		_game.draw_texture_rect(_tri_deco_texture, Rect2(center_r - size_r * 0.5, size_r), false, Color(1, 1, 1, deco_alpha))
+	# _clear_card_canvas が設定済みの場合はカード描画を draw シグナル経由に委譲
+	# （_on_clear_card_canvas_draw → _draw_card_content_to で透視シェーダーが適用される）
+	# 未設定の場合は _game に直接フォールバック
+	if _clear_card_canvas == null:
+		_draw_card_content_to(_game, vp, clear_elapsed)
+
+
+func _draw_card_content_to(canvas: Node2D, vp: Vector2, clear_elapsed: float) -> void:
+	const POP_DUR: float = 0.5
+	var clear_t: float = clampf(clear_elapsed / POP_DUR, 0.0, 1.0)
+	var clear_ease: float = _ease_out_cubic(clear_t)
+	var clear_scale: float = lerp(10.0, 1.0, clear_ease)
+	var a: float = clear_ease
 
 	# カードサイズ（スケールアニメーション適用）
 	var base_w: float = vp.x * 0.745 * 0.85
@@ -3189,25 +3218,24 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var c_cream: Color = Color(1.0, 0.937, 0.89, a)
 
 	# シャドウ・白背景
-	_game.draw_rect(Rect2(Vector2(card_x + 15.0, card_y + 15.0), Vector2(card_w, card_h)), Color(0.26, 0.21, 0.28, 0.25 * a))
-	_game.draw_rect(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_white)
+	canvas.draw_rect(Rect2(Vector2(card_x + 15.0, card_y + 15.0), Vector2(card_w, card_h)), Color(0.26, 0.21, 0.28, 0.25 * a))
+	canvas.draw_rect(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_white)
 
 	# ─── 各部寸法 ───
-	var stripe_w: float = card_w * 0.046   # 左ストライプ幅
-	var left_w: float   = card_w * 0.50    # 左テキストエリア幅（ストライプ含む）
-	var bar_h: float    = card_h * 0.1734  # 下部赤バー高さ（ボタン2倍化×85%）
-	var pad: float      = stripe_w * 0.40  # 内側パディング
-	var ch: float       = card_h * 1.1875  # コンテンツサイズ基準（外枠縮小の補正）
+	var stripe_w: float = card_w * 0.046
+	var left_w: float   = card_w * 0.50
+	var bar_h: float    = card_h * 0.1734
+	var pad: float      = stripe_w * 0.40
+	var ch: float       = card_h * 1.1875
 
 	# ─── 左ストライプ ───
 	var red_h: float = card_h * 0.375 + 30.0
-	_game.draw_rect(Rect2(card_x, card_y, stripe_w, card_h), c_dark)
+	canvas.draw_rect(Rect2(card_x, card_y, stripe_w, card_h), c_dark)
 
-	# ストライプ下部の斜め平行四辺形パターン（5個・下詰め）
+	# ストライプ下部の矢印パターン
 	var diag_top: float = card_y + red_h
 	var diag_bot: float = card_y + card_h - bar_h
 	var stripe_right: float = card_x + stripe_w
-	# SVG準拠の矢印形状（5角形）: ▷◁▷◁▷ を縦に連ねる
 	var tri_count: int = 10
 	const TRI_SCALE: float = 0.8
 	var tri_mid_x: float = card_x + stripe_w * 0.5 - 1.0
@@ -3222,10 +3250,10 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var first_cy: float  = last_cy - float(tri_count - 1) * spacing_v
 	for tri_i in range(tri_count):
 		var cy: float = first_cy + float(tri_i) * spacing_v
-		var tri_a: float = float(tri_i + 1) * 0.10  # 上から 10%→20%→...→100%
+		var tri_a: float = float(tri_i + 1) * 0.10
 		var tri_color: Color = Color(c_red.r, c_red.g, c_red.b, c_red.a * tri_a)
 		var pts: PackedVector2Array
-		if tri_i % 2 == 0:  # ▷ 右向き（左辺フラット）
+		if tri_i % 2 == 0:
 			pts = PackedVector2Array([
 				Vector2(tri_left,  cy - half_h),
 				Vector2(tri_mid_x, cy - notch_h),
@@ -3233,7 +3261,7 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 				Vector2(tri_mid_x, cy + notch_h),
 				Vector2(tri_left,  cy + half_h),
 			])
-		else:               # ◁ 左向き（右辺フラット）
+		else:
 			pts = PackedVector2Array([
 				Vector2(tri_right, cy - half_h),
 				Vector2(tri_right, cy + half_h),
@@ -3241,10 +3269,9 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 				Vector2(tri_left,  cy),
 				Vector2(tri_mid_x, cy - notch_h),
 			])
-		_game.draw_colored_polygon(pts, tri_color)
+		canvas.draw_colored_polygon(pts, tri_color)
 
-	# 「KATA-DRAW」縦書きテキスト（字間詰め・黒帯左上端）
-	# FontVariation で font_din の extra 5px を打ち消す（FontFile プロパティは Godot 4.7 では不可）
+	# 「KATA-DRAW」縦書きテキスト
 	if _font_din_tight == null:
 		_font_din_tight = FontVariation.new()
 		_font_din_tight.base_font = _game.font_din
@@ -3267,21 +3294,19 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var kata_cy: float = card_y + stripe_w * 0.25 + kata_w * 0.5
 	var kata_pivot := Vector2(kata_cx, kata_cy)
 	var kata_xf: Transform2D = Transform2D(0.0, kata_pivot) * Transform2D(PI * 0.5, Vector2.ZERO) * Transform2D(0.0, -kata_pivot)
-	_game.draw_set_transform_matrix(kata_xf)
-	_game.draw_string(fdt, Vector2(kata_cx - kata_w * 0.5, kata_cy + (kata_asc - kata_dsc) * 0.5), kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs, Color(1.0, 1.0, 1.0, a * 0.85))
-	_game.draw_set_transform_matrix(Transform2D())
+	canvas.draw_set_transform_matrix(kata_xf)
+	canvas.draw_string(fdt, Vector2(kata_cx - kata_w * 0.5, kata_cy + (kata_asc - kata_dsc) * 0.5), kata_str, HORIZONTAL_ALIGNMENT_LEFT, -1, kata_fs, Color(1.0, 1.0, 1.0, a * 0.85))
+	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
 
-	# ─── 左テキストコンテンツ（fdt = 字間詰め font_din）───
+	# ─── 左テキストコンテンツ ───
 	var tx: float = card_x + stripe_w + pad
 	var tw: float = left_w - stripe_w - pad * 2.0
 
-	# CLEAR 専用フォント（spacing_glyph = -2、net +3px）
 	if _font_clear == null:
 		_font_clear = FontVariation.new()
 		_font_clear.base_font = _game.font_din
 		_font_clear.spacing_glyph = -7
 
-	# STAGE: CLEAR の自然幅に合わせて字間を自動調整（右端を揃える）
 	var stage_fs: int = int(ch * 0.219)
 	var clear_str_w: float = _font_clear.get_string_size("CLEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
 	var stage_str_w_base: float = fdt.get_string_size("STAGE", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
@@ -3293,18 +3318,17 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var stage_str_w: float = _font_stage.get_string_size("STAGE", HORIZONTAL_ALIGNMENT_LEFT, -1, stage_fs).x
 	var stage_right: float = tx + maxf(stage_str_w, clear_str_w) - 8.0
 	var stage_base_y: float = card_y + ch * 0.185
-	_game.draw_string(_font_stage, Vector2(tx, stage_base_y), "STAGE", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
+	canvas.draw_string(_font_stage, Vector2(tx, stage_base_y), "STAGE", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
 	var clear_base_y: float = card_y + ch * 0.358
-	_game.draw_string(_font_clear, Vector2(tx - 5.0, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
+	canvas.draw_string(_font_clear, Vector2(tx - 5.0, clear_base_y), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, tw, stage_fs, c_red)
 
-	# "#XX" 左詰 ／ "RESULT" 右詰（右端を STAGE/CLEAR 共通右端に揃え）
 	var num_fs: int = int(ch * 0.1203) - 2
 	var num_base_y: float = card_y + ch * 0.498
 	var stage_num_str: String = "#%d" % (_game.current_stage + 1)
-	_game.draw_string(_font_din_result, Vector2(tx, num_base_y), stage_num_str, HORIZONTAL_ALIGNMENT_LEFT,  stage_right - tx - 16.0, num_fs, c_dark)
-	_game.draw_string(_font_din_result, Vector2(tx, num_base_y), "RESULT",      HORIZONTAL_ALIGNMENT_RIGHT, stage_right - tx - 16.0, num_fs, c_dark)
+	canvas.draw_string(_font_din_result, Vector2(tx, num_base_y), stage_num_str, HORIZONTAL_ALIGNMENT_LEFT,  stage_right - tx - 16.0, num_fs, c_dark)
+	canvas.draw_string(_font_din_result, Vector2(tx, num_base_y), "RESULT",      HORIZONTAL_ALIGNMENT_RIGHT, stage_right - tx - 16.0, num_fs, c_dark)
 
-	# ─── ラベルボックス + 数値（別オブジェクト行間・右端を STAGE/CLEAR 共通右端に揃え） ───
+	# ─── ラベルボックス + 数値 ───
 	var box_w: float = left_w * 0.155
 	var box_h: float = ch * 0.113
 	var lbl_fs: int = maxi(8, int(box_h * 0.290))
@@ -3313,7 +3337,6 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var val_dsc: float = fdt.get_descent(val_fs)
 	var lbl_asc: float = fdt.get_ascent(lbl_fs)
 	var lbl_dsc: float = fdt.get_descent(lbl_fs)
-	# 行間：左上端ぴったり、行間は極限まで詰める
 	var lbl_top_pad: float = 0.0
 	var lbl_l1_off: float = lbl_top_pad + lbl_asc
 	var lbl_l2_off: float = lbl_l1_off + lbl_asc * 0.85
@@ -3321,18 +3344,15 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var ct_val_x: float = tx + box_w + pad
 	var ct_val_w: float = maxf(0.0, stage_right - ct_val_x - 16.0)
 
-	# CLEAR TIME ボックス（54.2%）
 	var ct_box_y: float = card_y + ch * 0.542 + 5.0
-	_game.draw_rect(Rect2(tx, ct_box_y, box_w, box_h), c_dark)
-	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l1_off), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
-	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l2_off), "TIME",  HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
-	# ── スロット演出：クリアから0.5秒間、数値が高速回転してから着地 ──
+	canvas.draw_rect(Rect2(tx, ct_box_y, box_w, box_h), c_dark)
+	canvas.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l1_off), "CLEAR", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	canvas.draw_string(fdt, Vector2(tx + lbl_inner_pad, ct_box_y + lbl_l2_off), "TIME",  HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	const SLOT_DUR: float = 0.5
 	var ct_display: String
 	var mc_display: String
 	if clear_elapsed < SLOT_DUR:
 		var slot_t: float = clear_elapsed / SLOT_DUR
-		# 周波数: 30Hz→3Hz に二乗カーブで減速
 		var freq: float = lerp(30.0, 3.0, slot_t * slot_t)
 		var ct_range: float = maxf(_game.clear_time * 1.5, 15.0)
 		var mc_range: float = float(maxi(_game.stage_move_count * 2, 9))
@@ -3342,25 +3362,23 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 		ct_display = "%.2f" % _game.clear_time
 		mc_display = "%d"   % _game.stage_move_count
 
-	# グレー帯：スロット中は棒グラフのように左→右へ伸びるアニメーション
 	var bar_progress: float = clampf(clear_elapsed / SLOT_DUR, 0.0, 1.0)
 	var val_bg: Color = Color(0.87, 0.87, 0.87, a)
-	var val_bg_x: float = tx + box_w          # 黒ボックスに接着
-	var val_bg_w: float = ct_val_w + pad      # pad 分広げて隙間を埋める
+	var val_bg_x: float = tx + box_w
+	var val_bg_w: float = ct_val_w + pad
 	var ct_val_base: float = ct_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
-	_game.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w * bar_progress, box_h), val_bg)
-	_game.draw_string(_font_din_num, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+	canvas.draw_rect(Rect2(val_bg_x, ct_box_y, val_bg_w * bar_progress, box_h), val_bg)
+	canvas.draw_string(_font_din_num, Vector2(ct_val_x, ct_val_base), ct_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
-	# TRY COUNT ボックス（67.6%）
 	var tc_box_y: float = card_y + ch * 0.676 + 17.0
-	_game.draw_rect(Rect2(tx, tc_box_y, box_w, box_h), c_dark)
-	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l1_off), "TRY",   HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
-	_game.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	canvas.draw_rect(Rect2(tx, tc_box_y, box_w, box_h), c_dark)
+	canvas.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l1_off), "TRY",   HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
+	canvas.draw_string(fdt, Vector2(tx + lbl_inner_pad, tc_box_y + lbl_l2_off), "COUNT", HORIZONTAL_ALIGNMENT_LEFT, box_w - lbl_inner_pad, lbl_fs, c_white)
 	var tc_val_base: float = tc_box_y + (box_h + val_asc - val_dsc) * 0.5 - 10.0
-	_game.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w * bar_progress, box_h), val_bg)
-	_game.draw_string(_font_din_num, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
+	canvas.draw_rect(Rect2(val_bg_x, tc_box_y, val_bg_w * bar_progress, box_h), val_bg)
+	canvas.draw_string(_font_din_num, Vector2(ct_val_x, tc_val_base), mc_display, HORIZONTAL_ALIGNMENT_RIGHT, ct_val_w, val_fs, c_dark)
 
-	# ─── NEW RECORD! バッジ（スロット演出後にフェードイン） ───
+	# ─── NEW RECORD! バッジ ───
 	const NR_FS: int = 15
 	const NR_TEXT: String = "NEW RECORD!"
 	const NR_PAD_X: float = 4.0
@@ -3378,24 +3396,24 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 		var nr_c_white: Color = Color(1.0, 1.0, 1.0, nr_badge_a)
 		if _game._new_record_time:
 			var ct_nr_y: float = ct_box_y - nr_h
-			_game.draw_colored_polygon(PackedVector2Array([
+			canvas.draw_colored_polygon(PackedVector2Array([
 				Vector2(nr_right - nr_w, ct_nr_y),
 				Vector2(nr_right, ct_nr_y),
 				Vector2(nr_right, ct_nr_y + nr_h),
 				Vector2(nr_right - nr_w - NR_TAG_EXT, ct_nr_y + nr_h),
 			]), nr_c_red)
-			_game.draw_string(fdt, Vector2(nr_right - nr_w + NR_PAD_X, ct_nr_y + (nr_h + nr_asc - nr_dsc) * 0.5), NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, nr_c_white)
+			canvas.draw_string(fdt, Vector2(nr_right - nr_w + NR_PAD_X, ct_nr_y + (nr_h + nr_asc - nr_dsc) * 0.5), NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, nr_c_white)
 		if _game._new_record_moves:
 			var tc_nr_y: float = tc_box_y - nr_h
-			_game.draw_colored_polygon(PackedVector2Array([
+			canvas.draw_colored_polygon(PackedVector2Array([
 				Vector2(nr_right - nr_w, tc_nr_y),
 				Vector2(nr_right, tc_nr_y),
 				Vector2(nr_right, tc_nr_y + nr_h),
 				Vector2(nr_right - nr_w - NR_TAG_EXT, tc_nr_y + nr_h),
 			]), nr_c_red)
-			_game.draw_string(fdt, Vector2(nr_right - nr_w + NR_PAD_X, tc_nr_y + (nr_h + nr_asc - nr_dsc) * 0.5), NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, nr_c_white)
+			canvas.draw_string(fdt, Vector2(nr_right - nr_w + NR_PAD_X, tc_nr_y + (nr_h + nr_asc - nr_dsc) * 0.5), NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, nr_c_white)
 
-	# ─── 右：見本の図形（85%縮小表示） ───
+	# ─── 右：見本の図形 ───
 	var shape_x: float = card_x + left_w
 	var shape_w: float = card_w - left_w
 	var shape_full_h: float = card_h - bar_h
@@ -3403,10 +3421,12 @@ func _draw_clear_overlay(vp: Vector2) -> void:
 	var shape_my: float = shape_full_h * 0.075
 	var shape_rect := Rect2(shape_x + shape_mx - 53.0, card_y + shape_my + 50.0, shape_w - shape_mx * 2.0, shape_full_h - shape_my * 2.0)
 	var fill_c := Color(c_red.r, c_red.g, c_red.b, c_red.a * 0.22)
+	_stage_renderer._draw_canvas = canvas
 	_stage_renderer.draw_ideal_filled(shape_rect, fill_c, c_red, maxf(2.5, shape_w * 0.006), shape_w * 0.013)
+	_stage_renderer._draw_canvas = null
 
 	# カード外枠
-	_draw_rect_border_with_corners(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_dark, 5.75)
+	_draw_rect_border_with_corners(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_dark, 5.75, canvas)
 
 
 func _draw_results_sidebar_title_fallback(vp: Vector2, bar_w: float, a: float) -> void:
@@ -3618,6 +3638,11 @@ func _draw_results(vp: Vector2) -> void:
 	const CARD_BORDER_W: float  = 5.75
 	const SHADOW_OFFSET: float  = 12.5
 
+	# ─── 疑似3Dホログラム傾きアニメーション ───
+	var tilt_elapsed: float = maxf(Time.get_ticks_msec() / 1000.0 - _results_anim_time, 0.0)
+	var tilt_mat: Transform2D = _compute_results_tilt(vp, tilt_elapsed, a)
+	_game.draw_set_transform_matrix(tilt_mat)
+
 	# ═══ 右パネル（先に描画 → 左カードより下レイヤー） ═══
 	const RP_W: float      = 740.0
 	const RP_H: float      = 610.0
@@ -3707,11 +3732,13 @@ func _draw_results(vp: Vector2) -> void:
 	var frame_sx: float = GRID_FRAME_SX
 	var frame_sy: float = GRID_SCALE
 	var grid_frame_rect := Rect2(grid_cx - lp_w * 0.5, grid_top, lp_w, grid_h)
-	_game.draw_set_transform(Vector2(grid_cx * (1.0 - frame_sx), grid_cy * (1.0 - frame_sy)), 0.0, Vector2(frame_sx, frame_sy))
+	var _frame_sub := Transform2D(Vector2(frame_sx, 0.0), Vector2(0.0, frame_sy), Vector2(grid_cx * (1.0 - frame_sx), grid_cy * (1.0 - frame_sy)))
+	_game.draw_set_transform_matrix(tilt_mat * _frame_sub)
 	_game.draw_rect(grid_frame_rect, Color(1.0, 1.0, 1.0, 0.97 * a))
 	_game.draw_rect(grid_frame_rect, Color(1.0, 1.0, 1.0, 0.4 * a), false, 3.0)
 	# グリッド内容（80%）
-	_game.draw_set_transform(Vector2(grid_cx * (1.0 - GRID_SCALE), grid_cy * (1.0 - GRID_SCALE)), 0.0, Vector2(GRID_SCALE, GRID_SCALE))
+	var _grid_sub := Transform2D(Vector2(GRID_SCALE, 0.0), Vector2(0.0, GRID_SCALE), Vector2(grid_cx * (1.0 - GRID_SCALE), grid_cy * (1.0 - GRID_SCALE)))
+	_game.draw_set_transform_matrix(tilt_mat * _grid_sub)
 	for row in range(5):
 		for col in range(2):
 			var idx: int = row + col * 5
@@ -3751,7 +3778,7 @@ func _draw_results(vp: Vector2) -> void:
 			var row_baseline: float = cell_rect.position.y + (ch + _game.font.get_ascent(fs_cell) - _game.font.get_descent(fs_cell)) * 0.5
 			_game.draw_string(_game.font, Vector2(mid_x, row_baseline), time_str, HORIZONTAL_ALIGNMENT_CENTER, mid_col_w, fs_cell, c_dark)
 			_game.draw_string(_game.font, Vector2(right_x, row_baseline), move_str, HORIZONTAL_ALIGNMENT_CENTER, right_col_w, fs_cell, c_dark)
-	_game.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_game.draw_set_transform_matrix(tilt_mat)  # グリッド内部スケール終了、ホログラム傾きに戻す
 
 	# ─── TOTALバー ───
 	const TOTAL_BORDER_W: float = 3.0
@@ -3811,6 +3838,28 @@ func _draw_results(vp: Vector2) -> void:
 
 	# ─── NEXTボタン（アイコングループ右端） ───
 	_draw_results_next_button(Vector2(next_cx_new, ig_cy), tr("RESULT_BTN_NEXT"), 35, a, NEXT_BTN_S, res_act == 2)
+
+	_game.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+func _compute_results_tilt(vp: Vector2, elapsed: float, alpha: float) -> Transform2D:
+	# Y軸まわり（左右の傾き）とX軸まわり（前後の傾き）を独立したサイン波で合成し、
+	# 疑似3Dの浮遊感を演出する。±5°程度の微細な動きをホログラムパネルのように見せる。
+	const TILT_Y_MAX: float = 5.0   # Y軸最大傾き（度）
+	const TILT_X_MAX: float = 3.0   # X軸最大傾き（度）
+	const PERIOD_Y: float = 3.7     # Y軸周期（秒）
+	const PERIOD_X: float = 4.3     # X軸周期（秒）
+	const DEPTH: float = 0.20       # 疑似遠近シア量（大きいほど立体感が増す）
+	var ty: float = sin(elapsed * TAU / PERIOD_Y) * deg_to_rad(TILT_Y_MAX) * alpha
+	var tx: float = sin(elapsed * TAU / PERIOD_X + 1.3) * deg_to_rad(TILT_X_MAX) * alpha
+	# GDScriptでは Transform2D(Vector2,Vector2,Vector2) コンストラクタは使用不可のため
+	# プロパティ代入で列ベクトルを直接設定する
+	var mat := Transform2D.IDENTITY
+	mat.x = Vector2(cos(ty), sin(ty) * DEPTH)
+	mat.y = Vector2(sin(tx) * DEPTH, cos(tx))
+	var pivot := vp * 0.5
+	mat.origin = pivot - (mat.x * pivot.x + mat.y * pivot.y)
+	return mat
 
 
 func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float, pad_focused: bool = false) -> void:

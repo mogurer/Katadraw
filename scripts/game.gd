@@ -9,6 +9,9 @@ var stage_manager: StageManager
 var input_handler: InputHandler
 var ui_renderer: UIRenderer
 
+# --- Clear カード（位置揺らぎ用 Node2D）---
+var _clear_card_canvas: Node2D = null
+
 # --- Constants ---
 const CIRCLE_SEGMENTS := 128
 
@@ -608,6 +611,35 @@ func _ready() -> void:
 		game_state = "logo"
 		logo_start_time = Time.get_ticks_msec() / 1000.0
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	_setup_clear_card_canvas()
+
+
+## STAGE CLEAR カード用 Node2D をセットアップ（位置揺らぎのみ・シェーダーなし）
+func _setup_clear_card_canvas() -> void:
+	_clear_card_canvas = Node2D.new()
+	_clear_card_canvas.z_index = 50
+	_clear_card_canvas.visible = false
+	add_child(_clear_card_canvas)
+	_clear_card_canvas.draw.connect(_on_clear_card_canvas_draw)
+	ui_renderer._clear_card_canvas = _clear_card_canvas
+
+
+func _on_clear_card_canvas_draw() -> void:
+	var vp_size: Vector2 = get_viewport_rect().size
+	var elapsed: float = Time.get_ticks_msec() / 1000.0 - ui_renderer._clear_anim_time \
+		if ui_renderer._clear_anim_time > 0.0 else 10.0
+
+	const FLOAT_RANGE: float = 15.0  # 位置揺らぎ ±px（合計 30px 範囲）
+	const PERIOD_PX: float = 8.3     # 水平揺らぎ周期（秒）
+	const PERIOD_PY: float = 6.1     # 垂直揺らぎ周期（秒）
+
+	# ポップイン（0〜0.5秒）完了後に揺らぎが立ち上がる
+	var float_alpha: float = clampf((elapsed - 0.5) / 0.5, 0.0, 1.0)
+	var pos_x: float = sin(elapsed * TAU / PERIOD_PX) * FLOAT_RANGE * float_alpha
+	var pos_y: float = sin(elapsed * TAU / PERIOD_PY + 1.7) * FLOAT_RANGE * float_alpha
+	_clear_card_canvas.position = Vector2(pos_x, pos_y)
+
+	ui_renderer._draw_card_content_to(_clear_card_canvas, vp_size, elapsed)
 
 
 ## Translation.csv を直接読み込み、TranslationServer に登録する（.translation バイナリに依存しない）。
@@ -5054,6 +5086,8 @@ func _process(delta: float) -> void:
 	elif game_state == "cleared":
 		ui_renderer.update_particles(delta)
 		queue_redraw()
+		if _clear_card_canvas != null:
+			_clear_card_canvas.queue_redraw()
 
 	elif game_state == "results":
 		queue_redraw()
