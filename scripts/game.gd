@@ -552,12 +552,18 @@ var _konami_idx: int = 0
 var _konami_last_msec: int = 0
 var _konami_used: bool = false
 
+# --- Trial ---
+var _trial_stage_ids: Array[int] = []
+var _trial_idx: int = 0
+
 # --- Debug ---
 ## F2 から入る STAGE DEBUG 系でのみ有効にするデバッグフラグ
 var debug_mode: bool = false
 
 
 func _ready() -> void:
+	if GameConfig.IS_TRIAL:
+		_trial_stage_ids = GameConfig.get_trial_stage_ids()
 	_register_translations_from_csv()
 	stage_manager = StageManager.new()
 	ui_renderer = UIRenderer.new(self)
@@ -605,7 +611,7 @@ func _ready() -> void:
 	_sync_window_display_from_os()
 	if not is_fullscreen:
 		call_deferred("_apply_window_pixel_size_impl", _window_client_size_for_display_mode())
-	if not GameConfig.IS_DEMO and StageSelectManager.pending_stage_id >= 0:
+	if not GameConfig.IS_TRIAL and StageSelectManager.pending_stage_id >= 0:
 		_start_game_from_stage_select()
 	else:
 		game_state = "logo"
@@ -1366,7 +1372,7 @@ func _check_clear() -> void:
 			BGMManager.stop()
 		else:
 			BGMManager.play_clear()
-		if not GameConfig.IS_DEMO:
+		if not GameConfig.IS_TRIAL:
 			StageSelectManager.mark_cleared(current_stage)
 			var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
 			_new_record_time = _rec.time
@@ -1754,7 +1760,7 @@ func _input(event: InputEvent) -> void:
 		)
 		if (
 			is_guide_cancel
-			and not GameConfig.IS_DEMO
+			and not GameConfig.IS_TRIAL
 			and not stage_session.debug_test_mode
 			and not _pbd_return_after_test
 		):
@@ -1885,6 +1891,18 @@ func _input(event: InputEvent) -> void:
 		and event.keycode == KEY_S
 	):
 		_enter_play_balance_debug()
+		return
+
+	# デバッグ用: [F1] で現在ステージを強制クリア（エディタからの実行時のみ。エクスポート版では無効）
+	if (
+		game_state == "playing"
+		and _debug_tools_enabled()
+		and event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_F1
+	):
+		_force_clear_for_debug()
 		return
 
 	if game_state == "playing" and is_pause_key:
@@ -2499,9 +2517,13 @@ func _rules_proceed() -> void:
 		config_index = 0
 		_reset_ui_menu_stick_navigation()
 		queue_redraw()
+	elif StageSelectManager.tutorial_return_to == "trial":
+		StageSelectManager.tutorial_return_to = ""
+		BGMManager.start_first_stage()
+		_start_stage(_trial_stage_ids[0])
 	else:
 		StageSelectManager.tutorial_return_to = ""
-		# A-1: チュートリアル完了 → ステージ1 開始（初回のみ無音カウントダウン待機）
+		# チュートリアル完了 → ステージ1 開始（初回のみ無音カウントダウン待機）
 		BGMManager.start_first_stage()
 		stage_session.clear_results()
 		pause_retry_elapsed = -1.0
@@ -2731,7 +2753,7 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 						BGMManager.stop()
 						_play_sfx(sfx_window_close)
 						_return_to_title_or_stage_debug_from_test()
-					elif not GameConfig.IS_DEMO:
+					elif not GameConfig.IS_TRIAL:
 						_return_to_stage_select_preserve_bgm()
 					else:
 						BGMManager.stop()
@@ -2833,7 +2855,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 					BGMManager.stop()
 					_play_sfx(sfx_window_close)
 					_return_to_title_or_stage_debug_from_test()
-				elif not GameConfig.IS_DEMO:
+				elif not GameConfig.IS_TRIAL:
 					_return_to_stage_select_preserve_bgm()
 				else:
 					BGMManager.stop()
@@ -2865,27 +2887,29 @@ func _start_game() -> void:
 	stage_session.clear_debug_test()
 	input_recorder = null
 
-	if not GameConfig.IS_DEMO:
-		if not StageSelectManager.tutorial_shown:
-			# A-1: 初回 → チュートリアル → ステージ1
-			StageSelectManager.tutorial_shown = true
-			StageSelectManager.tutorial_return_to = "stage1"
-			StageSelectManager._save_states()
-			_enter_rules()
-			return
-		# B: 2回目以降 → タイトルBGM停止→斜めワイプ→（画面覆った瞬間）インゲームBGM開始＋シーン切替
-		BGMManager.stop()
-		TransitionManager.play_diagonal(func():
-			BGMManager.play_ingame()
-			get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
-		)
+	if GameConfig.IS_TRIAL:
+		# 体験版: 毎回チュートリアルを表示してから _trial_stage_ids[0] を開始
+		_trial_idx = 0
+		stage_session.clear_results()
+		pause_retry_elapsed = -1.0
+		StageSelectManager.tutorial_return_to = "trial"
+		_enter_rules()
 		return
 
-	# IS_DEMO=true: 従来どおり
-	BGMManager.start_first_stage()  # ①: 無音でカウントダウン待機
-	stage_session.clear_results()
-	pause_retry_elapsed = -1.0
-	_start_stage(0)
+	# 製品版
+	if not StageSelectManager.tutorial_shown:
+		# 初回 → チュートリアル → ステージ1
+		StageSelectManager.tutorial_shown = true
+		StageSelectManager.tutorial_return_to = "stage1"
+		StageSelectManager._save_states()
+		_enter_rules()
+		return
+	# 2回目以降 → タイトルBGM停止→斜めワイプ→インゲームBGM開始＋ステージセレクトへ
+	BGMManager.stop()
+	TransitionManager.play_diagonal(func():
+		BGMManager.play_ingame()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	)
 
 
 func _start_game_from_stage_select() -> void:
@@ -2963,23 +2987,32 @@ func _return_to_stage_select_preserve_bgm() -> void:
 
 
 func _advance_stage() -> void:
-	if not GameConfig.IS_DEMO:
-		if StageSelectManager._zou_stage_idx >= 0 and StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
-			if not StageSelectManager.zou_cleared:
-				# 初回クリア: エンディング画面へ
-				StageSelectManager.mark_zou_cleared()
-				_zou_ending_start = Time.get_ticks_msec() / 1000.0
-				game_state = "zou_ending"
-				queue_redraw()
-			else:
-				# リプレイ: 通常ステージと同様にステージセレクトへ
-				BGMManager.resume_stage_select()
-				TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
-			return
-		# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
-		BGMManager.resume_stage_select()
-		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
+	if GameConfig.IS_TRIAL:
+		_trial_idx += 1
+		if _trial_idx < _trial_stage_ids.size():
+			_start_stage(_trial_stage_ids[_trial_idx])
+		else:
+			# 10ステージ完走 → 全ステージ結果画面（Twitter共有を兼ねた体験版完了画面）
+			game_state = "results"
+			queue_redraw()
 		return
+
+	# 製品版
+	if StageSelectManager._zou_stage_idx >= 0 and StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
+		if not StageSelectManager.zou_cleared:
+			# 初回クリア: エンディング画面へ
+			StageSelectManager.mark_zou_cleared()
+			_zou_ending_start = Time.get_ticks_msec() / 1000.0
+			game_state = "zou_ending"
+			queue_redraw()
+		else:
+			# リプレイ: ステージセレクトへ
+			BGMManager.resume_stage_select()
+			TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
+		return
+	# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
+	BGMManager.resume_stage_select()
+	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
 
 
 func _trigger_zou_ending_return() -> void:
@@ -3020,6 +3053,13 @@ func _enter_results_screen_debug() -> void:
 
 func _return_to_title_or_stage_debug_from_test() -> void:
 	_screenshot_folder_opened = false
+	if GameConfig.IS_TRIAL:
+		BGMManager.stop()
+		debug_mode = false
+		game_state = "title"
+		title_start_time = Time.get_ticks_msec() / 1000.0
+		_apply_title_bgm_for_debug_mode()
+		return
 	if _pbd_return_after_test and _debug_tools_enabled():
 		_pbd_return_after_test = false
 		stage_session.clear_debug_test()
@@ -3042,7 +3082,7 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		stage_debug_state.last_error = ""
 		title_start_time = Time.get_ticks_msec() / 1000.0
 		BGMManager.stop()  # BGMManager に移行
-	elif not GameConfig.IS_DEMO:
+	elif not GameConfig.IS_TRIAL:
 		BGMManager.resume_stage_select()
 		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 	else:
@@ -3297,7 +3337,7 @@ func _pbd_start_test() -> void:
 func _pbd_exit_to_stage_select() -> void:
 	stage_debug_state.field_focus_idx = -1
 	debug_mode = false
-	if not GameConfig.IS_DEMO:
+	if not GameConfig.IS_TRIAL:
 		BGMManager.resume_stage_select()
 		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 	else:
