@@ -165,6 +165,8 @@ class _DrawNode extends Node2D:
 		var cy: float = vp.y * 0.5
 		var max_r: float = vp.length()
 		var r: float = t * max_r
+		if r < 2.0:
+			return
 		var base_angle: float = -PI * 0.5
 		var rotation_offset: float = t * TAU
 		var pts := PackedVector2Array()
@@ -183,6 +185,8 @@ class _DrawNode extends Node2D:
 		var cy: float = vp.y * 0.5
 		var max_r: float = vp.length()
 		var r: float = t * max_r
+		if r < 2.0:
+			return
 		var pts := PackedVector2Array()
 		for k in range(6):
 			var a: float = TAU * float(k) / 6.0

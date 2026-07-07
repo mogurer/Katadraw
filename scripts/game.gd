@@ -3493,6 +3493,10 @@ func _stage_debug_list_right_edge_x(split: float) -> float:
 	return split - STAGE_DEBUG_SCROLLBAR_W - STAGE_DEBUG_SCROLLBAR_GAP * 2.0
 
 
+func _stage_debug_clear_badge_rect(row_y: float, list_left: float) -> Rect2:
+	return Rect2(list_left + 8.0, row_y + 50.0, 44.0, 18.0)
+
+
 func _stage_debug_scrollbar_track_rect(vp: Vector2) -> Rect2:
 	var split: float = _stage_debug_split_x(vp)
 	var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
@@ -4760,10 +4764,20 @@ func _input_stage_debug(event: InputEvent) -> void:
 		var n: int = _stage_debug_total_rows()
 		var y0: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_state.scroll
 		var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+		var master_n_lc: int = _stage_debug_master_count()
 		for i in range(n):
 			var y1: float = y0 + float(i) * STAGE_DEBUG_ROW_H
 			if pos.y >= y1 and pos.y < y1 + STAGE_DEBUG_ROW_H and pos.y < list_bottom and pos.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
 				if pos.x >= 8.0 and pos.x < _stage_debug_list_right_edge_x(split):
+					# CLR バッジ: クリックで ON/OFF 切り替え
+					if i < master_n_lc and _stage_debug_clear_badge_rect(y1, 8.0).has_point(pos):
+						if StageSelectManager.get_state(i) == StageSelectManager.StageState.CLEARED:
+							StageSelectManager._states[i] = StageSelectManager.StageState.UNLOCKED
+						else:
+							StageSelectManager._states[i] = StageSelectManager.StageState.CLEARED
+						StageSelectManager._save_states()
+						queue_redraw()
+						return
 					if i != stage_debug_state.selected:
 						_commit_focused_field_to_pending()
 						if stage_debug_state.last_error != "":

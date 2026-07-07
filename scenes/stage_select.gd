@@ -204,8 +204,9 @@ var _bgm_expanded: bool = false
 # --- 入力モード ---
 var _input_mode: int = 0  # 0 = KBM、1 = コントローラ
 
-# --- BGM 青ゾーン色 ---
-const _BGM_ZONE_COLOR := Color("#4477CC")
+# --- BGM ゾーン色 ---
+const _BGM_ZONE_COLOR          := Color("#433647")  # 未解放
+const _BGM_ZONE_UNLOCKED_COLOR := Color("#bc4280")  # 解放済み
 const _BGM_ZONE_DOT_RADIUS := _DOT_RADIUS * 1.5
 
 # --- BGM 解禁演出 ---
@@ -217,6 +218,14 @@ var _bgm_unlock_bgm_id: String = ""
 var _bgm_unlock_skip_count: int = 0
 var _bgm_unlock_cam_start: Vector2 = Vector2.ZERO
 var _bgm_unlock_pending: bool = false  # フォーカス演出終了後に開始するフラグ
+var _bgm_unlock_is_preview: bool = false  # デバッグ: プレビュー演出モード（永続変更なし）
+var _bgm_unlock_visual_zi: int = -1       # 円変色・音符アイコン出現が確定したゾーンインデックス（-1=まだ）
+var _dbg_bgm_preview_zi: int = 0          # デバッグ: 次にプレビューするゾーンインデックス
+var _bgm_line_retract_progress: Dictionary = {}  # { zone_idx: float 0..1 } 1.0=完全収納
+var _onpu_texture: Texture2D = null
+var _onpu_icon_texture: Texture2D = null
+var _left_q_texture: Texture2D = null
+var _right_e_texture: Texture2D = null
 
 
 func _ready() -> void:
@@ -285,6 +294,10 @@ func _ready() -> void:
 	_sfx_telop_soft = AudioStreamPlayer.new()
 	_sfx_telop_soft.stream = load("res://assets/sounds/Telop_Soft_25.wav")
 	add_child(_sfx_telop_soft)
+	_onpu_texture      = load("res://assets/UI/onpu.svg")      as Texture2D
+	_onpu_icon_texture = load("res://assets/UI/onpu_icon.svg") as Texture2D
+	_left_q_texture    = load("res://assets/UI/LEFT_Q.svg")    as Texture2D
+	_right_e_texture   = load("res://assets/UI/RIGHT_E.svg")   as Texture2D
 	# 直前クリアで解放されたステージがあれば演出を開始する
 	var unlocked: Array[int] = StageSelectManager.last_unlocked_ids.duplicate()
 	StageSelectManager.last_unlocked_ids.clear()
@@ -302,6 +315,12 @@ func _ready() -> void:
 			_camera.position = _zou_world_pos
 	# BGM 解放状態を同期してから新解放チェック
 	BGMManager.set_unlocked_bgm_ids(StageSelectManager.get_unlocked_bgm_ids())
+	# 既解放ゾーンのライン収納を初期化（セーブデータ読み込み時）
+	var _already_unlocked := StageSelectManager.get_unlocked_bgm_ids()
+	for _zi in range(StageSelectManager._bgm_zones.size()):
+		var _init_bgm_id: String = str(StageSelectManager._bgm_zones[_zi].get("unlocks_bgm", ""))
+		if _already_unlocked.has(_init_bgm_id):
+			_bgm_line_retract_progress[_zi] = 1.0
 	var newly_unlocked_bgms: Array[String] = StageSelectManager.check_bgm_unlocks()
 	if newly_unlocked_bgms.size() > 0:
 		var bgm_id: String = newly_unlocked_bgms[0]
@@ -330,6 +349,12 @@ func _process(delta: float) -> void:
 			_bgm_lr_collapse_timer = -1.0
 			if not _bgm_right_click_held and not _bgm_x_btn_held:
 				_bgm_do_collapse()
+
+	# BGM ライン収納アニメーション進行（解禁演出とは独立して動く）
+	for _rzi in _bgm_line_retract_progress.keys():
+		if _bgm_line_retract_progress[_rzi] < 1.0:
+			_bgm_line_retract_progress[_rzi] = minf(
+				_bgm_line_retract_progress[_rzi] + delta / 2.5, 1.0)
 
 	# 描線アニメーション進行（フォーカス演出終了後も継続するため常時実行）
 	var _line_any_active: bool = false
@@ -363,11 +388,18 @@ func _process(delta: float) -> void:
 					_bgm_unlock_elapsed = 0.0
 					_spawn_bgm_unlock_particles(_bgm_unlock_zone_center)
 					_bgm_do_expand()
-					BGMManager.unlock_bgm(_bgm_unlock_bgm_id)
+					if not _bgm_unlock_is_preview:
+						BGMManager.unlock_bgm(_bgm_unlock_bgm_id)
+					var _unlock_zi: int = _get_zone_idx_for_bgm(_bgm_unlock_bgm_id)
+					if _unlock_zi >= 0:
+						_bgm_line_retract_progress[_unlock_zi] = 0.0
+					# 円変色・音符アイコンは 0.3s 後（Phase 2 内で設定）
+			2:  # 爆発後: 0.3s で円変色・音符アイコン出現 → ライン収納完了で Phase 3 へ
+				if _bgm_unlock_visual_zi < 0 and _bgm_unlock_elapsed >= 0.3:
+					_bgm_unlock_visual_zi = _get_zone_idx_for_bgm(_bgm_unlock_bgm_id)
 					_bgm_update_expanded_label()
 					_update_bgm_button_labels()
-			2:  # 展開アニメーション待ち（0.15s）
-				if _bgm_unlock_elapsed >= 0.15:
+				if _bgm_unlock_visual_zi >= 0 and _bgm_line_retract_progress.get(_bgm_unlock_visual_zi, 1.0) >= 1.0:
 					_bgm_unlock_phase = 3
 					_bgm_unlock_elapsed = 0.0
 			3:  # 表示待機（0.5s）
@@ -379,6 +411,8 @@ func _process(delta: float) -> void:
 				if _bgm_unlock_elapsed >= 0.15:
 					_bgm_unlock_directing = false
 					_bgm_unlock_phase = 0
+					_bgm_unlock_is_preview = false
+					_bgm_unlock_visual_zi = -1
 					_char_pos = _camera.position
 					_char_target = _camera.position
 		queue_redraw()
@@ -501,9 +535,13 @@ func _input(event: InputEvent) -> void:
 				(event.button_index == JOY_BUTTON_A or event.button_index == JOY_BUTTON_X))
 		)
 		if is_skip:
-			_bgm_unlock_skip_count += 1
-			if _bgm_unlock_skip_count >= 2:
-				_bgm_unlock_skip()
+			if _bgm_unlock_phase == 2:
+				# Phase2 中: ライン収納を即完了してPhase3へ（演出キャンセル）
+				_bgm_advance_from_phase2()
+			else:
+				_bgm_unlock_skip_count += 1
+				if _bgm_unlock_skip_count >= 2:
+					_bgm_unlock_skip()
 		return
 
 	if event is InputEventKey:
@@ -519,6 +557,12 @@ func _input(event: InputEvent) -> void:
 			_update_esc_popup_hover(event.position)
 		elif _popup_stage >= 0:
 			_update_popup_hover(event.position)
+
+	# [DEBUG] BGM演出プレビュー（B キー: ゾーンを順番にプレビュー）
+	if _is_debug() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_B:
+		_dbg_trigger_bgm_preview()
+		get_viewport().set_input_as_handled()
+		return
 
 	# [DEBUG] デバッグクリック処理（他のUIより先に処理）
 	if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -706,17 +750,44 @@ func _draw() -> void:
 			to_pt = _dot_pos(b)
 		draw_line(from_pt, to_pt, _LINE_COLOR, _LINE_WIDTH)
 
-	# BGM 解禁ゾーン: 青い線・点
+	# BGM 解禁ゾーン: 線・点（解放済み = #f23052、未解放 = #433647）
 	if not _final_directing:
 		var zones: Array = StageSelectManager._bgm_zones
 		var centers: Array[Vector2] = StageSelectManager.get_bgm_zone_centers()
+		var unlocked_ids: Array = StageSelectManager.get_unlocked_bgm_ids()
+		# 演出中のゾーンは _bgm_unlock_visual_zi が確定するまで視覚的に未解放として扱う
+		var _animating_zi: int = -1
+		if _bgm_unlock_directing:
+			_animating_zi = _get_zone_idx_for_bgm(_bgm_unlock_bgm_id)
 		for zi in range(mini(zones.size(), centers.size())):
 			var center: Vector2 = centers[zi]
+			var bgm_id: String = str(zones[zi].get("unlocks_bgm", ""))
+			var is_unlocked: bool
+			if zi == _animating_zi:
+				is_unlocked = _bgm_unlock_visual_zi >= 0
+			else:
+				is_unlocked = unlocked_ids.has(bgm_id)
+			var zone_color: Color = _BGM_ZONE_UNLOCKED_COLOR if is_unlocked else _BGM_ZONE_COLOR
+			var retract_prog: float = _bgm_line_retract_progress.get(zi, 1.0) if is_unlocked else 0.0
 			for sid in zones[zi].get("required_stages", []):
 				var sid_int: int = int(sid)
 				if StageSelectManager.get_state(sid_int) == StageSelectManager.StageState.CLEARED:
-					draw_line(StageSelectManager.get_world_pos(sid_int), center, _BGM_ZONE_COLOR, _LINE_WIDTH, true)
-			draw_circle(center, _BGM_ZONE_DOT_RADIUS, _BGM_ZONE_COLOR)
+					if retract_prog < 1.0:
+						var stage_pos: Vector2 = StageSelectManager.get_world_pos(sid_int)
+						var draw_start: Vector2 = stage_pos.lerp(center, retract_prog)
+						draw_line(draw_start, center, zone_color, _LINE_WIDTH, true)
+			draw_circle(center, _BGM_ZONE_DOT_RADIUS, zone_color)
+			if is_unlocked and _onpu_texture != null:
+				# 音符をドット内に収まるサイズで中央配置（白）
+				# SVG内の音符は概ねx:[830,1060] y:[392,634]、中心(945,513)
+				const NOTE_H_SVG: float = 242.0
+				const NOTE_CX_SVG: float = 945.0
+				const NOTE_CY_SVG: float = 513.0
+				var svg_scale: float = _BGM_ZONE_DOT_RADIUS * 1.224 / NOTE_H_SVG
+				draw_texture_rect(_onpu_texture,
+					Rect2(center - Vector2(NOTE_CX_SVG * svg_scale, NOTE_CY_SVG * svg_scale),
+						Vector2(1920.0 * svg_scale, 1080.0 * svg_scale)),
+					false, Color.WHITE)
 
 	# ステージドット（LOCKEDは描画しない）
 	for i in range(StageSelectManager.STAGE_COUNT):
@@ -2120,19 +2191,25 @@ func _mk_bgm_btn(label_text: String) -> Button:
 	b.flat = true
 	b.focus_mode = Control.FOCUS_NONE
 	b.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
-	b.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
-	b.add_theme_color_override("font_hover_color", _BGM_LABEL_COLOR.lightened(0.25))
-	b.add_theme_color_override("font_pressed_color", _BGM_LABEL_COLOR.darkened(0.20))
-	b.add_theme_color_override("font_disabled_color",
-		Color(_BGM_LABEL_COLOR.r, _BGM_LABEL_COLOR.g, _BGM_LABEL_COLOR.b, 0.35))
+	b.add_theme_color_override("font_color", Color("#f23052"))
+	b.add_theme_color_override("font_hover_color", Color("#f23052").lightened(0.25))
+	b.add_theme_color_override("font_pressed_color", Color("#f23052").darkened(0.20))
+	b.add_theme_color_override("font_disabled_color", Color(0.949, 0.188, 0.322, 0.35))
 	return b
 
 
-func _mk_note_label() -> Label:
+func _mk_note_label() -> Control:
+	if _onpu_icon_texture != null:
+		var t := TextureRect.new()
+		t.texture = _onpu_icon_texture
+		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		t.custom_minimum_size = Vector2(18, 20)
+		return t
 	var l := Label.new()
 	l.text = "♪"
 	l.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
-	l.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	l.add_theme_color_override("font_color", Color.WHITE)
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	return l
 
@@ -2143,35 +2220,68 @@ func _setup_bgm_ui() -> void:
 	anchor.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_bgm_canvas.add_child(anchor)
 
-	# HBoxContainer: 右下アンカー・コンテンツ量に合わせて左方向へ伸張
-	_bgm_container = HBoxContainer.new()
-	_bgm_container.anchor_left   = 1.0
-	_bgm_container.anchor_right  = 1.0
-	_bgm_container.anchor_top    = 1.0
-	_bgm_container.anchor_bottom = 1.0
-	_bgm_container.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_bgm_container.grow_vertical   = Control.GROW_DIRECTION_BEGIN
-	_bgm_container.offset_right  = -20.0
-	_bgm_container.offset_bottom = -14.0
-	_bgm_container.add_theme_constant_override("separation", 8)
-	anchor.add_child(_bgm_container)
+	# 右下ラベル背景パネル（拡大パネルと同デザイン）
+	var small_panel := PanelContainer.new()
+	small_panel.anchor_left   = 1.0
+	small_panel.anchor_right  = 1.0
+	small_panel.anchor_top    = 1.0
+	small_panel.anchor_bottom = 1.0
+	small_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	small_panel.grow_vertical   = Control.GROW_DIRECTION_BEGIN
+	small_panel.offset_right  = -20.0
+	small_panel.offset_bottom = -14.0
+	var small_style := StyleBoxFlat.new()
+	small_style.bg_color = Color(0.263, 0.212, 0.278, 0.9)
+	small_style.set_corner_radius_all(10)
+	small_style.content_margin_left   = 8.0
+	small_style.content_margin_right  = 8.0
+	small_style.content_margin_top    = 4.0
+	small_style.content_margin_bottom = 4.0
+	small_panel.add_theme_stylebox_override("panel", small_style)
+	anchor.add_child(small_panel)
 
-	_btn_prev = _mk_bgm_btn("◀[Q]")
+	# HBoxContainer: 背景パネル内に配置
+	_bgm_container = HBoxContainer.new()
+	_bgm_container.add_theme_constant_override("separation", 8)
+	small_panel.add_child(_bgm_container)
+
+	_btn_prev = Button.new()
+	_btn_prev.flat = true
+	_btn_prev.focus_mode = Control.FOCUS_NONE
+	_btn_prev.expand_icon = true
+	_btn_prev.custom_minimum_size = Vector2(36, 20)
+	if _left_q_texture != null:
+		_btn_prev.icon = _left_q_texture
+	else:
+		_btn_prev.text = "◀[Q]"
+		_btn_prev.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+		_btn_prev.add_theme_color_override("font_color", Color("#f23052"))
 	_bgm_container.add_child(_btn_prev)
+
 	_bgm_container.add_child(_mk_note_label())
 
 	_bgm_label = Label.new()
 	_bgm_label.name = "BgmNameLabel"
 	_bgm_label.visible_characters = 0
 	_bgm_label.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
-	_bgm_label.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	_bgm_label.add_theme_color_override("font_color", Color.WHITE)
+	if _font_din != null:
+		_bgm_label.add_theme_font_override("font", _font_din)
 	_bgm_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_bgm_label.hide()
 	_bgm_container.add_child(_bgm_label)
 
-	_bgm_container.add_child(_mk_note_label())
-
-	_btn_next = _mk_bgm_btn("[E]▶")
+	_btn_next = Button.new()
+	_btn_next.flat = true
+	_btn_next.focus_mode = Control.FOCUS_NONE
+	_btn_next.expand_icon = true
+	_btn_next.custom_minimum_size = Vector2(36, 20)
+	if _right_e_texture != null:
+		_btn_next.icon = _right_e_texture
+	else:
+		_btn_next.text = "[E]▶"
+		_btn_next.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+		_btn_next.add_theme_color_override("font_color", Color("#f23052"))
 	_bgm_container.add_child(_btn_next)
 
 	_btn_prev.pressed.connect(_on_bgm_btn_prev)
@@ -2191,31 +2301,54 @@ func _setup_bgm_ui() -> void:
 	_bgm_expanded_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_bgm_expanded_panel.grow_vertical   = Control.GROW_DIRECTION_BOTH
 	_bgm_expanded_panel.visible = false
+	var exp_style := StyleBoxFlat.new()
+	exp_style.bg_color = Color(0.263, 0.212, 0.278, 0.9)  # #433647 90%
+	exp_style.set_corner_radius_all(10)
+	exp_style.content_margin_left   = 20.0
+	exp_style.content_margin_right  = 20.0
+	exp_style.content_margin_top    = 12.0
+	exp_style.content_margin_bottom = 12.0
+	_bgm_expanded_panel.add_theme_stylebox_override("panel", exp_style)
 	exp_anchor.add_child(_bgm_expanded_panel)
 	_bgm_expanded_panel.resized.connect(func() -> void:
 		_bgm_expanded_panel.pivot_offset = _bgm_expanded_panel.size / 2.0
 	)
 
 	var exp_hbox := HBoxContainer.new()
-	exp_hbox.add_theme_constant_override("separation", 24)
+	exp_hbox.add_theme_constant_override("separation", 16)
 	_bgm_expanded_panel.add_child(exp_hbox)
 
+	var exp_btn_color := Color("#f23052")
 	_bgm_expanded_prev_btn = Button.new()
-	_bgm_expanded_prev_btn.text = "◀[Q]"
-	_bgm_expanded_prev_btn.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE * 4)
-	_bgm_expanded_prev_btn.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	_bgm_expanded_prev_btn.flat = true
+	_bgm_expanded_prev_btn.expand_icon = true
+	_bgm_expanded_prev_btn.custom_minimum_size = Vector2(90, 50)
+	if _left_q_texture != null:
+		_bgm_expanded_prev_btn.icon = _left_q_texture
+	else:
+		_bgm_expanded_prev_btn.text = "◀[Q]"
+		_bgm_expanded_prev_btn.add_theme_font_size_override("font_size", 50)
+		_bgm_expanded_prev_btn.add_theme_color_override("font_color", exp_btn_color)
 	exp_hbox.add_child(_bgm_expanded_prev_btn)
 
 	_bgm_expanded_name_label = Label.new()
-	_bgm_expanded_name_label.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE * 3)
-	_bgm_expanded_name_label.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	_bgm_expanded_name_label.add_theme_font_size_override("font_size", 36)
+	_bgm_expanded_name_label.add_theme_color_override("font_color", Color.WHITE)
+	if _font_din != null:
+		_bgm_expanded_name_label.add_theme_font_override("font", _font_din)
 	_bgm_expanded_name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	exp_hbox.add_child(_bgm_expanded_name_label)
 
 	_bgm_expanded_next_btn = Button.new()
-	_bgm_expanded_next_btn.text = "[E]▶"
-	_bgm_expanded_next_btn.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE * 4)
-	_bgm_expanded_next_btn.add_theme_color_override("font_color", _BGM_LABEL_COLOR)
+	_bgm_expanded_next_btn.flat = true
+	_bgm_expanded_next_btn.expand_icon = true
+	_bgm_expanded_next_btn.custom_minimum_size = Vector2(90, 50)
+	if _right_e_texture != null:
+		_bgm_expanded_next_btn.icon = _right_e_texture
+	else:
+		_bgm_expanded_next_btn.text = "[E]▶"
+		_bgm_expanded_next_btn.add_theme_font_size_override("font_size", 50)
+		_bgm_expanded_next_btn.add_theme_color_override("font_color", exp_btn_color)
 	exp_hbox.add_child(_bgm_expanded_next_btn)
 
 	_bgm_expanded_prev_btn.pressed.connect(_on_bgm_btn_prev)
@@ -2388,15 +2521,43 @@ func _update_bgm_button_labels() -> void:
 	var is_kb: bool = (_input_mode == 0)
 	var show_arrows: bool = BGMManager.get_unlocked_track_count() > 1
 	if _btn_prev:
-		_btn_prev.text = "◀[Q]" if is_kb else "◀[L]"
+		if is_kb and _left_q_texture != null:
+			_btn_prev.icon = _left_q_texture
+			_btn_prev.text = ""
+		else:
+			_btn_prev.icon = null
+			_btn_prev.text = "◀[L]"
+			_btn_prev.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+			_btn_prev.add_theme_color_override("font_color", Color("#f23052"))
 		_btn_prev.visible = show_arrows
 	if _btn_next:
-		_btn_next.text = "[E]▶" if is_kb else "[R]▶"
+		if is_kb and _right_e_texture != null:
+			_btn_next.icon = _right_e_texture
+			_btn_next.text = ""
+		else:
+			_btn_next.icon = null
+			_btn_next.text = "[R]▶"
+			_btn_next.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+			_btn_next.add_theme_color_override("font_color", Color("#f23052"))
 		_btn_next.visible = show_arrows
 	if _bgm_expanded_prev_btn:
-		_bgm_expanded_prev_btn.text = "◀[Q]" if is_kb else "◀[L]"
+		if is_kb and _left_q_texture != null:
+			_bgm_expanded_prev_btn.icon = _left_q_texture
+			_bgm_expanded_prev_btn.text = ""
+		else:
+			_bgm_expanded_prev_btn.icon = null
+			_bgm_expanded_prev_btn.text = "◀[L]"
+			_bgm_expanded_prev_btn.add_theme_font_size_override("font_size", 50)
+			_bgm_expanded_prev_btn.add_theme_color_override("font_color", Color("#f23052"))
 	if _bgm_expanded_next_btn:
-		_bgm_expanded_next_btn.text = "[E]▶" if is_kb else "[R]▶"
+		if is_kb and _right_e_texture != null:
+			_bgm_expanded_next_btn.icon = _right_e_texture
+			_bgm_expanded_next_btn.text = ""
+		else:
+			_bgm_expanded_next_btn.icon = null
+			_bgm_expanded_next_btn.text = "[R]▶"
+			_bgm_expanded_next_btn.add_theme_font_size_override("font_size", 50)
+			_bgm_expanded_next_btn.add_theme_color_override("font_color", Color("#f23052"))
 
 
 # --- BGM 解禁ゾーン ---
@@ -2407,6 +2568,20 @@ func _start_bgm_unlock_sequence() -> void:
 	_bgm_unlock_elapsed = 0.0
 	_bgm_unlock_skip_count = 0
 	_bgm_unlock_cam_start = _camera.position
+	_bgm_unlock_visual_zi = -1
+
+
+func _bgm_advance_from_phase2() -> void:
+	var _zi: int = _get_zone_idx_for_bgm(_bgm_unlock_bgm_id)
+	if _zi >= 0:
+		_bgm_line_retract_progress[_zi] = 1.0
+	if _bgm_unlock_visual_zi < 0 and _zi >= 0:
+		_bgm_unlock_visual_zi = _zi
+		_bgm_update_expanded_label()
+		_update_bgm_button_labels()
+	_bgm_unlock_phase = 3
+	_bgm_unlock_elapsed = 0.0
+	queue_redraw()
 
 
 func _bgm_unlock_skip() -> void:
@@ -2415,13 +2590,38 @@ func _bgm_unlock_skip() -> void:
 	_camera.position = _bgm_unlock_zone_center
 	_char_pos = _camera.position
 	_char_target = _camera.position
-	BGMManager.unlock_bgm(_bgm_unlock_bgm_id)
+	if not _bgm_unlock_is_preview:
+		BGMManager.unlock_bgm(_bgm_unlock_bgm_id)
+	_bgm_unlock_is_preview = false
+	_bgm_unlock_visual_zi = -1
+	var _skip_zi: int = _get_zone_idx_for_bgm(_bgm_unlock_bgm_id)
+	if _skip_zi >= 0:
+		_bgm_line_retract_progress[_skip_zi] = 1.0
+	_bgm_update_expanded_label()
 	_update_bgm_button_labels()
 	if _bgm_expanded:
 		if _bgm_expand_tween:
 			_bgm_expand_tween.kill()
 		_bgm_expanded = false
 		_bgm_expanded_panel.visible = false
+
+
+func _dbg_trigger_bgm_preview() -> void:
+	if _bgm_unlock_directing or _is_focusing:
+		return
+	var zones: Array = StageSelectManager._bgm_zones
+	if zones.is_empty():
+		return
+	var centers: Array[Vector2] = StageSelectManager.get_bgm_zone_centers()
+	if centers.size() != zones.size():
+		return
+	var zi: int = _dbg_bgm_preview_zi % zones.size()
+	_dbg_bgm_preview_zi = (zi + 1) % zones.size()
+	_bgm_unlock_bgm_id = str(zones[zi].get("unlocks_bgm", ""))
+	_bgm_unlock_zone_center = centers[zi]
+	_bgm_line_retract_progress[zi] = 0.0  # ラインを一時的に復元
+	_bgm_unlock_is_preview = true
+	_start_bgm_unlock_sequence()
 
 
 func _get_zone_idx_for_bgm(bgm_id: String) -> int:

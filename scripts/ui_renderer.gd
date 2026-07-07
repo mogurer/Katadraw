@@ -1105,6 +1105,18 @@ func _draw_stage_debug(vp: Vector2) -> void:
 		_game.draw_rect(row_rect, Color(0.88, 0.86, 0.88), false, 1.5)
 		var row_lbl: String = _game._stage_debug_list_row_label(i)
 		_game.draw_string(_game.font, Vector2(list_left + 10.0, y + 30.0), row_lbl, HORIZONTAL_ALIGNMENT_LEFT, label_max_w, fs, text_c)
+		# CLR バッジ（マスター行のみ・クリックで ON/OFF 切り替え）
+		if i < master_n:
+			var cleared_i: bool = StageSelectManager.get_state(i) == StageSelectManager.StageState.CLEARED
+			var badge_r: Rect2 = _game._stage_debug_clear_badge_rect(y, list_left)
+			if cleared_i:
+				_game.draw_rect(badge_r, Color(0.95, 0.19, 0.32, 0.82))
+			_game.draw_rect(badge_r, Color(0.95, 0.19, 0.32, 0.60) if cleared_i else Color(0.55, 0.50, 0.58, 0.70), false, 1.0)
+			_game.draw_string(_game.font,
+				Vector2(badge_r.position.x + 2.0, badge_r.position.y + 13.0),
+				"CLR" if cleared_i else "---",
+				HORIZONTAL_ALIGNMENT_CENTER, badge_r.size.x - 4.0, 11,
+				Color.WHITE if cleared_i else Color(0.52, 0.47, 0.55))
 		var icx: float = list_left + list_w - icon_r - 12.0
 		var icy: float = y + _game.STAGE_DEBUG_ROW_H * 0.5 - 2.0
 		var drew_preview: bool = false
@@ -2911,10 +2923,24 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 	const BTN_BW: float = 5.75
 	var text_color: Color
 	if is_off:
-		_game.draw_rect(Rect2(rect.position + shadow_offset, rect.size), Color(LINE_COLOR,0.30 * alpha))
-		_game.draw_rect(rect, Color(1.0, 0.937, 0.89, alpha))
+		_game.draw_rect(Rect2(rect.position + shadow_offset, rect.size), Color(LINE_COLOR, 0.30 * alpha))
+		var off_pts := PackedVector2Array([
+			rect.position,
+			Vector2(rect.end.x, rect.position.y),
+			rect.end,
+			Vector2(rect.position.x, rect.end.y),
+		])
+		var off_grad := PackedColorArray([
+			Color(1.00, 0.937, 0.890, alpha),
+			Color(1.00, 0.937, 0.890, alpha),
+			Color(0.80, 0.750, 0.712, alpha),
+			Color(0.80, 0.750, 0.712, alpha),
+		])
+		_game.draw_polygon(off_pts, off_grad)
+		# ハイライトストライプ（上部 26% に白シーン）
+		_game.draw_rect(Rect2(rect.position, Vector2(rect.size.x, rect.size.y * 0.26)), Color(1.0, 1.0, 1.0, 0.22 * alpha))
 		_draw_rect_border_with_corners(rect, border_c, BTN_BW)
-		text_color = Color(LINE_COLOR,alpha)
+		text_color = Color(LINE_COLOR, alpha)
 	else:
 		# ONボタン：四隅が時刻ベースのサイン波でゆっくり動き続ける（OFFで正矩形に戻る）
 		var t: float = Time.get_ticks_msec() / 500.0
@@ -2931,8 +2957,22 @@ func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_
 			pts[0] + shadow_offset, pts[1] + shadow_offset,
 			pts[2] + shadow_offset, pts[3] + shadow_offset,
 		])
-		_game.draw_colored_polygon(pts_shadow, Color(LINE_COLOR,0.30 * alpha))
-		_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.9 * alpha))
+		_game.draw_colored_polygon(pts_shadow, Color(LINE_COLOR, 0.30 * alpha))
+		# 頂点グラデーション（上: 明るい赤、下: 暗い赤）
+		var on_grad := PackedColorArray([
+			Color(1.00, 0.28, 0.40, 0.9 * alpha),
+			Color(1.00, 0.28, 0.40, 0.9 * alpha),
+			Color(0.50, 0.07, 0.14, 0.9 * alpha),
+			Color(0.50, 0.07, 0.14, 0.9 * alpha),
+		])
+		_game.draw_polygon(pts, on_grad)
+		# ハイライトストライプ（上部 26% にクリームシーン）
+		var hl_pts := PackedVector2Array([
+			pts[0], pts[1],
+			pts[1].lerp(pts[2], 0.26),
+			pts[0].lerp(pts[3], 0.26),
+		])
+		_game.draw_colored_polygon(hl_pts, Color(1.0, 0.937, 0.89, 0.12 * alpha))
 		var dot_r: float = BTN_BW * 1.25
 		for i in range(4):
 			_game.draw_line(pts[i], pts[(i + 1) % 4], border_c, BTN_BW, true)
@@ -3926,16 +3966,43 @@ func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: fl
 	var c_accent_red: Color = Color(0.9490, 0.1882, 0.3216, alpha)
 	var c_cream: Color = Color(1.0, 0.99, 0.97, alpha)
 	var c_body_dark: Color = Color(LINE_COLOR,alpha)
-	var c_fill: Color
 	var c_text: Color
 	if hovered:
-		c_fill = c_accent_red
 		c_text = c_cream
+		# 頂点グラデーション（上: 明るい赤、下: 暗い赤）
+		var r_pts := PackedVector2Array([
+			rect.position,
+			Vector2(rect.end.x, rect.position.y),
+			rect.end,
+			Vector2(rect.position.x, rect.end.y),
+		])
+		var r_grad := PackedColorArray([
+			Color(1.00, 0.28, 0.40, alpha),
+			Color(1.00, 0.28, 0.40, alpha),
+			Color(0.50, 0.07, 0.14, alpha),
+			Color(0.50, 0.07, 0.14, alpha),
+		])
+		_game.draw_polygon(r_pts, r_grad)
+		# ハイライトストライプ（上部 26%）
+		_game.draw_rect(Rect2(rect.position, Vector2(rect.size.x, rect.size.y * 0.26)), Color(1.0, 0.937, 0.89, 0.12 * alpha))
 	else:
-		c_fill = c_cream
 		c_text = c_body_dark
-	_game.draw_rect(rect, c_fill)
-	_draw_rect_border_with_corners(rect, Color(LINE_COLOR,alpha), 5.75)
+		var nr_pts := PackedVector2Array([
+			rect.position,
+			Vector2(rect.end.x, rect.position.y),
+			rect.end,
+			Vector2(rect.position.x, rect.end.y),
+		])
+		var nr_grad := PackedColorArray([
+			Color(1.00, 0.990, 0.970, alpha),
+			Color(1.00, 0.990, 0.970, alpha),
+			Color(0.80, 0.792, 0.776, alpha),
+			Color(0.80, 0.792, 0.776, alpha),
+		])
+		_game.draw_polygon(nr_pts, nr_grad)
+		# ハイライトストライプ（上部 26%）
+		_game.draw_rect(Rect2(rect.position, Vector2(rect.size.x, rect.size.y * 0.26)), Color(1.0, 1.0, 1.0, 0.22 * alpha))
+	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 5.75)
 	var ascent: float = _game.font_bold.get_ascent(fs)
 	var descent: float = _game.font_bold.get_descent(fs)
 	var baseline_y: float = rect.position.y + (draw_h + ascent - descent) * 0.5
