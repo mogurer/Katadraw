@@ -226,6 +226,11 @@ var _onpu_texture: Texture2D = null
 var _onpu_icon_texture: Texture2D = null
 var _left_q_texture: Texture2D = null
 var _right_e_texture: Texture2D = null
+var _lb_texture: Texture2D = null
+var _rb_texture: Texture2D = null
+var _esc_key_texture: Texture2D = null
+var _start_pad_texture: Texture2D = null
+var _title_hint_style: StyleBoxFlat = null
 
 
 func _ready() -> void:
@@ -296,8 +301,19 @@ func _ready() -> void:
 	add_child(_sfx_telop_soft)
 	_onpu_texture      = load("res://assets/UI/onpu.svg")      as Texture2D
 	_onpu_icon_texture = load("res://assets/UI/onpu_icon.svg") as Texture2D
-	_left_q_texture    = load("res://assets/UI/LEFT_Q.svg")    as Texture2D
-	_right_e_texture   = load("res://assets/UI/RIGHT_E.svg")   as Texture2D
+	_left_q_texture    = load("res://assets/UI/LEFT_Q.svg")     as Texture2D
+	_right_e_texture   = load("res://assets/UI/RIGHT_E.svg")    as Texture2D
+	_lb_texture        = load("res://assets/UI/LB.svg")         as Texture2D
+	_rb_texture        = load("res://assets/UI/RB.svg")         as Texture2D
+	_esc_key_texture   = load("res://assets/UI/esc_key.svg")    as Texture2D
+	_start_pad_texture = load("res://assets/UI/start_pad.svg")  as Texture2D
+	_title_hint_style = StyleBoxFlat.new()
+	_title_hint_style.bg_color = Color(0.263, 0.212, 0.278, 0.9)
+	_title_hint_style.set_corner_radius_all(10)
+	_title_hint_style.content_margin_left   = 10.0
+	_title_hint_style.content_margin_right  = 10.0
+	_title_hint_style.content_margin_top    = 6.0
+	_title_hint_style.content_margin_bottom = 6.0
 	# 直前クリアで解放されたステージがあれば演出を開始する
 	var unlocked: Array[int] = StageSelectManager.last_unlocked_ids.duplicate()
 	StageSelectManager.last_unlocked_ids.clear()
@@ -849,10 +865,28 @@ func _draw() -> void:
 		var deco_w: float = 500.0
 		_draw_tri_deco(Vector2(20.0, vp.y - deco_w * 0.9495 - 20.0), deco_w, Color(GameConfig.INK_COLOR,0.2))
 
-	# ラベル
-	if not _final_directing:
-		var title_hint: String = "Start: タイトルへ戻る" if _input_mode == 1 else "ESC: タイトルへ戻る"
-		draw_string(_font, Vector2(40, vp.y - 32), title_hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.5, 0.3, 0.3))
+	# タイトル戻りヒント（小ラベルスタイル）
+	if not _final_directing and _title_hint_style != null:
+		var icon_tex: Texture2D = _start_pad_texture if _input_mode == 1 else _esc_key_texture
+		var hint_txt: String = "タイトルへ戻る"
+		var hint_fs: int = 16
+		var icon_h: float = 26.0
+		var gap: float = 8.0
+		var pad_x: float = 10.0
+		var pad_y: float = 6.0
+		var icon_w: float = icon_h
+		if icon_tex != null:
+			icon_w = icon_h * float(icon_tex.get_width()) / float(icon_tex.get_height())
+		var txt_w: float = _font.get_string_size(hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs).x
+		var panel_w: float = pad_x * 2.0 + icon_w + gap + txt_w
+		var panel_h: float = pad_y * 2.0 + icon_h
+		var panel_x: float = 20.0
+		var panel_y: float = vp.y - 14.0 - panel_h
+		draw_style_box(_title_hint_style, Rect2(panel_x, panel_y, panel_w, panel_h))
+		if icon_tex != null:
+			draw_texture_rect(icon_tex, Rect2(panel_x + pad_x, panel_y + pad_y, icon_w, icon_h), false)
+		draw_string(_font, Vector2(panel_x + pad_x + icon_w + gap, panel_y + pad_y + icon_h * 0.78),
+			hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs, Color.WHITE)
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
@@ -2525,39 +2559,55 @@ func _update_bgm_button_labels() -> void:
 			_btn_prev.icon = _left_q_texture
 			_btn_prev.text = ""
 		else:
-			_btn_prev.icon = null
-			_btn_prev.text = "◀[L]"
-			_btn_prev.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
-			_btn_prev.add_theme_color_override("font_color", Color("#f23052"))
+			if _lb_texture != null:
+				_btn_prev.icon = _lb_texture
+				_btn_prev.text = ""
+			else:
+				_btn_prev.icon = null
+				_btn_prev.text = "◀[L]"
+				_btn_prev.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+				_btn_prev.add_theme_color_override("font_color", Color("#f23052"))
 		_btn_prev.visible = show_arrows
 	if _btn_next:
 		if is_kb and _right_e_texture != null:
 			_btn_next.icon = _right_e_texture
 			_btn_next.text = ""
 		else:
-			_btn_next.icon = null
-			_btn_next.text = "[R]▶"
-			_btn_next.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
-			_btn_next.add_theme_color_override("font_color", Color("#f23052"))
+			if _rb_texture != null:
+				_btn_next.icon = _rb_texture
+				_btn_next.text = ""
+			else:
+				_btn_next.icon = null
+				_btn_next.text = "[R]▶"
+				_btn_next.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
+				_btn_next.add_theme_color_override("font_color", Color("#f23052"))
 		_btn_next.visible = show_arrows
 	if _bgm_expanded_prev_btn:
 		if is_kb and _left_q_texture != null:
 			_bgm_expanded_prev_btn.icon = _left_q_texture
 			_bgm_expanded_prev_btn.text = ""
 		else:
-			_bgm_expanded_prev_btn.icon = null
-			_bgm_expanded_prev_btn.text = "◀[L]"
-			_bgm_expanded_prev_btn.add_theme_font_size_override("font_size", 50)
-			_bgm_expanded_prev_btn.add_theme_color_override("font_color", Color("#f23052"))
+			if _lb_texture != null:
+				_bgm_expanded_prev_btn.icon = _lb_texture
+				_bgm_expanded_prev_btn.text = ""
+			else:
+				_bgm_expanded_prev_btn.icon = null
+				_bgm_expanded_prev_btn.text = "◀[L]"
+				_bgm_expanded_prev_btn.add_theme_font_size_override("font_size", 50)
+				_bgm_expanded_prev_btn.add_theme_color_override("font_color", Color("#f23052"))
 	if _bgm_expanded_next_btn:
 		if is_kb and _right_e_texture != null:
 			_bgm_expanded_next_btn.icon = _right_e_texture
 			_bgm_expanded_next_btn.text = ""
 		else:
-			_bgm_expanded_next_btn.icon = null
-			_bgm_expanded_next_btn.text = "[R]▶"
-			_bgm_expanded_next_btn.add_theme_font_size_override("font_size", 50)
-			_bgm_expanded_next_btn.add_theme_color_override("font_color", Color("#f23052"))
+			if _rb_texture != null:
+				_bgm_expanded_next_btn.icon = _rb_texture
+				_bgm_expanded_next_btn.text = ""
+			else:
+				_bgm_expanded_next_btn.icon = null
+				_bgm_expanded_next_btn.text = "[R]▶"
+				_bgm_expanded_next_btn.add_theme_font_size_override("font_size", 50)
+				_bgm_expanded_next_btn.add_theme_color_override("font_color", Color("#f23052"))
 
 
 # --- BGM 解禁ゾーン ---
