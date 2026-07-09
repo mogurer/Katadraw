@@ -157,11 +157,13 @@ var _popup_border_phase_t: float = BORDER_WAIT  # ポップアップボーダー
 var _popup_stage: int = -1    # 確認ポップアップ対象（-1 = 非表示）
 var _popup_yes_hovered: bool = false
 var _popup_no_hovered: bool = false
+var _popup_stick_ready: bool = true  # スティック左右スナップ用
 
 var _esc_popup: bool = false   # タイトル戻り確認ポップアップ
 var _ctrl_held: bool = false   # Ctrlキー押下中フラグ
 var _esc_popup_yes_hovered: bool = false
 var _esc_popup_no_hovered: bool = false
+var _esc_popup_stick_ready: bool = true  # スティック左右スナップ用
 
 # --- ZOU ドット（zou_cleared 後）---
 var _zou_world_pos: Vector2 = Vector2.ZERO
@@ -598,11 +600,38 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
 				_handle_esc_popup_confirm(_esc_popup_yes_hovered)
 		if event is InputEventJoypadButton and event.pressed:
-			if event.button_index == JOY_BUTTON_B:
-				_esc_popup = false
-				queue_redraw()
-			elif event.button_index == JOY_BUTTON_A:
-				_handle_esc_popup_confirm(_esc_popup_yes_hovered)
+			match event.button_index:
+				JOY_BUTTON_DPAD_LEFT:
+					if not _esc_popup_yes_hovered:
+						_esc_popup_yes_hovered = true
+						_esc_popup_no_hovered = false
+						_sfx_on.play()
+						queue_redraw()
+				JOY_BUTTON_DPAD_RIGHT:
+					if not _esc_popup_no_hovered:
+						_esc_popup_yes_hovered = false
+						_esc_popup_no_hovered = true
+						_sfx_on.play()
+						queue_redraw()
+				JOY_BUTTON_B:
+					_handle_esc_popup_confirm(false)
+				JOY_BUTTON_A:
+					_handle_esc_popup_confirm(_esc_popup_yes_hovered)
+		if event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_X:
+			if abs(event.axis_value) < 0.2:
+				_esc_popup_stick_ready = true
+			elif abs(event.axis_value) >= 0.6 and _esc_popup_stick_ready:
+				_esc_popup_stick_ready = false
+				if event.axis_value < 0 and not _esc_popup_yes_hovered:
+					_esc_popup_yes_hovered = true
+					_esc_popup_no_hovered = false
+					_sfx_on.play()
+					queue_redraw()
+				elif event.axis_value > 0 and not _esc_popup_no_hovered:
+					_esc_popup_yes_hovered = false
+					_esc_popup_no_hovered = true
+					_sfx_on.play()
+					queue_redraw()
 		return
 
 	# ステージ選択確認ポップアップ
@@ -619,12 +648,38 @@ func _input(event: InputEvent) -> void:
 				if _popup_yes_hovered or _popup_no_hovered:
 					_handle_popup_confirm(_popup_yes_hovered)
 		if event is InputEventJoypadButton and event.pressed:
-			if event.button_index == JOY_BUTTON_B:
-				_popup_stage = -1
-				_nearest = _find_nearest_accessible()
-				queue_redraw()
-			elif event.button_index == JOY_BUTTON_A:
-				_handle_popup_confirm(_popup_yes_hovered)
+			match event.button_index:
+				JOY_BUTTON_DPAD_LEFT:
+					if not _popup_yes_hovered:
+						_popup_yes_hovered = true
+						_popup_no_hovered = false
+						_sfx_on.play()
+						queue_redraw()
+				JOY_BUTTON_DPAD_RIGHT:
+					if not _popup_no_hovered:
+						_popup_yes_hovered = false
+						_popup_no_hovered = true
+						_sfx_on.play()
+						queue_redraw()
+				JOY_BUTTON_B:
+					_handle_popup_confirm(false)
+				JOY_BUTTON_A:
+					_handle_popup_confirm(_popup_yes_hovered)
+		if event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_X:
+			if abs(event.axis_value) < 0.2:
+				_popup_stick_ready = true
+			elif abs(event.axis_value) >= 0.6 and _popup_stick_ready:
+				_popup_stick_ready = false
+				if event.axis_value < 0 and not _popup_yes_hovered:
+					_popup_yes_hovered = true
+					_popup_no_hovered = false
+					_sfx_on.play()
+					queue_redraw()
+				elif event.axis_value > 0 and not _popup_no_hovered:
+					_popup_yes_hovered = false
+					_popup_no_hovered = true
+					_sfx_on.play()
+					queue_redraw()
 		return
 
 	# 決定: マウス左クリック or ゲームパッドA or Enter
@@ -638,6 +693,7 @@ func _input(event: InputEvent) -> void:
 		_popup_stage = StageSelectManager._zou_stage_idx
 		_popup_yes_hovered = true
 		_popup_no_hovered = false
+		_popup_stick_ready = true
 		_sfx_click.play()
 		queue_redraw()
 		return
@@ -646,6 +702,7 @@ func _input(event: InputEvent) -> void:
 		_popup_stage = _nearest
 		_popup_yes_hovered = true
 		_popup_no_hovered = false
+		_popup_stick_ready = true
 		_sfx_click.play()
 		queue_redraw()
 		return
@@ -705,7 +762,8 @@ func _input(event: InputEvent) -> void:
 			if not _esc_popup and _popup_stage < 0 and not _final_directing:
 				_esc_popup = true
 				_esc_popup_yes_hovered = false
-				_esc_popup_no_hovered = false
+				_esc_popup_no_hovered = true  # ゲームパッドはデフォルト「いいえ」を選択
+				_esc_popup_stick_ready = true
 				_sfx_click.play()
 				queue_redraw()
 
