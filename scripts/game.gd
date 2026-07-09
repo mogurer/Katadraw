@@ -1009,22 +1009,21 @@ func _setup_audio() -> void:
 	sfx_move.volume_db = -14.5
 	add_child(sfx_move)
 
-	if _debug_tools_enabled():
-		DebugSFXConfig.ensure_counted()
-		_sfx_ui_in = AudioStreamPlayer.new()
-		_sfx_ui_in.volume_db = -10.0
-		add_child(_sfx_ui_in)
-		_sfx_ui_in_timer = Timer.new()
-		_sfx_ui_in_timer.one_shot = true
-		add_child(_sfx_ui_in_timer)
-		_sfx_ui_in_timer.timeout.connect(_on_sfx_ui_in_timer_timeout)
-		_sfx_ui_out = AudioStreamPlayer.new()
-		_sfx_ui_out.volume_db = -10.0
-		add_child(_sfx_ui_out)
-		_sfx_ui_out_timer = Timer.new()
-		_sfx_ui_out_timer.one_shot = true
-		add_child(_sfx_ui_out_timer)
-		_sfx_ui_out_timer.timeout.connect(_on_sfx_ui_out_timer_timeout)
+	DebugSFXConfig.ensure_counted()
+	_sfx_ui_in = AudioStreamPlayer.new()
+	_sfx_ui_in.volume_db = -10.0
+	add_child(_sfx_ui_in)
+	_sfx_ui_in_timer = Timer.new()
+	_sfx_ui_in_timer.one_shot = true
+	add_child(_sfx_ui_in_timer)
+	_sfx_ui_in_timer.timeout.connect(_on_sfx_ui_in_timer_timeout)
+	_sfx_ui_out = AudioStreamPlayer.new()
+	_sfx_ui_out.volume_db = -10.0
+	add_child(_sfx_ui_out)
+	_sfx_ui_out_timer = Timer.new()
+	_sfx_ui_out_timer.one_shot = true
+	add_child(_sfx_ui_out_timer)
+	_sfx_ui_out_timer.timeout.connect(_on_sfx_ui_out_timer_timeout)
 
 	sfx_stageclear = AudioStreamPlayer.new()
 	sfx_stageclear.stream = _load_audio("res://assets/sounds/se_stageclear.wav")

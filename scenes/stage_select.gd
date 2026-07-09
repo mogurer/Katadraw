@@ -164,6 +164,8 @@ var _ctrl_held: bool = false   # Ctrlキー押下中フラグ
 var _esc_popup_yes_hovered: bool = false
 var _esc_popup_no_hovered: bool = false
 var _esc_popup_stick_ready: bool = true  # スティック左右スナップ用
+var _lt_ready: bool = true  # LTトリガースナップ用
+var _rt_ready: bool = true  # RTトリガースナップ用
 
 # --- ZOU ドット（zou_cleared 後）---
 var _zou_world_pos: Vector2 = Vector2.ZERO
@@ -180,6 +182,7 @@ var _dbg_preview: AudioStreamPlayer = null
 var _sfx_hover: AudioStreamPlayer = null
 var _sfx_click: AudioStreamPlayer = null
 var _sfx_on: AudioStreamPlayer = null
+var _sfx_se_preview: AudioStreamPlayer = null
 var _sfx_spot02: AudioStreamPlayer = null
 var _sfx_telop_soft: AudioStreamPlayer = null
 
@@ -204,6 +207,7 @@ var _bgm_expand_tween: Tween = null
 var _bgm_expanded: bool = false
 
 # --- 入力モード ---
+static var _saved_input_mode: int = 0  # シーン再生成をまたいで保持
 var _input_mode: int = 0  # 0 = KBM、1 = コントローラ
 
 # --- BGM ゾーン色 ---
@@ -233,9 +237,21 @@ var _rb_texture: Texture2D = null
 var _esc_key_texture: Texture2D = null
 var _start_pad_texture: Texture2D = null
 var _title_hint_style: StyleBoxFlat = null
+var _s_in_texture: Texture2D = null
+var _s_num_textures: Array[Texture2D] = []
+var _sfx_in_sel: int = 0
+var _sfx_in_panel_rect: Rect2 = Rect2()
+var _s_seki_texture: Texture2D = null
+var _lt_tex: Texture2D = null
+var _rt_tex: Texture2D = null
+var _z_key_tex: Texture2D = null
+var _x_key_tex: Texture2D = null
+var _sfx_out_sel: int = 0
+var _sfx_out_panel_rect: Rect2 = Rect2()
 
 
 func _ready() -> void:
+	_input_mode = _saved_input_mode
 	var mplus: Font = load("res://assets/fonts/Mplus2-Medium.otf")
 	if mplus != null:
 		mplus.fallbacks = [ThemeDB.fallback_font]
@@ -294,6 +310,9 @@ func _ready() -> void:
 	_sfx_on.stream = load("res://assets/sounds/se_on.wav")
 	_sfx_on.volume_db = -14.5
 	add_child(_sfx_on)
+	_sfx_se_preview = AudioStreamPlayer.new()
+	_sfx_se_preview.volume_db = -10.0
+	add_child(_sfx_se_preview)
 	_sfx_spot02 = AudioStreamPlayer.new()
 	_sfx_spot02.stream = load("res://assets/sounds/skill_airdash.wav")
 	_sfx_spot02.volume_db = -10.0
@@ -316,6 +335,16 @@ func _ready() -> void:
 	_title_hint_style.content_margin_right  = 10.0
 	_title_hint_style.content_margin_top    = 6.0
 	_title_hint_style.content_margin_bottom = 6.0
+	_s_in_texture = load("res://assets/UI/s_in.svg") as Texture2D
+	for i in range(1, 6):
+		_s_num_textures.append(load("res://assets/UI/s%02d.svg" % i) as Texture2D)
+	_sfx_in_sel = clampi(DebugSFXConfig.in_idx, 0, 4)
+	_s_seki_texture = load("res://assets/UI/s_seki.svg") as Texture2D
+	_lt_tex    = load("res://assets/UI/LT.svg")    as Texture2D
+	_rt_tex    = load("res://assets/UI/RT.svg")    as Texture2D
+	_z_key_tex = load("res://assets/UI/Z_key.svg") as Texture2D
+	_x_key_tex = load("res://assets/UI/X_key.svg") as Texture2D
+	_sfx_out_sel = clampi(DebugSFXConfig.out_idx, 0, 4)
 	# 直前クリアで解放されたステージがあれば演出を開始する
 	var unlocked: Array[int] = StageSelectManager.last_unlocked_ids.duplicate()
 	StageSelectManager.last_unlocked_ids.clear()
@@ -682,6 +711,39 @@ func _input(event: InputEvent) -> void:
 					queue_redraw()
 		return
 
+	# 引力SE選択ラベルのクリック
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if not _final_directing and _sfx_in_panel_rect.size.x > 0 and _sfx_in_panel_rect.has_point(event.position):
+			var se_icon_size: float = 26.0
+			var se_gap: float = 30.0
+			var se_pad_x: float = 10.0
+			var rel_x: float = event.position.x - _sfx_in_panel_rect.position.x - se_pad_x
+			for i in range(5):
+				var icon_left: float = (se_icon_size + se_gap) * (i + 1)
+				if rel_x >= icon_left and rel_x < icon_left + se_icon_size:
+					if _sfx_in_sel != i:
+						_sfx_in_sel = i
+						DebugSFXConfig.in_idx = i
+						_preview_se(DebugSFXConfig.in_path(i))
+						queue_redraw()
+					return
+			return  # パネル内クリックをコンシューム
+		elif not _final_directing and _sfx_out_panel_rect.size.x > 0 and _sfx_out_panel_rect.has_point(event.position):
+			var se_icon_size: float = 26.0
+			var se_gap: float = 30.0
+			var se_pad_x: float = 10.0
+			var rel_x: float = event.position.x - _sfx_out_panel_rect.position.x - se_pad_x
+			for i in range(5):
+				var icon_left: float = (se_icon_size + se_gap) * (i + 1)
+				if rel_x >= icon_left and rel_x < icon_left + se_icon_size:
+					if _sfx_out_sel != i:
+						_sfx_out_sel = i
+						DebugSFXConfig.out_idx = i
+						_preview_se(DebugSFXConfig.out_path(i))
+						queue_redraw()
+					return
+			return
+
 	# 決定: マウス左クリック or ゲームパッドA or Enter
 	var is_confirm: bool = (
 		(event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT)
@@ -728,6 +790,10 @@ func _input(event: InputEvent) -> void:
 			_bgm_lr_collapse_timer = 0.5
 			if not _bgm_expanded:
 				_bgm_do_expand()
+		elif event.keycode == KEY_Z:
+			_cycle_sfx_in()
+		elif event.keycode == KEY_X:
+			_cycle_sfx_out()
 
 	# 右クリック保持で BGM 拡大パネル表示
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and _popup_stage < 0 and not _esc_popup:
@@ -772,6 +838,21 @@ func _input(event: InputEvent) -> void:
 		_bgm_x_btn_held = false
 		if not _bgm_right_click_held:
 			_bgm_do_collapse()
+
+	# LT/RT トリガーでSE順送り（ポップアップ非表示中のみ）
+	if event is InputEventJoypadMotion and _popup_stage < 0 and not _esc_popup:
+		if event.axis == JOY_AXIS_TRIGGER_LEFT:
+			if event.axis_value < 0.2:
+				_lt_ready = true
+			elif event.axis_value >= 0.5 and _lt_ready:
+				_lt_ready = false
+				_cycle_sfx_in()
+		elif event.axis == JOY_AXIS_TRIGGER_RIGHT:
+			if event.axis_value < 0.2:
+				_rt_ready = true
+			elif event.axis_value >= 0.5 and _rt_ready:
+				_rt_ready = false
+				_cycle_sfx_out()
 
 
 func _draw() -> void:
@@ -945,6 +1026,65 @@ func _draw() -> void:
 			draw_texture_rect(icon_tex, Rect2(panel_x + pad_x, panel_y + pad_y, icon_w, icon_h), false)
 		draw_string(_font, Vector2(panel_x + pad_x + icon_w + gap, panel_y + pad_y + icon_h * 0.78),
 			hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs, Color.WHITE)
+
+		# --- 引力SE設定ラベル ---
+		var se_icon_size: float = 26.0
+		var se_gap: float = 30.0
+		var se_pad_x: float = 10.0
+		var se_pad_y: float = 6.0
+		var n_se: int = 6
+		var se_content_w: float = se_icon_size * n_se + se_gap * (n_se - 1)
+		var se_panel_w: float = se_content_w + se_pad_x * 2.0
+		var se_panel_h: float = se_icon_size + se_pad_y * 2.0
+		var se_panel_x: float = panel_x + panel_w + 80.0
+		var se_panel_y: float = vp.y - 14.0 - se_panel_h
+		# ヒント幅を先算出してパネルを拡張（ヒントはパネル内右端に収める）
+		var se_hint_h: float = se_icon_size * 0.85
+		var in_hint_tex: Texture2D = _lt_tex if _input_mode == 1 else _z_key_tex
+		var in_hint_w: float = 0.0
+		if in_hint_tex != null:
+			in_hint_w = se_hint_h * float(in_hint_tex.get_width()) / float(in_hint_tex.get_height())
+		_sfx_in_panel_rect = Rect2(se_panel_x, se_panel_y, se_panel_w + 30.0 + in_hint_w + 15.0, se_panel_h)
+		draw_style_box(_title_hint_style, _sfx_in_panel_rect)
+		var se_iy: float = se_panel_y + se_pad_y
+		if _s_in_texture != null:
+			draw_texture_rect(_s_in_texture,
+				Rect2(se_panel_x + se_pad_x, se_iy, se_icon_size, se_icon_size), false)
+		for i in range(5):
+			if i < _s_num_textures.size() and _s_num_textures[i] != null:
+				var se_ix: float = se_panel_x + se_pad_x + (se_icon_size + se_gap) * (i + 1)
+				var nc: Color = Color.WHITE if _sfx_in_sel == i else Color(0.518, 0.506, 0.506)
+				draw_texture_rect(_s_num_textures[i], Rect2(se_ix, se_iy, se_icon_size, se_icon_size), false, nc)
+		# 引力SEキーヒント（Z_key / LT）：コンテンツ右端から30px
+		if in_hint_tex != null:
+			var iy_hint: float = se_panel_y + (se_panel_h - se_hint_h) * 0.5
+			draw_texture_rect(in_hint_tex,
+				Rect2(se_panel_x + se_panel_w + 30.0, iy_hint, in_hint_w, se_hint_h), false, Color("#338FFF"))
+
+		# --- 斥力SE設定ラベル ---
+		# 斥力ヒント幅を先算出してパネルを拡張
+		var out_hint_tex: Texture2D = _rt_tex if _input_mode == 1 else _x_key_tex
+		var out_hint_w: float = 0.0
+		if out_hint_tex != null:
+			out_hint_w = se_hint_h * float(out_hint_tex.get_width()) / float(out_hint_tex.get_height())
+		var seki_panel_x: float = _sfx_in_panel_rect.end.x + 40.0
+		var seki_panel_y: float = vp.y - 14.0 - se_panel_h
+		_sfx_out_panel_rect = Rect2(seki_panel_x, seki_panel_y, se_panel_w + 30.0 + out_hint_w + 15.0, se_panel_h)
+		draw_style_box(_title_hint_style, _sfx_out_panel_rect)
+		var seki_iy: float = seki_panel_y + se_pad_y
+		if _s_seki_texture != null:
+			draw_texture_rect(_s_seki_texture,
+				Rect2(seki_panel_x + se_pad_x, seki_iy, se_icon_size, se_icon_size), false)
+		for i in range(5):
+			if i < _s_num_textures.size() and _s_num_textures[i] != null:
+				var seki_ix: float = seki_panel_x + se_pad_x + (se_icon_size + se_gap) * (i + 1)
+				var oc: Color = Color.WHITE if _sfx_out_sel == i else Color(0.518, 0.506, 0.506)
+				draw_texture_rect(_s_num_textures[i], Rect2(seki_ix, seki_iy, se_icon_size, se_icon_size), false, oc)
+		# 斥力SEキーヒント（X_key / RT）：コンテンツ右端から30px
+		if out_hint_tex != null:
+			var oy_hint: float = seki_panel_y + (se_panel_h - se_hint_h) * 0.5
+			draw_texture_rect(out_hint_tex,
+				Rect2(seki_panel_x + se_panel_w + 30.0, oy_hint, out_hint_w, se_hint_h), false, Color("#EB2E61"))
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
@@ -1947,6 +2087,31 @@ func _is_debug() -> bool:
 	return OS.has_feature("editor") or Engine.is_editor_hint()
 
 
+func _preview_se(path: String) -> void:
+	if _sfx_se_preview == null:
+		return
+	if FileAccess.file_exists(path):
+		_sfx_se_preview.stream = load(path)
+		_sfx_se_preview.stop()
+		_sfx_se_preview.play()
+
+
+func _cycle_sfx_in() -> void:
+	var count: int = maxi(DebugSFXConfig.in_count, 1)
+	_sfx_in_sel = (_sfx_in_sel + 1) % count
+	DebugSFXConfig.in_idx = _sfx_in_sel
+	_preview_se(DebugSFXConfig.in_path(_sfx_in_sel))
+	queue_redraw()
+
+
+func _cycle_sfx_out() -> void:
+	var count: int = maxi(DebugSFXConfig.out_count, 1)
+	_sfx_out_sel = (_sfx_out_sel + 1) % count
+	DebugSFXConfig.out_idx = _sfx_out_sel
+	_preview_se(DebugSFXConfig.out_path(_sfx_out_sel))
+	queue_redraw()
+
+
 func _find_zou_stage_idx() -> int:
 	# [DEBUG] キャッシュを強制リセットしてマニフェスト変更を反映させる
 	StageData._stages_cache_ready = false
@@ -2341,7 +2506,7 @@ func _setup_bgm_ui() -> void:
 	_btn_prev.flat = true
 	_btn_prev.focus_mode = Control.FOCUS_NONE
 	_btn_prev.expand_icon = true
-	_btn_prev.custom_minimum_size = Vector2(36, 20)
+	_btn_prev.custom_minimum_size = Vector2(45, 25)
 	if _left_q_texture != null:
 		_btn_prev.icon = _left_q_texture
 	else:
@@ -2367,7 +2532,7 @@ func _setup_bgm_ui() -> void:
 	_btn_next.flat = true
 	_btn_next.focus_mode = Control.FOCUS_NONE
 	_btn_next.expand_icon = true
-	_btn_next.custom_minimum_size = Vector2(36, 20)
+	_btn_next.custom_minimum_size = Vector2(45, 25)
 	if _right_e_texture != null:
 		_btn_next.icon = _right_e_texture
 	else:
@@ -2605,6 +2770,7 @@ func _set_input_mode(mode: int) -> void:
 	if _input_mode == mode:
 		return
 	_input_mode = mode
+	_saved_input_mode = mode
 	_update_bgm_button_labels()
 	queue_redraw()
 

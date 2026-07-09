@@ -1282,16 +1282,15 @@ func update_drag_physics(delta: float) -> void:
 	if not player_position_initialized:
 		_reset_player_position()
 
-	# [DEBUG] 引力・斥力の遷移を検出してSEを制御
-	if OS.has_feature("editor") or Engine.is_editor_hint():
-		if player_force_attracting and not _prev_force_attracting:
-			_game.play_sfx_ui_in()
-		elif not player_force_attracting and _prev_force_attracting:
-			_game.stop_sfx_ui_in()
-		if player_force_repelling and not _prev_force_repelling:
-			_game.play_sfx_ui_out()
-		elif not player_force_repelling and _prev_force_repelling:
-			_game.stop_sfx_ui_out()
+	# 引力・斥力の遷移を検出してSEを制御
+	if player_force_attracting and not _prev_force_attracting:
+		_game.play_sfx_ui_in()
+	elif not player_force_attracting and _prev_force_attracting:
+		_game.stop_sfx_ui_in()
+	if player_force_repelling and not _prev_force_repelling:
+		_game.play_sfx_ui_out()
+	elif not player_force_repelling and _prev_force_repelling:
+		_game.stop_sfx_ui_out()
 	_prev_force_attracting = player_force_attracting
 	_prev_force_repelling = player_force_repelling
 
