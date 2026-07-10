@@ -2344,7 +2344,7 @@ func config_mouse_confine_ui_label() -> String:
 
 
 func _center_window() -> void:
-	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(0)
+	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(DisplayServer.get_primary_screen())
 	var win_size: Vector2i = get_window().get_size_with_decorations()
 	get_window().position = screen_rect.position + (screen_rect.size / 2 - win_size / 2)
 
