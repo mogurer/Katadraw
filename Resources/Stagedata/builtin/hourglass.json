@@ -1,10 +1,10 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 560.0,
 		"min_radius": 320.0,
-		"num_points": 21,
+		"num_points": 20,
 		"shape_type": "fish",
 		"type": "hourglass",
 		"variance": 0.15
@@ -12,8 +12,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ここに図形設計時のメモなどを残してもいい",
-		"stage_name": "すなどけい",
-		"locale_key": "STAGE_HOURGLASS"
+		"locale_key": "STAGE_HOURGLASS",
+		"stage_name": "すなどけい"
 	},
 	"schema_version": 1.0,
 	"shape": {

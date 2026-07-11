@@ -64,7 +64,7 @@ var min_radius: float = 0.0
 var max_radius: float = 0.0
 var clear_threshold: float = 5.0
 var num_points: int = 12
-var display_rate_min_pct: float = 50.0  # 実現率表示の下限。min_pct～目標 を 0～100 にマッピング
+var display_rate_min_pct: float = 0.0  # 実現率表示の下限。スナップ方式では 0 始まりのため 0.0 固定
 
 # --- Circle metrics (primary / group 1) ---
 var current_centroid: Vector2 = Vector2.ZERO
@@ -285,7 +285,7 @@ func _apply_hud_correspondence_scale() -> void:
 	if ideal_outline_points.is_empty():
 		return
 	correspondence_scale = hud_guide_scale
-	if stage_type == "triangle":
+	if stage_type == "triangle" or stage_type == "circle":
 		ideal_display_radius = hud_guide_scale
 
 
@@ -572,6 +572,20 @@ func _rebuild_initial_points_hud_hex_ring_outward(point_positions: Array[Vector2
 
 
 ## 正方形・4 点: 各理想角に対応する位置を、角から重心へ HUD_SPAWN_SQUARE_CORNER_INWARD だけ内側に固定
+## 正三角形: 下辺2点をコーナー位置に置いて事前スナップ対象とし、頂上は中心からスタート。
+## コーナー順は shape_corner_points と揃える: 0=頂上, 1=右下, 2=左下
+func _rebuild_initial_points_hud_triangle_bottom_snap(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
+	var center: Vector2 = hud_guide_center
+	var r: float = hud_guide_scale  # guide_radius_val ではなく HUD スケール（recompute_hud_guide_layout 後）
+	var sq3: float = sqrt(3.0) / 2.0
+	# KATA 0: 頂上（center→天頂を3等分して天頂寄り2/3の位置からスタート）
+	var apex: Vector2 = center + Vector2(0.0, -1.0) * r
+	point_positions.append(center.lerp(apex, 2.0 / 3.0))
+	point_positions.append(center + Vector2(sq3,  0.5) * r) # KATA 1: 右下（事前スナップ）
+	point_positions.append(center + Vector2(-sq3, 0.5) * r) # KATA 2: 左下（事前スナップ）
+	return true
+
+
 func _rebuild_initial_points_hud_square_attract_friendly(point_positions: Array[Vector2], _viewport_size: Vector2) -> bool:
 	var corners: Array[Vector2] = _hud_square_corner_world_positions()
 	if corners.size() != 4:
@@ -615,6 +629,11 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 		return
 	point_positions.clear()
 
+	# 正三角形: 下辺2点をコーナー位置に配置（事前スナップ）、頂上は中心からスタート
+	if stage_type == "triangle" and num_points == 3:
+		if _rebuild_initial_points_hud_triangle_bottom_snap(point_positions, viewport_size):
+			return
+
 	# 正方形: 4 角を理想対応に合わせ、角からわずかに内側（引力ですぐガイドへ）
 	if stage_type == "square" and num_points == 4:
 		if _rebuild_initial_points_hud_square_attract_friendly(point_positions, viewport_size):
@@ -631,12 +650,6 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 	if stage_type == "hexagon" and num_points == 6:
 		if _rebuild_initial_points_hud_hex_ring_outward(point_positions, viewport_size):
 			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
-			return
-
-	# 円: 全点をガイド円周上に置き、下半分（画面 +y 側）に偏って配置
-	if stage_type == "circle":
-		if _rebuild_initial_points_hud_circle_guide_lower_bias(point_positions, viewport_size):
-			_finalize_hud_spawn_points_circle_on_guide(point_positions, viewport_size)
 			return
 
 	# 単一閉曲線ステージ（fish / mug / heptagram_silhouette / rugby_ball 等）ほか、
@@ -707,6 +720,15 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			# スコア用: 正三角形の頂点（単位スケール、弧なし）
 			_score_verts_norm = [Vector2(0.0, -1.0), Vector2(-sqrt(3.0) / 2.0, 0.5), Vector2(sqrt(3.0) / 2.0, 0.5)]
 			_score_arcs_norm = {}
+			# スナップ用: 頂点を時計回りで定義（square/hexagon と同様）
+			# corner 0=頂上, 1=右下, 2=左下 — KATA点の結合順と対応
+			correspondence_scale = guide_radius_val
+			var _sq3: float = sqrt(3.0) / 2.0
+			shape_corner_points = [
+				Vector2(0.0, -1.0),
+				Vector2(_sq3,  0.5),
+				Vector2(-_sq3, 0.5),
+			]
 		"circle":
 			_generate_circle_shape(shape_center, point_positions, cfg)
 			correspondence_scale = guide_radius_val
@@ -769,7 +791,7 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		recompute_hud_guide_layout(shape_center, viewport_size)
 	if not skip_hud_initial_layout:
 		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
-	if current_stage >= 0 and stage_type not in ["triangle", "square", "hexagon", "circle"]:
+	if current_stage >= 0 and stage_type not in ["triangle", "square", "hexagon"]:
 		_constrain_spawn_to_edge_band(point_positions, viewport_size)
 	# ステージ切り替え時は前ステージのキャッシュを破棄し、必ずフル計算を行う
 	_hausdorff_call_counter = 0
@@ -2306,16 +2328,10 @@ func calculate_metrics(point_positions: Array[Vector2]) -> void:
 	current_smoothness_error = 0.0
 	current_smoothness = 100.0
 
-	# --- 一致率（スロットル付き） ---
-	if _run_hausdorff_this_call:
-		_hausdorff_cached_err = _eval_per_edge_score_world(point_positions)
-		# スナップショットを更新（次回の静止検知の基準点）
-		_hausdorff_snapshot.resize(n_pts)
-		for i in range(n_pts):
-			_hausdorff_snapshot[i] = point_positions[i]
-	current_circularity_error = _hausdorff_cached_err
-	current_circularity = maxf(0.0, 100.0 - _hausdorff_cached_err)
-	_rebuild_accuracy_alpha_cache(point_positions)
+	# --- Hausdorff 一致率: スナップ判定に切り替えたため無効化 ---
+	# _eval_per_edge_score_world は重いため呼ばない。current_circularity は game.gd で上書きされる。
+	current_circularity_error = 0.0
+	current_circularity = 100.0
 
 
 func _rebuild_accuracy_alpha_cache(point_positions: Array[Vector2]) -> void:

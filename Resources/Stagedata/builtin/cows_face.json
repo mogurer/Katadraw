@@ -1,11 +1,11 @@
 ﻿{
 	"config": {
 		"clear_pct": 99.5,
-		"display_rate_min_pct": 80.0,
+		"display_rate_min_pct": 0.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 450.0,
 		"min_radius": 400.0,
-		"num_points": 22,
+		"num_points": 21,
 		"shape_type": "fish",
 		"type": "cows_face",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "ウシの顔",
-		"locale_key": "STAGE_COWS_FACE"
+		"locale_key": "STAGE_COWS_FACE",
+		"stage_name": "ウシの顔"
 	},
 	"schema_version": 1.0,
 	"shape": {

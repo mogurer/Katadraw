@@ -1,11 +1,11 @@
 ﻿{
 	"config": {
 		"clear_pct": 99.5,
-		"display_rate_min_pct": 80.0,
+		"display_rate_min_pct": 0.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 400.0,
 		"min_radius": 300.0,
-		"num_points": 19,
+		"num_points": 18,
 		"shape_type": "fish",
 		"type": "book",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "本",
-		"locale_key": "STAGE_BOOK"
+		"locale_key": "STAGE_BOOK",
+		"stage_name": "本"
 	},
 	"schema_version": 1.0,
 	"shape": {

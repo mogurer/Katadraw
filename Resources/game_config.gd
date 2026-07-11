@@ -5,13 +5,13 @@
 
 class_name GameConfig
 
-# --- 体験版 / 製品版 ---
-# true: 体験版（3ステージ）、false: 製品版（全ステージ）
-const EXPERIENCE_VERSION := false
+# --- ブランドカラー ---
+## ゲーム内の「インク色」（濃い紫）の正規定数。頂点・辺・自キャラ・UI 枠など全域で参照する。
+const INK_COLOR := Color("#433647")
 
-# --- デモ / 製品 ---
-# true: デモ版（タイトルから直接ゲーム開始）、false: 製品版（ステージセレクト経由）
-const IS_DEMO := false
+# --- 体験版 ---
+# true: 体験版（manifest_ex.json の10ステージをループなしで固定順プレイ）
+const IS_TRIAL := false
 
 ## 本編を「1 面だけ」繰り返しプレイするときのマスタ行インデックス（manifest / StageData.get_stages() の 0 始まり）。
 ## -1 で無効（通常は全ステージを順にプレイ）。例: 星 10 点のみ試すなら 3（star_10.json の並び）
@@ -42,13 +42,25 @@ static func get_max_stage_index() -> int:
 	var rows: Array = get_play_stage_rows()
 	if rows.is_empty():
 		return -1
-	if EXPERIENCE_VERSION:
-		return mini(2, rows.size() - 1)
 	return mini(50, rows.size() - 1)
 
 
 static func get_stage_count() -> int:
 	return get_max_stage_index() + 1
+
+
+static func get_trial_stage_ids() -> Array[int]:
+	var f := FileAccess.open("res://data/manifest_ex.json", FileAccess.READ)
+	if f == null:
+		return []
+	var data = JSON.parse_string(f.get_as_text())
+	if not data is Dictionary:
+		return []
+	var raw: Array = data.get("trial_stages", [])
+	var result: Array[int] = []
+	for v in raw:
+		result.append(int(v))
+	return result
 
 # --- レイアウト ---
 # 左側UIパネルの幅（画面幅に対する比率 0.0〜1.0）。0=パネルなし
@@ -95,3 +107,12 @@ const TWITTER_SHARE_TEXT_PATH := "res://Resources/Text/Twitter.txt"
 ## ファイル未同梱・読み取り失敗時に使う既定文（Twitter.txt と揃えること）
 const TWITTER_SHARE_TEXT_DEFAULT := "#KATADRAW"
 const TWITTER_INTENT_URL := "https://twitter.com/intent/tweet"
+
+# --- SE音量 ---
+## SE音量レベル（0〜10）から dB オフセットを返す共通ヘルパー。
+## 各 AudioStreamPlayer の volume_db = 基準dB + se_volume_offset_db(level) で統一する。
+## 0=ミュート(-80dB)、1〜10: -20dB〜+15dB（5で0dB）
+static func se_volume_offset_db(level: int) -> float:
+	if level <= 0:
+		return -80.0
+	return (level - 5) * 3.0

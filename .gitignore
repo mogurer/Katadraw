@@ -1,6 +1,9 @@
 # Godot 4+ specific ignores
 .godot/
 
+# Godot editor (Windows): GDExtension の一時コピー（~ 付き DLL）。エディタ終了で消える
+~*.dll
+
 # Godot-specific ignores
 *.translation
 

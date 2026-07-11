@@ -18,6 +18,7 @@ const _HUD_GUIDE_GLOW_LAYERS := 8
 const _PROX_GRID_CELL := 80.0
 
 var _game: Node2D
+var _draw_canvas: Node2D = null  # draw calls の転送先（設定時は draw_* のみここへ、property access は _game）
 var _renderer: UIRenderer
 
 ## 近接表示用ガイド辺空間グリッド（フレームをまたいで再利用）
@@ -156,15 +157,16 @@ func draw_hud_overlay_guide(alpha: float) -> void:
 
 # ---------- 近接ガイド表示（プレイ中） ----------
 
-const _REVEAL_RADIUS        := 150.0   # 近接表示半径（px）
-const _ON_GUIDE_DIST        := 12.0    # ガイド上判定距離（px）
-const _VERTEX_REVEAL_DIST   := 20.0    # 頂点上判定距離（px）
+const _REVEAL_RADIUS        := 150.0   # KATA→角の近接 / A+X 時の自キャラ周辺表示半径（px）
 const _REVEAL_SAMPLE_STEP   := 8.0     # サンプリング間隔（px）
-const _FULL_REVEAL_FADE_PX  := 50.0    # 完全表示セグメント端フェード距離（px）
+const _FULL_REVEAL_FADE_PX  := 50.0    # 半辺表示セグメント端フェード距離（px）
+const _CORNER_MARKER_RADIUS := 6.0     # 角のみ表示時のマーカー半径（px）
 
 
 ## プレイ中のガイド近接表示。draw_hud_overlay_guide の代替。
-## ガイド全体を非表示にした上で、自キャラ・ポイント周辺のみ浮かび上がらせる。
+## - コーナー吸着済み KATA: その角から前後それぞれ半辺を表示
+## - それ以外: 任意 KATA から 150px 以内の shape 角のみマーカー表示
+## - 自キャラ周辺: 通常は非表示 / A+X 同時押し中のみ 150px 圏でガイド線
 func draw_guide_proximity_reveal() -> void:
 	if not GameConfig.USE_SCREEN_HUD_GUIDE:
 		return
@@ -173,96 +175,55 @@ func draw_guide_proximity_reveal() -> void:
 	if n < 2:
 		return
 
-	# プローブ: 自キャラ + 全ポイント
-	var probes: Array[Vector2] = []
-	if _game.input_handler.has_player_avatar():
-		probes.append(_game.input_handler.player_position)
+	var ih: InputHandler = _game.input_handler
+	var kata_pts: Array[Vector2] = []
 	for p: Vector2 in _game.point_positions:
-		probes.append(p)
-	if probes.is_empty():
-		return
+		kata_pts.append(p)
 
 	var col: Color = _game.GUIDE_COLOR
 	var width: float = HUD_GUIDE_LINE_WIDTH_PX
 
-	# 各辺の端点ごとの開示フラグ
-	# reveal_from_a[si]: loop[si]（va）側の半辺を開示
-	# reveal_from_b[si]: loop[(si+1)%n]（vb）側の半辺を開示
-	# 両方 true → 辺全体を開示
-	var reveal_from_a: Array[bool] = []
-	var reveal_from_b: Array[bool] = []
-	reveal_from_a.resize(n)
-	reveal_from_b.resize(n)
-	reveal_from_a.fill(false)
-	reveal_from_b.fill(false)
-	# 空間グリッド経由で O(M×k) に削減（逆順ループ: ポイント → 近傍辺）
-	_rebuild_prox_grid_if_needed(loop)
-	var pcell: float = _PROX_GRID_CELL
-	for p: Vector2 in _game.point_positions:
-		var pcx0: int = int(floor((p.x - pcell) / pcell))
-		var pcx1: int = int(floor((p.x + pcell) / pcell))
-		var pcy0: int = int(floor((p.y - pcell) / pcell))
-		var pcy1: int = int(floor((p.y + pcell) / pcell))
-		for pcx in range(pcx0, pcx1 + 1):
-			for pcy in range(pcy0, pcy1 + 1):
-				var pk := Vector2i(pcx, pcy)
-				if not _prox_grid.has(pk):
-					continue
-				for pedge in (_prox_grid[pk] as Array):
-					var si: int = int(pedge[2])
-					if reveal_from_a[si] and reveal_from_b[si]:
-						continue  # 既に全開示済み
-					var va: Vector2 = pedge[0] as Vector2
-					var vb: Vector2 = pedge[1] as Vector2
-					if p.distance_to(va) < _VERTEX_REVEAL_DIST:
-						reveal_from_a[si] = true
-					elif p.distance_to(vb) < _VERTEX_REVEAL_DIST:
-						reveal_from_b[si] = true
-					elif _dist_to_seg(p, va, vb) < _ON_GUIDE_DIST:
-						reveal_from_a[si] = true
-						reveal_from_b[si] = true
+	var snapped_corner_indices: Dictionary = {}
+	var shape_corners: Array = _game.stage_manager.get_corner_positions_world()
+	var n_corners: int = shape_corners.size()
+	var n_kata: int = _game.point_positions.size()
+	for i in range(n_kata):
+		if not ih.is_point_corner_snapped(i):
+			continue
+		var ci: int = ih.get_point_snap_corner_index(i)
+		if ci < 0 or ci >= n_corners:
+			continue
+		snapped_corner_indices[ci] = true
 
-	# セグメント描画
-	for si in range(n):
-		var va: Vector2 = loop[si] as Vector2
-		var vb: Vector2 = loop[(si + 1) % n] as Vector2
-		var from_a: bool = reveal_from_a[si]
-		var from_b: bool = reveal_from_b[si]
-		if from_a and from_b:
-			# 辺全体を表示。隣接辺の vb/va 側が未開示のときのみ端をフェード
-			var fade_a: bool = not reveal_from_b[(si - 1 + n) % n]
-			var fade_b: bool = not reveal_from_a[(si + 1) % n]
-			if fade_a:
-				for p: Vector2 in probes:
-					if p.distance_to(va) < _REVEAL_RADIUS:
-						fade_a = false
-						break
-			if fade_b:
-				for p: Vector2 in probes:
-					if p.distance_to(vb) < _REVEAL_RADIUS:
-						fade_b = false
-						break
-			_draw_guide_seg_full(va, vb, col, width, fade_a, fade_b)
-		elif from_a:
-			# va 側の半辺のみ（va→中点）。中点側は常にフェード
-			var fade_at_va: bool = not reveal_from_b[(si - 1 + n) % n]
-			if fade_at_va:
-				for p: Vector2 in probes:
-					if p.distance_to(va) < _REVEAL_RADIUS:
-						fade_at_va = false
-						break
-			_draw_guide_seg_full(va, vb, col, width, fade_at_va, true, 0.0, 0.5)
-		elif from_b:
-			# vb 側の半辺のみ（中点→vb）。中点側は常にフェード
-			var fade_at_vb: bool = not reveal_from_a[(si + 1) % n]
-			if fade_at_vb:
-				for p: Vector2 in probes:
-					if p.distance_to(vb) < _REVEAL_RADIUS:
-						fade_at_vb = false
-						break
-			_draw_guide_seg_full(va, vb, col, width, true, fade_at_vb, 0.5, 1.0)
-		else:
-			_draw_guide_seg_proximity(va, vb, probes, col, width)
+	var corner_markers: Array[Vector2] = []
+	var rsq: float = _REVEAL_RADIUS * _REVEAL_RADIUS
+	for ci in range(n_corners):
+		if snapped_corner_indices.has(ci):
+			continue
+		var cp: Vector2 = shape_corners[ci] as Vector2
+		for p: Vector2 in kata_pts:
+			if p.distance_squared_to(cp) <= rsq:
+				corner_markers.append(cp)
+				break
+
+	# コーナー吸着: 論理角から前後それぞれ半分の辺
+	for ci in snapped_corner_indices:
+		if n_corners < 2:
+			continue
+		var cp: Vector2 = shape_corners[ci] as Vector2
+		var cp_prev: Vector2 = shape_corners[(ci - 1 + n_corners) % n_corners] as Vector2
+		var cp_next: Vector2 = shape_corners[(ci + 1) % n_corners] as Vector2
+		_draw_guide_seg_full(cp_prev, cp, col, width, true, false, 0.5, 1.0)
+		_draw_guide_seg_full(cp, cp_next, col, width, false, true, 0.0, 0.5)
+
+	for cp: Vector2 in corner_markers:
+		_draw_guide_corner_marker(cp, col)
+
+
+func _draw_guide_corner_marker(center: Vector2, col: Color) -> void:
+	var r: float = _CORNER_MARKER_RADIUS
+	_game.draw_circle(center, r * 1.35, Color(col.r, col.g, col.b, col.a * 0.35))
+	_game.draw_circle(center, r, col)
 
 
 func _draw_guide_seg_full(va: Vector2, vb: Vector2, col: Color, width: float,
@@ -486,9 +447,9 @@ func draw_clear_metrics(tx: float, y: float, tw: float) -> void:
 	var circ_display: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
 	match _game.stage_type:
 		"triangle", "square", "rhombus", "hexagon", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
-			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
+			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, GameConfig.INK_COLOR)
 		_:
-			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, Color(0.26, 0.21, 0.28))
+			_game.draw_string(_game.font, Vector2(tx, y + 196), _game.tr("CLEAR_CIRC_SMOOTH") % [circ_display, _game.current_smoothness], HORIZONTAL_ALIGNMENT_CENTER, tw, 34, GameConfig.INK_COLOR)
 
 
 # --- ユーティリティ ---
@@ -591,6 +552,100 @@ func capture_result_loops() -> Dictionary:
 func draw_clear_shapes(rect: Rect2) -> void:
 	"""ステージクリア画面に目標ガイドと最終形を rect 内に収めて重ねて描画"""
 	draw_result_thumbnail(rect, _get_ideal_vertex_loops(), _get_player_vertex_loops())
+
+
+func draw_ideal_only(rect: Rect2, color: Color = Color(0.9490, 0.1882, 0.3216), line_width: float = 4.0) -> void:
+	"""見本の図形のみを rect 内に大きく描画（クリア画面右パネル用）"""
+	var ideal_loops: Array = _get_ideal_vertex_loops()
+	if ideal_loops.is_empty():
+		return
+	var all: Array[Vector2] = []
+	for loop in ideal_loops:
+		all.append_array(loop)
+	if all.is_empty():
+		return
+	var min_p: Vector2 = all[0]
+	var max_p: Vector2 = all[0]
+	for p in all:
+		min_p.x = minf(min_p.x, p.x)
+		min_p.y = minf(min_p.y, p.y)
+		max_p.x = maxf(max_p.x, p.x)
+		max_p.y = maxf(max_p.y, p.y)
+	var size: Vector2 = max_p - min_p
+	var center_src: Vector2 = (min_p + max_p) * 0.5
+	if size.x < 1.0:
+		size.x = 1.0
+	if size.y < 1.0:
+		size.y = 1.0
+	var margin: float = 24.0
+	var avail_w: float = rect.size.x - margin * 2.0
+	var avail_h: float = rect.size.y - margin * 2.0
+	if avail_w < 1.0 or avail_h < 1.0:
+		return
+	var scale: float = minf(avail_w / size.x, avail_h / size.y)
+	var center_dst: Vector2 = rect.position + rect.size * 0.5
+	for loop in ideal_loops:
+		var verts: Array = loop
+		for i in range(verts.size()):
+			var a: Vector2 = (verts[i] - center_src) * scale + center_dst
+			var b: Vector2 = (verts[(i + 1) % verts.size()] - center_src) * scale + center_dst
+			_game.draw_line(a, b, color, line_width, true)
+
+
+func draw_ideal_filled(rect: Rect2, fill_color: Color, line_color: Color, line_width: float = 4.0, dot_radius: float = 6.0) -> void:
+	"""塗りつぶし＋頂点ドット付きで見本図形を描画（クリア画面の完成系表示用）"""
+	var ideal_loops: Array = _get_ideal_vertex_loops()
+	if ideal_loops.is_empty():
+		return
+	var all: Array[Vector2] = []
+	for loop in ideal_loops:
+		all.append_array(loop)
+	if all.is_empty():
+		return
+	var min_p: Vector2 = all[0]
+	var max_p: Vector2 = all[0]
+	for p in all:
+		min_p.x = minf(min_p.x, p.x)
+		min_p.y = minf(min_p.y, p.y)
+		max_p.x = maxf(max_p.x, p.x)
+		max_p.y = maxf(max_p.y, p.y)
+	var size: Vector2 = max_p - min_p
+	var center_src: Vector2 = (min_p + max_p) * 0.5
+	if size.x < 1.0: size.x = 1.0
+	if size.y < 1.0: size.y = 1.0
+	var margin: float = 24.0
+	var avail_w: float = rect.size.x - margin * 2.0
+	var avail_h: float = rect.size.y - margin * 2.0
+	if avail_w < 1.0 or avail_h < 1.0:
+		return
+	var scale: float = minf(avail_w / size.x, avail_h / size.y)
+	var center_dst: Vector2 = rect.position + rect.size * 0.5
+	# 頂点を変換
+	var transformed_loops: Array = []
+	for loop in ideal_loops:
+		var pts := PackedVector2Array()
+		for v in loop:
+			pts.append((v - center_src) * scale + center_dst)
+		transformed_loops.append(pts)
+	var dc: Node2D = _draw_canvas if _draw_canvas != null else _game
+	# 塗りつぶし
+	for pts in transformed_loops:
+		dc.draw_colored_polygon(pts, fill_color)
+	# 輪郭線
+	for pts in transformed_loops:
+		for i in range(pts.size()):
+			dc.draw_line(pts[i], pts[(i + 1) % pts.size()], line_color, line_width, true)
+	# 頂点ドット
+	var cos_rd: float = cos(_game.correspondence_rotation)
+	var sin_rd: float = sin(_game.correspondence_rotation)
+	var sc_d: float   = _game.correspondence_scale
+	for cp in _game.stage_manager.shape_corner_points:
+		var p: Vector2 = cp as Vector2
+		var tx: float = (p.x * cos_rd - p.y * sin_rd) * sc_d
+		var ty: float = (p.x * sin_rd + p.y * cos_rd) * sc_d
+		var w: Vector2 = _game.current_centroid + Vector2(tx, ty)
+		var dp: Vector2 = (w - center_src) * scale + center_dst
+		dc.draw_circle(dp, dot_radius, line_color)
 
 
 ## 保存済みループを rect 内にスケールして重ね描き（リザルト一覧サムネイル用）

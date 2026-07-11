@@ -12,7 +12,7 @@ config_version=5
 
 config/name="KATA-DRAW"
 run/main_scene="res://scenes/game.tscn"
-config/features=PackedStringArray("4.6")
+config/features=PackedStringArray("4.7")
 boot_splash/bg_color=Color(1, 1, 1, 1)
 boot_splash/show_image=false
 config/icon="res://assets/icons/icon.svg"
@@ -23,6 +23,7 @@ config/windows_native_icon="res://assets/icons/kataicon256.ico"
 BGMManager="*res://scripts/bgm/BGMManager.gd"
 SteamManager="*uid://di1gsd1cdiimu"
 StageSelectManager="*res://scripts/StageSelectManager.gd"
+TransitionManager="*res://scripts/TransitionManager.gd"
 
 [display]
 
@@ -30,6 +31,7 @@ window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/size/resizable=false
 window/stretch/mode="canvas_items"
+window/position/initial_position_type=1
 
 [editor]
 

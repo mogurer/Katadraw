@@ -82,27 +82,12 @@ const POINT_PAIR_REPULSE_DISTANCE := 64.0
 const _GUIDE_GRID_CELL := 80.0
 const POINT_PAIR_REPULSE_STRENGTH := 2600.0
 const POINT_PAIR_REPULSE_MIN_DISTANCE := 2.0
-## A+X 同時長押し: 頂点同士を押し広げて周上の等間隔に近づける追加斥力（長押しで増幅、上限あり）
-## 長押しは最大 3 秒で頭打ち。最大強さは旧実装（飽和時）比 2 倍。
-const AX_SPACING_HOLD_CAP_MS := 3000.0
-## A+X 「長押し」として均等化領域のチャージ・追加斥力などを許可するまでの最短時間（ms）。旧 0.5 は単位ズレ（0.5ms）だった。
-const AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS := 500.0
-## A+X 追加斥力は「多角形の辺で隣り合う頂点ペア」のみ（全ペアだと n² で描画・物理とも重い）。
-## 周上の等間隔化は主に隣接間隔の調整で足りる想定。
-## この距離より遠いペアには追加斥力は乗らない（大きい輪郭でも隣同士に効くよう余裕を持たせる）
-const AX_SPACING_REPULSE_DISTANCE := 400.0
-const AX_SPACING_REPULSE_STRENGTH := 10240.0
-const AX_SPACING_REPULSE_MIN_DISTANCE := 2.0
-const AX_SPACING_MAX_STRENGTH_MUL := 2.0
 ## ideal_points へのパッシブドリフト
 const IDEAL_VERTEX_SPRING := 8.0
 const IDEAL_VERTEX_REPEL_STRENGTH := 12.0
 const IDEAL_VERTEX_ATTRACT_RANGE := 200.0
 const IDEAL_VERTEX_OCCUPIED_RADIUS := 20.0
 const IDEAL_DRIFT_DURATION := 3.0
-## 均等化半径内での滞在累積（ms）から強さ係数 0〜1 に飽和させる時間
-const AX_SPACING_DWELL_RAMP_FULL_MS := 2500.0
-const AX_SPACING_DWELL_ACCUM_CAP_MS := 4000.0
 ## 頂点と非隣接辺が近づいたときの斥力（線の交差を抑える）
 const POINT_EDGE_REPULSE_DISTANCE := 56.0
 const POINT_EDGE_REPULSE_STRENGTH := 3400.0
@@ -169,6 +154,11 @@ var _stabilize_skip_frame: bool = false  # フレームスロットル用フラ�
 var _snap_corner_occupant: Dictionary = {}
 ## 各ポイントのスナップ状態: 0=未吸着, 1=コーナー吸着中, 2=辺吸着中
 var _snap_point_state: PackedByteArray = PackedByteArray()
+## playing 中に A+X（またはマウス左右）同時押し中（ガイド近接表示用）
+var ax_combo_held: bool = false
+## ネコアニメーション: A+X 立ち上がりエッジで true にセット。ui_renderer が消費する。
+var cat_anim_triggered: bool = false
+var _ax_combo_prev_held: bool = false
 ## スナップ先のワールド座標（吸着確定後の引き戻し先）
 var _snap_point_target: Array[Vector2] = []
 ## スナップ先のコーナーインデックス（-1 = 辺スナップ）
@@ -191,45 +181,6 @@ var _foldback_cooldown: int = 0
 var _debug_reconnect_highlight: Dictionary = {}
 const _DEBUG_RECONNECT_HIGHLIGHT_MS: int = 2000  # 2秒間赤表示
 
-# --- 物理パフォーマンス計測（デバッグ用） ---
-## 直近 N フレームの計測値を蓄積してオーバーレイに表示する
-const PERF_SAMPLE_FRAMES := 60
-var _perf_frame_us: Array[float] = []      # フレームごとの物理合計時間 (μs)
-var _perf_substeps: Array[int] = []        # フレームごとのサブステップ数
-var _perf_isect_us: Array[float] = []      # フレームごとの交差判定時間 (μs)
-## 外部参照用（UIRenderer から読む）
-var perf_avg_us: float = 0.0
-var perf_max_us: float = 0.0
-var perf_avg_substeps: float = 0.0
-var perf_avg_isect_us: float = 0.0
-var perf_isect_triggered: int = 0          # 今フレームの交差解消発動回数
-var _perf_last_isect_us: float = 0.0      # 直前サブステップの交差判定時間
-
-## フレーム計測値を記録して集計を更新する
-func _perf_record(frame_us: float, substeps: int, isect_us: float) -> void:
-	_perf_frame_us.append(frame_us)
-	_perf_substeps.append(substeps)
-	_perf_isect_us.append(isect_us)
-	if _perf_frame_us.size() > PERF_SAMPLE_FRAMES:
-		_perf_frame_us.pop_front()
-		_perf_substeps.pop_front()
-		_perf_isect_us.pop_front()
-	var sum_us: float = 0.0
-	var max_us: float = 0.0
-	var sum_ss: float = 0.0
-	var sum_is: float = 0.0
-	for v in _perf_frame_us:
-		sum_us += v
-		max_us = maxf(max_us, v)
-	for v in _perf_substeps:
-		sum_ss += v
-	for v in _perf_isect_us:
-		sum_is += v
-	var cnt: float = float(_perf_frame_us.size())
-	perf_avg_us = sum_us / cnt
-	perf_max_us = max_us
-	perf_avg_substeps = sum_ss / cnt
-	perf_avg_isect_us = sum_is / cnt
 const _ISECT_THROTTLE_EVERY: int = 3
 ## 鋭角折り返し（ヘアピン）検出の内積閾値。
 ## 連続する2辺の方向ベクトルの内積がこの値未満なら折り返しとみなす（-1.0=180°, 0.0=90°）。
@@ -327,6 +278,8 @@ var player_position: Vector2 = Vector2.ZERO
 var player_position_initialized: bool = false
 var player_force_attracting: bool = false
 var player_force_repelling: bool = false
+var _prev_force_attracting: bool = false  # [DEBUG] SE遷移検出用
+var _prev_force_repelling: bool = false   # [DEBUG] SE遷移検出用
 var player_has_motion_input: bool = false
 var player_force_active: bool = false
 var player_influenced_point_count: int = 0
@@ -346,18 +299,6 @@ var _empty_repulse_stationary_ms: float = 0.0
 var _empty_attract_stationary_ms: float = 0.0
 var _empty_repulse_radius_bonus: float = 0.0
 var _empty_attract_radius_bonus: float = 0.0
-## A+X（またはマウス左右同時）長押しで等間隔用斥力を有効にしているフレーム
-var _ax_spacing_active: bool = false
-var _ax_spacing_hold_ms: float = 0.0
-## A+X中の静止のみで増える均等化半径（引力・斥力と同じ幾何ボーナス）
-var _ax_spacing_region_stationary_ms: float = 0.0
-var _ax_spacing_region_radius_bonus: float = 0.0
-## A+X 中の stationary_charge が直前フレームから false→true になったとき用（移動後の再ウェイトだけに使う）
-var _ax_spacing_prev_stationary_for_region: bool = true
-## 上記のとき、領域チャージが再び進むまでの絶対時刻（msec）。0 のとき無効
-var _ax_spacing_region_charge_suppress_until_msec: int = 0
-## 均等化半径内での頂点別滞在累積（ms）。半径外へ出たフレームで 0 に戻す
-var _ax_spacing_vertex_dwell_ms: Array[float] = []
 ## ideal_points ドリフト: プレイヤーが離れた後も物理ループを継続する残り時間（秒）
 var _ideal_drift_timer: float = 0.0
 var _prev_player_force_active: bool = false
@@ -388,7 +329,7 @@ func is_bb_dragging() -> bool:
 func is_pad_grabbing_modifier_now() -> bool:
 	if _game.game_state != "playing" and _game.game_state != "rules":
 		return false
-	return player_force_attracting or player_force_repelling or player_force_active or _ax_spacing_active
+	return player_force_attracting or player_force_repelling or player_force_active
 
 
 func update_grab_state_for_mouse() -> void:
@@ -446,13 +387,6 @@ func reset_for_stage() -> void:
 	_empty_attract_stationary_ms = 0.0
 	_empty_repulse_radius_bonus = 0.0
 	_empty_attract_radius_bonus = 0.0
-	_ax_spacing_active = false
-	_ax_spacing_hold_ms = 0.0
-	_ax_spacing_region_stationary_ms = 0.0
-	_ax_spacing_region_radius_bonus = 0.0
-	_ax_spacing_prev_stationary_for_region = true
-	_ax_spacing_region_charge_suppress_until_msec = 0
-	_ax_spacing_vertex_dwell_ms.clear()
 	_mouse_rel_motion_for_charge = 0.0
 	_pad_move_ramp_ms = 0.0
 	_foldback_cooldown = 0
@@ -465,6 +399,7 @@ func reset_for_stage() -> void:
 	_snap_cached_guide_loops.clear()
 	snap_ramp_elapsed = 0.0
 	_reset_player_position()
+	_presnap_at_corners()
 
 
 func _reset_player_position() -> void:
@@ -1074,10 +1009,25 @@ func _select_point_by_direction_line(origin: Vector2, direction: Vector2) -> boo
 	return true
 
 
+func get_last_input_method() -> String:
+	return _last_input_method
+
+
+func sync_mouse_target_to_player() -> void:
+	_mouse_target = player_position
+
+
+func notify_pad_steering_active() -> void:
+	_last_input_method = "pad"
+	sync_mouse_target_to_player()
+
+
 ## マウス入力時の自キャラ lerp 追従。毎フレーム _process から呼ぶ。
 ## 最後の入力がマウスの場合のみ player_position を _mouse_target へ近づける。
 func process_mouse_lerp(delta: float) -> void:
 	if _last_input_method != "mouse":
+		return
+	if _game.game_state == "playing" and not _game.playing_mouse_steers_player:
 		return
 	if not player_position_initialized:
 		return
@@ -1089,48 +1039,33 @@ func process_mouse_lerp(delta: float) -> void:
 
 func process_pad(delta: float) -> void:
 	if _game.game_state != "playing" and _game.game_state != "rules":
+		ax_combo_held = false
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
 		grab_input_active = false
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
-		_ax_spacing_active = false
-		_ax_spacing_hold_ms = 0.0
-		_ax_spacing_region_stationary_ms = 0.0
-		_ax_spacing_region_radius_bonus = 0.0
-		_ax_spacing_prev_stationary_for_region = true
-		_ax_spacing_region_charge_suppress_until_msec = 0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.game_state == "rules" and _game.rules_focus_button:
+		ax_combo_held = false
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
 		grab_input_active = false
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
-		_ax_spacing_active = false
-		_ax_spacing_hold_ms = 0.0
-		_ax_spacing_region_stationary_ms = 0.0
-		_ax_spacing_region_radius_bonus = 0.0
-		_ax_spacing_prev_stationary_for_region = true
-		_ax_spacing_region_charge_suppress_until_msec = 0
 		_pad_move_ramp_ms = 0.0
 		return
 	if _game.point_positions.is_empty():
+		ax_combo_held = false
 		player_has_motion_input = false
 		player_force_attracting = false
 		player_force_repelling = false
 		grab_input_active = false
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
-		_ax_spacing_active = false
-		_ax_spacing_hold_ms = 0.0
-		_ax_spacing_region_stationary_ms = 0.0
-		_ax_spacing_region_radius_bonus = 0.0
-		_ax_spacing_prev_stationary_for_region = true
-		_ax_spacing_region_charge_suppress_until_msec = 0
 		_pad_move_ramp_ms = 0.0
 		return
 	if not player_position_initialized:
@@ -1158,7 +1093,12 @@ func process_pad(delta: float) -> void:
 	var pad_b: bool = Input.is_joy_button_pressed(0, JOY_BUTTON_B)
 	var mouse_left: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var mouse_right: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	_ax_spacing_active = false
+	var _ax_now: bool = (
+		_game.game_state == "playing"
+		and not pad_b
+		and ((pad_a and pad_x) or (mouse_left and mouse_right))
+	)
+	ax_combo_held = _ax_now
 
 	if pad_b:
 		player_force_repelling = false
@@ -1171,13 +1111,10 @@ func process_pad(delta: float) -> void:
 		# [つぎへ] 上では A は遷移用 — 斥力にしない
 		player_force_repelling = false
 		player_force_attracting = false
-	elif (
-		_game.game_state == "playing"
-		and not pad_b
-		and ((pad_a and pad_x) or (mouse_left and mouse_right))
-	):
-		# A+X 同時（またはマウス左右同時）: 自キャラ引力・斥力はオフにし、頂点間斥力のみ
-		_ax_spacing_active = true
+	elif _ax_now:
+		# A+X 同時（またはマウス左右同時）: ネコアニメーション（立ち上がりエッジで発火）
+		if not _ax_combo_prev_held:
+			cat_anim_triggered = true
 		player_force_repelling = false
 		player_force_attracting = false
 	else:
@@ -1195,12 +1132,8 @@ func process_pad(delta: float) -> void:
 	if pad_b:
 		player_force_repelling = false
 		player_force_attracting = false
-		_ax_spacing_active = false
 
-	if _ax_spacing_active:
-		_ax_spacing_hold_ms = minf(_ax_spacing_hold_ms + delta * 1000.0, AX_SPACING_HOLD_CAP_MS)
-	else:
-		_ax_spacing_hold_ms = 0.0
+	_ax_combo_prev_held = _ax_now
 
 	mouse_force_pressed = mouse_left or mouse_right
 
@@ -1273,36 +1206,6 @@ func process_pad(delta: float) -> void:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
 
-	# A+X 均等化領域: 上記と同じ stationary_charge。ホールド閾値・移動→再静止での再ウェイトは A 初回長押しと同程度に揃える。
-	if in_play_ef and _ax_spacing_active:
-		if stationary_charge and not _ax_spacing_prev_stationary_for_region:
-			if _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
-				_ax_spacing_region_charge_suppress_until_msec = (
-					Time.get_ticks_msec()
-					+ int(AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS)
-				)
-		_ax_spacing_prev_stationary_for_region = stationary_charge
-
-		var hold_ok_region: bool = _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS
-		var region_suppressed: bool = (
-			stationary_charge
-			and Time.get_ticks_msec() < _ax_spacing_region_charge_suppress_until_msec
-		)
-		var can_charge_ax_region: bool = stationary_charge and hold_ok_region and not region_suppressed
-		if can_charge_ax_region:
-			_ax_spacing_region_stationary_ms = minf(
-				_ax_spacing_region_stationary_ms + delta * 1000.0,
-				max_charge_ms
-			)
-		var tr_ax: float = 1.0 + _ax_spacing_region_stationary_ms / float(EMPTY_FORCE_RADIUS_TICK_MS)
-		tr_ax = minf(tr_ax, float(EMPTY_FORCE_RADIUS_TICK_CAP))
-		_ax_spacing_region_radius_bonus = _force_radius_bonus_smooth(tr_ax)
-	else:
-		_ax_spacing_region_stationary_ms = 0.0
-		_ax_spacing_region_radius_bonus = 0.0
-		_ax_spacing_prev_stationary_for_region = stationary_charge
-		_ax_spacing_region_charge_suppress_until_msec = 0
-
 	player_position += player_velocity * delta
 	if wish.length_squared() > 0.0001 or player_velocity.length_squared() > 3600.0:
 		moved = true
@@ -1313,12 +1216,12 @@ func process_pad(delta: float) -> void:
 	if moved:
 		_clamp_player_to_viewport()
 		_last_input_method = "pad"
+		notify_pad_steering_active()
 		_game.queue_redraw()
 	_refresh_hovered_point()
 	grab_input_active = (
 		_get_player_force_mode() != 0
 		or player_force_active
-		or _ax_spacing_active
 	)
 	_game.is_dragging = false
 
@@ -1378,6 +1281,19 @@ func update_drag_physics(delta: float) -> void:
 	_snap_ensure_arrays()
 	if not player_position_initialized:
 		_reset_player_position()
+
+	# 引力・斥力の遷移を検出してSEを制御
+	if player_force_attracting and not _prev_force_attracting:
+		_game.play_sfx_ui_in()
+	elif not player_force_attracting and _prev_force_attracting:
+		_game.stop_sfx_ui_in()
+	if player_force_repelling and not _prev_force_repelling:
+		_game.play_sfx_ui_out()
+	elif not player_force_repelling and _prev_force_repelling:
+		_game.stop_sfx_ui_out()
+	_prev_force_attracting = player_force_attracting
+	_prev_force_repelling = player_force_repelling
+
 	# [DISABLED] Layer 4: _ideal_drift_timer
 	# [DISABLED] Layer 1: snap_ramp_elapsed
 
@@ -1385,12 +1301,8 @@ func update_drag_physics(delta: float) -> void:
 		not player_force_active
 		and not _has_points_within_player_force()
 		and not _has_active_point_velocity()
-		and not _ax_spacing_active
 	):
-		_perf_record(0.0, 0, 0.0)
 		return
-
-	var _t_frame_start: int = Time.get_ticks_usec()
 
 	# ガイドデータをフレームごとに1回キャッシュ（サブステップで使い回すため、物理実行時のみ）
 	_snap_cached_corner_world = _game.stage_manager.get_corner_positions_world()
@@ -1398,16 +1310,12 @@ func update_drag_physics(delta: float) -> void:
 
 	var steps: int = maxi(1, int(ceil(delta / DRAG_STEP_MAX)))
 	var step_delta: float = delta / float(steps)
-	perf_isect_triggered = 0
 	var moved: bool = false
 	for _i in range(steps):
 		moved = _step_drag_physics(step_delta) or moved
 
 	# [DISABLED] Layer 4: _ideal_drift_timer = IDEAL_DRIFT_DURATION
 	_prev_player_force_active = player_force_active
-
-	var _t_frame_end: int = Time.get_ticks_usec()
-	_perf_record(float(_t_frame_end - _t_frame_start), steps, float(_perf_last_isect_us))
 
 	if moved:
 		_notify_points_changed()
@@ -1428,7 +1336,6 @@ func _step_drag_physics(delta: float) -> bool:
 	var before: Array[Vector2] = _game.point_positions.duplicate()
 
 	_ensure_drag_state_arrays()
-	_update_ax_spacing_vertex_dwell(delta)
 
 	var forces: Array[Vector2] = []
 	forces.resize(_game.point_positions.size())
@@ -1449,21 +1356,12 @@ func _step_drag_physics(delta: float) -> bool:
 	grab_input_active = (
 		player_force_active
 		or _get_player_force_mode() != 0
-		or _ax_spacing_active
 	)
 
-	# ガイド・ペア関連の力はすべて無効化。自キャラ操作（引力・斥力・A+X均等化）のみ有効。
-	if player_force_active or _ax_spacing_active:
-		if player_force_active:
-			var _ar: float = _get_effective_player_force_limit() + POINT_PAIR_REPULSE_DISTANCE
-			_build_phys_active_mask(player_position, _ar * _ar)
-		else:
-			_phys_mask_enabled = false
+	if player_force_active:
+		var _ar: float = _get_effective_player_force_limit() + POINT_PAIR_REPULSE_DISTANCE
+		_build_phys_active_mask(player_position, _ar * _ar)
 		_stabilize_skip_frame = not _stabilize_skip_frame
-		if not _stabilize_skip_frame or _ax_spacing_active:
-			if player_force_active or _ax_spacing_active:
-				if _ax_spacing_active and _ax_spacing_hold_ms >= AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
-					_apply_ax_spacing_equal_spacing_repulsion(forces)
 	_apply_playfield_edge_return_forces(forces, lo, hi)
 
 	# === スナップ力（頂点近接吸着 + 確定保持バネ + 未吸着分離）===
@@ -1490,7 +1388,6 @@ func _step_drag_physics(delta: float) -> bool:
 	if _foldback_cooldown > 0:
 		_foldback_cooldown -= 1
 	var topology_changed: bool = false
-	var _t_isect0: int = Time.get_ticks_usec()
 	if _isect_throttle == 0 and _has_any_unlocked_polygon_vertex():
 		var _n_pts: int = _game.point_positions.size()
 		var _now_ms: int = Time.get_ticks_msec()
@@ -1513,7 +1410,6 @@ func _step_drag_physics(delta: float) -> bool:
 					_game.point_positions[_pd].snapped(Vector2.ONE),
 				])
 			topology_changed = true
-			perf_isect_triggered += 1
 			_resolve_intersections_2opt(lo, hi)
 			_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS
 		elif _foldback_cooldown == 0:
@@ -1530,7 +1426,6 @@ func _step_drag_physics(delta: float) -> bool:
 					if _hi >= 0 and _hi < _n_pts:
 						_debug_reconnect_highlight[_hi] = _exp_ms
 				topology_changed = true
-				perf_isect_triggered += 1
 				var _fold_ok: bool = _resolve_foldback_at_vertex(fb_k)
 				if _fold_ok:
 					print("[FOLD]  折返解消: k=%d(ei=%d,ej=%d) dot=%.3f  pos:%v" % [
@@ -1543,11 +1438,13 @@ func _step_drag_physics(delta: float) -> bool:
 					print("[FOLD]  折返=交差と両立不可、現状維持: k=%d dot=%.3f" % [fb_k, _dot_v])
 					# 長いクールダウンで同じ試行を繰り返さない
 					_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS * 10
-	_perf_last_isect_us = float(Time.get_ticks_usec() - _t_isect0)
 
 	# 交差解消後: 位置が変わったスナップ点を解除（案Y: 交差解消優先）
 	if topology_changed:
 		_snap_release_far_points()
+
+	# スナップ状態の整合性チェック（ghost occupancy・二重スナップを検出・修正）
+	_snap_validate_and_fix_consistency()
 
 	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
@@ -1763,77 +1660,6 @@ func _apply_point_pair_repulsion(forces: Array[Vector2], grid: Dictionary) -> vo
 						forces[j] += force
 
 
-## ワールド座標の2頂点間。戻りは i→j 方向の斥力ベクトル（i に -v、j に +v を足す用）
-func _ax_spacing_pair_repulsion_force(pi: Vector2, pj: Vector2, strength_mul: float) -> Vector2:
-	var delta_v: Vector2 = pj - pi
-	var thr: float = AX_SPACING_REPULSE_DISTANCE
-	var dist_sq: float = delta_v.length_squared()
-	if dist_sq > thr * thr:
-		return Vector2.ZERO
-	var dist: float = maxf(sqrt(dist_sq), AX_SPACING_REPULSE_MIN_DISTANCE)
-	var falloff: float = 1.0 - dist / thr
-	var dir: Vector2 = delta_v / dist
-	return dir * (AX_SPACING_REPULSE_STRENGTH * strength_mul * falloff * falloff)
-
-
-## A+X 均等化が効く半径（`_get_effective_player_force_limit` と同形: 基準＋引力・斥力と同じ静止チャージボーナス）
-func get_ax_spacing_equalization_radius() -> float:
-	return PLAYER_FORCE_RADIUS + _game.ui_renderer.POINT_RADIUS + _ax_spacing_region_radius_bonus
-
-
-func _ax_spacing_dwell_weight(ms: float) -> float:
-	if ms <= 0.001:
-		return 0.0
-	var t: float = clampf(ms / maxf(AX_SPACING_DWELL_RAMP_FULL_MS, 1.0), 0.0, 1.0)
-	return t * t
-
-
-func _ax_spacing_edge_dwell_multiplier(i: int, j: int, i_in: bool, j_in: bool) -> float:
-	if not i_in and not j_in:
-		return 0.0
-	var wi: float = _ax_spacing_dwell_weight(_ax_spacing_vertex_dwell_ms[i]) if i_in else 0.0
-	var wj: float = _ax_spacing_dwell_weight(_ax_spacing_vertex_dwell_ms[j]) if j_in else 0.0
-	var m: float
-	if wi > 0.001 and wj > 0.001:
-		m = sqrt(wi * wj)
-	elif wi > 0.001:
-		m = wi
-	elif wj > 0.001:
-		m = wj
-	else:
-		return 0.0
-	return m * AX_SPACING_MAX_STRENGTH_MUL
-
-
-func _update_ax_spacing_vertex_dwell(delta_sec: float) -> void:
-	_ensure_drag_state_arrays()
-	if not _ax_spacing_active:
-		for k in range(_ax_spacing_vertex_dwell_ms.size()):
-			_ax_spacing_vertex_dwell_ms[k] = 0.0
-		return
-	var R: float = get_ax_spacing_equalization_radius()
-	var rsq: float = R * R
-	var pp: Vector2 = player_position
-	var dm: float = delta_sec * 1000.0
-	for i in range(_game.point_positions.size()):
-		if _is_locked(i):
-			_ax_spacing_vertex_dwell_ms[i] = 0.0
-			continue
-		var inside: bool = pp.distance_squared_to(_game.point_positions[i]) <= rsq
-		if inside:
-			_ax_spacing_vertex_dwell_ms[i] = minf(_ax_spacing_vertex_dwell_ms[i] + dm, AX_SPACING_DWELL_ACCUM_CAP_MS)
-		else:
-			_ax_spacing_vertex_dwell_ms[i] = 0.0
-
-
-func is_ax_spacing_mode_active() -> bool:
-	return _ax_spacing_active
-
-
-func get_ax_spacing_hold_ms() -> float:
-	return _ax_spacing_hold_ms
-
-
 ## 多角形の辺（walk 順またはインデックス順）のワールド座標端点。可視化フォールバック用
 func get_polygon_loop_edge_endpoints_world() -> Array:
 	var out: Array = []
@@ -1845,65 +1671,6 @@ func get_polygon_loop_edge_endpoints_world() -> Array:
 			continue
 		out.append({"from": _game.point_positions[ia], "to": _game.point_positions[ib]})
 	return out
-
-
-func get_ax_spacing_repulsion_debug_segments() -> Array:
-	"""描画用: A+X 等間隔斥力が作用する辺ごとに { from, to, magnitude }（ワールド座標）"""
-	var out: Array = []
-	if not _ax_spacing_active or _ax_spacing_hold_ms < AX_SPACING_MIN_HOLD_BEFORE_EFFECT_MS:
-		return out
-	var R: float = get_ax_spacing_equalization_radius()
-	var rsq: float = R * R
-	var pp: Vector2 = player_position
-	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
-	for e in edges:
-		var i: int = e.x
-		var j: int = e.y
-		if _is_locked(i) or _is_locked(j):
-			continue
-		var pi: Vector2 = _game.point_positions[i]
-		var pj: Vector2 = _game.point_positions[j]
-		var i_in: bool = pp.distance_squared_to(pi) <= rsq
-		var j_in: bool = pp.distance_squared_to(pj) <= rsq
-		if not i_in and not j_in:
-			continue
-		var em: float = _ax_spacing_edge_dwell_multiplier(i, j, i_in, j_in)
-		if em < 0.001:
-			continue
-		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, em)
-		var mag: float = fvec.length()
-		if mag < 0.05:
-			continue
-		out.append({"from": pi, "to": pj, "magnitude": mag})
-	return out
-
-
-func _apply_ax_spacing_equal_spacing_repulsion(forces: Array[Vector2]) -> void:
-	"""自キャラ中心半径内／滞在時間でゲートされた辺隣接ペアのみ、既存のアルゴで斥力追加。"""
-	var R: float = get_ax_spacing_equalization_radius()
-	var rsq: float = R * R
-	var pp: Vector2 = player_position
-	_ensure_drag_state_arrays()
-	var edges: Array[Vector2i] = _get_polygon_edges_for_repulsion()
-	for e in edges:
-		var i: int = e.x
-		var j: int = e.y
-		if _is_locked(i) or _is_locked(j):
-			continue
-		var pi: Vector2 = _game.point_positions[i]
-		var pj: Vector2 = _game.point_positions[j]
-		var i_in: bool = pp.distance_squared_to(pi) <= rsq
-		var j_in: bool = pp.distance_squared_to(pj) <= rsq
-		if not i_in and not j_in:
-			continue
-		var strength_mul: float = _ax_spacing_edge_dwell_multiplier(i, j, i_in, j_in)
-		if strength_mul < 0.001:
-			continue
-		var fvec: Vector2 = _ax_spacing_pair_repulsion_force(pi, pj, strength_mul)
-		if fvec.length_squared() < 1e-12:
-			continue
-		forces[i] -= fvec
-		forces[j] += fvec
 
 
 ## ガイド（辺・頂点の近傍）にいるほど CCW・点-辺斥力を弱める。1=そのまま、0=ほぼ無効
@@ -2427,10 +2194,6 @@ func _ensure_drag_state_arrays() -> void:
 		point_stop_frames.append(0)
 	while point_stop_frames.size() > _game.point_positions.size():
 		point_stop_frames.pop_back()
-	while _ax_spacing_vertex_dwell_ms.size() < _game.point_positions.size():
-		_ax_spacing_vertex_dwell_ms.append(0.0)
-	while _ax_spacing_vertex_dwell_ms.size() > _game.point_positions.size():
-		_ax_spacing_vertex_dwell_ms.pop_back()
 
 
 func _zero_all_point_velocities() -> void:
@@ -2880,6 +2643,31 @@ func _compute_vertex_locks(_nearest_features: Array) -> Dictionary:
 
 ## ===== 新スナップシステム（アリジゴク型）=====
 
+## ステージ開始時に、コーナー位置に一致するポイントを即座にスナップ確定させる。
+## 正三角形の下辺2点など、あらかじめコーナー位置に配置されたポイント向け。
+func _presnap_at_corners() -> void:
+	var corners: Array = _game.stage_manager.get_corner_positions_world()
+	if corners.is_empty():
+		return
+	_snap_ensure_arrays()
+	var n: int = _game.point_positions.size()
+	for i in range(n):
+		if _snap_point_state[i] != 0:
+			continue
+		var pos: Vector2 = _game.point_positions[i]
+		for ci in range(corners.size()):
+			if _snap_corner_occupant.has(ci):
+				continue
+			if pos.distance_to(corners[ci]) <= SNAP_CORNER_RADIUS:
+				_snap_point_state[i] = 1
+				_snap_point_target[i] = corners[ci]
+				_snap_point_corner_idx[i] = ci
+				_snap_corner_occupant[ci] = i
+				_game.play_sfx_spot()
+				_game.ui_renderer.trigger_snap_color(i)
+				break
+
+
 ## スナップ状態配列のサイズをポイント数に合わせる
 func _snap_ensure_arrays() -> void:
 	var n: int = _game.point_positions.size()
@@ -3006,6 +2794,8 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 				_snap_point_corner_idx[i] = best_ci
 				_game.point_positions[i] = target
 				point_velocities[i] = Vector2.ZERO
+				_game.play_sfx_spot()
+				_game.ui_renderer.trigger_snap_color(i)
 			else:
 				# 常時アプローチバネ力（スムーズ移動）
 				forces[i] += (target - pos) * eff_approach_spring
@@ -3139,13 +2929,26 @@ func is_snap_clear() -> bool:
 	return true
 
 
-## 最良サイクル一致数 / 全頂点数 (0.0〜1.0) を返す。部分スナップ中の進捗スコアとして使用
+## 全頂点が占有されているか（巡回順チェックなし）
+func is_all_corners_occupied() -> bool:
+	var n_corners: int = _game.stage_manager.shape_corner_points.size()
+	var n: int = _game.point_positions.size()
+	if n_corners == 0 or n == 0 or n != n_corners:
+		return false
+	return _snap_corner_occupant.size() == n_corners
+
+
+## スコア (0.0〜1.0) = (A + B) / (2N)
+## A: 頂点に乗っているポイント数、B: 最良サイクル順で一致しているポイント数
 func get_snap_score() -> float:
 	var n_corners: int = _game.stage_manager.shape_corner_points.size()
 	var n: int = _game.point_positions.size()
 	if n_corners == 0 or n == 0 or n != n_corners:
 		return 0.0
-	var best: int = 0
+	# A: 占有されている頂点数
+	var a: int = _snap_corner_occupant.size()
+	# B: 最良サイクル一致数（全N通りのオフセットを正転・逆転で試す）
+	var b: int = 0
 	for k in range(n):
 		var cnt_fwd: int = 0
 		var cnt_rev: int = 0
@@ -3157,8 +2960,8 @@ func get_snap_score() -> float:
 				cnt_fwd += 1
 			if occ == (k - ci + n) % n:
 				cnt_rev += 1
-		best = maxi(best, maxi(cnt_fwd, cnt_rev))
-	return float(best) / float(n_corners)
+		b = maxi(b, maxi(cnt_fwd, cnt_rev))
+	return float(a + b) / float(2 * n_corners)
 
 
 ## 近接スナップシステム: 頂点への近接バネ吸着 + 占有頂点からの斥力
@@ -3208,6 +3011,8 @@ func _apply_snap_vertex_forces(forces: Array[Vector2]) -> void:
 				_snap_point_corner_idx[i] = best_ci
 				_game.point_positions[i] = target
 				point_velocities[i] = Vector2.ZERO
+				_game.play_sfx_spot()
+				_game.ui_renderer.trigger_snap_color(i)
 			else:
 				# 近接バネ力
 				forces[i] += (target - pos) * SNAP_VERTEX_APPROACH_SPRING
@@ -3229,6 +3034,15 @@ func _apply_snap_vertex_forces(forces: Array[Vector2]) -> void:
 func _snap_permute_after_reorder(ord: PackedInt32Array) -> void:
 	var n: int = ord.size()
 	if n == 0 or _snap_point_state.size() != n or _snap_point_target.size() != n:
+		# サイズ不一致: 置換を安全に行えないため、全スナップ状態をリセットして整合性を復元する。
+		# 黙って return すると座標順序だけ書き換わり、スナップ状態が旧インデックスのまま残る。
+		push_warning("[snap] _snap_permute_after_reorder: サイズ不一致 ord=%d state=%d target=%d cidx=%d — 全スナップ状態をリセット" % [
+			n, _snap_point_state.size(), _snap_point_target.size(), _snap_point_corner_idx.size()])
+		_snap_corner_occupant.clear()
+		for i in range(_snap_point_state.size()):
+			_snap_point_state[i] = 0
+		for i in range(_snap_point_corner_idx.size()):
+			_snap_point_corner_idx[i] = -1
 		return
 	# 逆置換 (old_idx → new_idx)
 	var inv: PackedInt32Array = PackedInt32Array()
@@ -3250,13 +3064,95 @@ func _snap_permute_after_reorder(ord: PackedInt32Array) -> void:
 	_snap_point_state = new_state
 	_snap_point_target = new_target
 	_snap_point_corner_idx = new_cidx
-	# コーナー占有辞書のポイントインデックスを新インデックスに更新
+	# コーナー占有辞書のポイントインデックスを新インデックスに更新。
+	# old_pi の state が 0（ghost occupancy）のエントリは引き継がない。
 	var new_occ: Dictionary = {}
 	for ci in _snap_corner_occupant:
 		var old_pi: int = int(_snap_corner_occupant[ci])
-		if old_pi >= 0 and old_pi < n:
+		if old_pi >= 0 and old_pi < n and _snap_point_state[old_pi] == 1:
 			new_occ[ci] = inv[old_pi]
 	_snap_corner_occupant = new_occ
+
+
+## スナップ状態の整合性を毎フレーム検証し、ghost occupancy と二重スナップを修正する（方針2・3）
+func _snap_validate_and_fix_consistency() -> void:
+	var n: int = _game.point_positions.size()
+	if n == 0:
+		return
+	var sn: int = _snap_point_state.size()
+	var cn: int = _snap_point_corner_idx.size()
+	var corners: Array = _snap_cached_corner_world
+	var frame: int = Engine.get_process_frames()
+
+	# Pass 1: _snap_corner_occupant の ghost エントリを除去
+	# dict[ci]=pi なのに state[pi]!=1 または corner_idx[pi]!=ci のエントリ
+	var ghost_cis: Array[int] = []
+	for ci: int in _snap_corner_occupant:
+		var pi: int = int(_snap_corner_occupant[ci])
+		if pi < 0 or pi >= sn:
+			ghost_cis.append(ci)
+			push_warning("[snap] frame=%d ghost: ci=%d pi=%d (out of range, sn=%d n=%d)" % [frame, ci, pi, sn, n])
+			continue
+		var actual_state: int = int(_snap_point_state[pi])
+		var actual_ci: int = int(_snap_point_corner_idx[pi]) if pi < cn else -1
+		if actual_state != 1 or actual_ci != ci:
+			ghost_cis.append(ci)
+			push_warning("[snap] frame=%d ghost: ci=%d pi=%d state=%d corner_idx=%d (expected state=1 ci=%d)" % [
+				frame, ci, pi, actual_state, actual_ci, ci])
+	for ci: int in ghost_cis:
+		_snap_corner_occupant.erase(ci)
+
+	# Pass 2: 同一コーナーに state=1 が2つ以上存在する二重スナップを距離優先で解消
+	# 孤立スナップ解除（Pass 3）より先に実行することで、辞書が敗者を指していても
+	# 距離で正しい勝者を決定してから辞書を上書きできる。
+	var corner_claimants: Dictionary = {}
+	for i in range(mini(sn, n)):
+		if int(_snap_point_state[i]) != 1:
+			continue
+		var ci: int = int(_snap_point_corner_idx[i]) if i < cn else -1
+		if ci < 0:
+			continue
+		if not corner_claimants.has(ci):
+			corner_claimants[ci] = [] as Array
+		(corner_claimants[ci] as Array).append(i)
+
+	for ci: int in corner_claimants:
+		var pts: Array = corner_claimants[ci] as Array
+		if pts.size() <= 1:
+			continue
+		var pt_states: Array = pts.map(func(p: int) -> int: return int(_snap_point_state[p]))
+		push_warning("[snap] frame=%d DOUBLE SNAP ci=%d points=%s states=%s n=%d sn=%d" % [
+			frame, ci, str(pts), str(pt_states), n, sn])
+		var corner_pos: Vector2 = (corners[ci] as Vector2) if ci < corners.size() else Vector2.ZERO
+		var best_pi: int = -1
+		var best_d: float = INF
+		for pi: int in pts:
+			var d: float = _game.point_positions[pi].distance_to(corner_pos)
+			if d < best_d:
+				best_d = d
+				best_pi = pi
+		# 勝者を辞書に上書き（辞書が敗者を指していた場合も確実に更新）
+		_snap_corner_occupant[ci] = best_pi
+		for pi: int in pts:
+			if pi == best_pi:
+				continue
+			_snap_point_state[pi] = 0
+			if pi < cn:
+				_snap_point_corner_idx[pi] = -1
+
+	# Pass 3: state=1 なのに辞書と食い違うポイント（孤立スナップ）を解除
+	# Pass 2 で二重スナップが解消済みのため、辞書は正しい勝者を指している前提で動作する。
+	for i in range(mini(sn, n)):
+		if int(_snap_point_state[i]) != 1:
+			continue
+		var ci: int = int(_snap_point_corner_idx[i]) if i < cn else -1
+		var dict_owner: int = int(_snap_corner_occupant.get(ci, -1))
+		if ci < 0 or dict_owner != i:
+			push_warning("[snap] frame=%d orphan snap: pi=%d state=1 ci=%d dict_owner=%d" % [
+				frame, i, ci, dict_owner])
+			_snap_point_state[i] = 0
+			if i < cn:
+				_snap_point_corner_idx[i] = -1
 
 
 ## ===== 旧スナップシステム（未使用、互換性のため残存）=====
@@ -3453,6 +3349,8 @@ func _clamp_points_to_viewport() -> void:
 
 
 func _clamp_player_to_viewport() -> void:
+	if not _game.is_inside_tree():
+		return
 	var vp: Vector2 = _game.get_viewport_rect().size
 	var margin: float = PLAYER_RADIUS
 	player_position = player_position.clamp(Vector2(margin, margin), Vector2(vp.x - margin, vp.y - margin))
@@ -3548,6 +3446,26 @@ func _is_selected(idx: int) -> bool:
 
 func _is_locked(idx: int) -> bool:
 	return _game.stage_manager.is_locked(idx)
+
+
+func is_ax_combo_held() -> bool:
+	return ax_combo_held
+
+
+## コーナー吸着確定（_snap_point_state == 1）か
+func is_point_corner_snapped(idx: int) -> bool:
+	return idx < _snap_point_state.size() and _snap_point_state[idx] == 1
+
+
+func get_point_snap_corner_index(idx: int) -> int:
+	if idx < 0 or idx >= _snap_point_corner_idx.size():
+		return -1
+	return _snap_point_corner_idx[idx]
+
+
+## スナップ未確定のポイントかどうかを返す（ネコアニメーション描画用）
+func is_point_free(i: int) -> bool:
+	return i < _snap_point_state.size() and _snap_point_state[i] == 0
 
 
 func _notify_points_changed() -> void:

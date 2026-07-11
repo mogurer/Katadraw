@@ -1,18 +1,18 @@
-﻿{
+{
 	"config": {
 		"clear_pct": 99.5,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 400.0,
 		"min_radius": 200.0,
-		"num_points": 9,
+		"num_points": 20.0,
 		"shape_type": "fish",
 		"type": "waning_moon"
 	},
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "ひばち",
-		"stage_name": "三日月",
-		"locale_key": "STAGE_WANING_MOON"
+		"locale_key": "STAGE_WANING_MOON",
+		"stage_name": "三日月"
 	},
 	"schema_version": 1.0,
 	"shape": {

@@ -1,11 +1,11 @@
 ﻿{
 	"config": {
 		"clear_pct": 99.5,
-		"display_rate_min_pct": 80.0,
+		"display_rate_min_pct": 0.0,
 		"guide_follows_player_radius": 0.0,
 		"max_radius": 470.0,
 		"min_radius": 200.0,
-		"num_points": 31,
+		"num_points": 25,
 		"shape_type": "fish",
 		"type": "paramecium",
 		"variance": 0.15
@@ -13,8 +13,8 @@
 	"kind": "katadraw_custom_stage",
 	"meta": {
 		"description": "paramecium ゾウリムシ　ひばち",
-		"stage_name": "ゾウリムシ",
-		"locale_key": "STAGE_PARAMECIUM"
+		"locale_key": "STAGE_PARAMECIUM",
+		"stage_name": "ゾウリムシ"
 	},
 	"schema_version": 1.0,
 	"shape": {

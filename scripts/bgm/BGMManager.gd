@@ -14,7 +14,7 @@ extends Node
 # ---------- Track data ----------
 
 const TRACKS: Array[Dictionary] = [
-	{  # 0: ingame
+	{  # 0: ingame – 01-05
 		"intro": "res://assets/sounds/01-05/01-05_0000.ogg",
 		"motifs": [
 			"res://assets/sounds/01-05/01-05_0010.ogg",
@@ -34,7 +34,72 @@ const TRACKS: Array[Dictionary] = [
 			"res://assets/sounds/01-05/01-05_0150.ogg",
 		]
 	},
-	{  # 1: title
+	{  # 1: ingame – 01-06
+		"intro": "res://assets/sounds/01-06/01-06_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/01-06/01-06_0009.ogg",
+			"res://assets/sounds/01-06/01-06_0017.ogg",
+			"res://assets/sounds/01-06/01-06_0025.ogg",
+			"res://assets/sounds/01-06/01-06_0033.ogg",
+			"res://assets/sounds/01-06/01-06_0041.ogg",
+			"res://assets/sounds/01-06/01-06_0049.ogg",
+			"res://assets/sounds/01-06/01-06_0057.ogg",
+			"res://assets/sounds/01-06/01-06_0065.ogg",
+			"res://assets/sounds/01-06/01-06_0073.ogg",
+			"res://assets/sounds/01-06/01-06_0081.ogg",
+			"res://assets/sounds/01-06/01-06_0089.ogg",
+			"res://assets/sounds/01-06/01-06_0097.ogg",
+			"res://assets/sounds/01-06/01-06_0105.ogg",
+			"res://assets/sounds/01-06/01-06_0113.ogg",
+		]
+	},
+	{  # 2: ingame – 01-08
+		"intro": "res://assets/sounds/01-08/01-08_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/01-08/01-08_0009.ogg",
+			"res://assets/sounds/01-08/01-08_0017.ogg",
+			"res://assets/sounds/01-08/01-08_0025.ogg",
+			"res://assets/sounds/01-08/01-08_0033.ogg",
+			"res://assets/sounds/01-08/01-08_0041.ogg",
+			"res://assets/sounds/01-08/01-08_0049.ogg",
+			"res://assets/sounds/01-08/01-08_0057.ogg",
+			"res://assets/sounds/01-08/01-08_0065.ogg",
+			"res://assets/sounds/01-08/01-08_0073.ogg",
+			"res://assets/sounds/01-08/01-08_0081.ogg",
+			"res://assets/sounds/01-08/01-08_0089.ogg",
+			"res://assets/sounds/01-08/01-08_0097.ogg",
+			"res://assets/sounds/01-08/01-08_0105.ogg",
+			"res://assets/sounds/01-08/01-08_0113.ogg",
+			"res://assets/sounds/01-08/01-08_0121.ogg",
+		]
+	},
+	{  # 3: ingame – 02-03
+		"intro": "res://assets/sounds/02-03/02-03_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/02-03/02-03_0010.ogg",
+			"res://assets/sounds/02-03/02-03_0020.ogg",
+			"res://assets/sounds/02-03/02-03_0030.ogg",
+			"res://assets/sounds/02-03/02-03_0040.ogg",
+			"res://assets/sounds/02-03/02-03_0050.ogg",
+			"res://assets/sounds/02-03/02-03_0060.ogg",
+			"res://assets/sounds/02-03/02-03_0070.ogg",
+			"res://assets/sounds/02-03/02-03_0080.ogg",
+			"res://assets/sounds/02-03/02-03_0085.ogg",
+			"res://assets/sounds/02-03/02-03_0095.ogg",
+			"res://assets/sounds/02-03/02-03_0105.ogg",
+			"res://assets/sounds/02-03/02-03_0115.ogg",
+		]
+	},
+	{  # 4: ingame – 02-09
+		"intro": "res://assets/sounds/02-09/02-09_0000.ogg",
+		"motifs": [
+			"res://assets/sounds/02-09/02-09_0010.ogg",
+			"res://assets/sounds/02-09/02-09_0020.ogg",
+			"res://assets/sounds/02-09/02-09_0030.ogg",
+			"res://assets/sounds/02-09/02-09_0040.ogg",
+		]
+	},
+	{  # 5: title
 		"intro": "res://assets/sounds/Title/KATADRAW_Title_0000.ogg",
 		"motifs": [
 			"res://assets/sounds/Title/KATADRAW_Title_0010.ogg",
@@ -46,6 +111,12 @@ const TRACKS: Array[Dictionary] = [
 	},
 ]
 
+const _INGAME_TRACK_COUNT: int = 5
+
+const _BGM_ID_TO_TRACK_IDX: Dictionary = {
+	"01-06": 1, "01-08": 2, "02-03": 3, "02-09": 4
+}
+
 # ---------- Constants ----------
 
 const _BASE_VOLUME_DB: float = -8.5
@@ -55,6 +126,8 @@ const _COUNTDOWN_VOLUME_REDUCE_DB: float = -3.0  # カウントダウン中の�
 
 # ---------- State ----------
 
+var _ingame_track_idx: int = 0  # 現在選択中のインゲームBGM（0〜_INGAME_TRACK_COUNT-1）
+var _unlocked_track_indices: PackedInt32Array = PackedInt32Array([0])  # 解放済みトラックインデックス
 var _track_idx: int = 0
 var _motif_idx: int = 0
 var _in_intro: bool = false
@@ -74,6 +147,9 @@ var _countdown_active: bool = false
 # ①: デモ→ステージ1 無音待機。resume_ingame() から1秒後に play_ingame() を起動する。
 var _first_stage_pending: bool = false
 var _first_stage_bgm_pending: bool = false  # タイマーが有効かどうか
+
+# Zou: カウントダウン終了まで無音待機。resume_ingame() でタイトルBGMをイントロから開始。
+var _zou_bgm_pending: bool = false
 
 var _players: Array[AudioStreamPlayer] = []
 var _active_player: int = 0
@@ -141,7 +217,7 @@ func _process(delta: float) -> void:
 func play_title() -> void:
 	_stop_all()
 	_active_player = 0
-	_track_idx = 1
+	_track_idx = _INGAME_TRACK_COUNT  # title は末尾インデックス
 	_motif_idx = 0
 	_in_intro = true
 	_in_pre_countdown = false
@@ -155,11 +231,11 @@ func play_title() -> void:
 	_play_on_active(TRACKS[_track_idx]["intro"])
 
 
-## インゲームBGM開始（イントロ先頭から）。
+## インゲームBGM開始（イントロ先頭から）。選択中の _ingame_track_idx を使用。
 func play_ingame() -> void:
 	_stop_all()
 	_active_player = 0
-	_track_idx = 0
+	_track_idx = _ingame_track_idx
 	_motif_idx = 0
 	_in_intro = true
 	_in_pre_countdown = false
@@ -167,17 +243,36 @@ func play_ingame() -> void:
 	_countdown_active = false
 	_first_stage_pending = false
 	_first_stage_bgm_pending = false
+	_zou_bgm_pending = false
 	_clear_boost_active = false
 	_virtual_pos = 0.0
 	_virtual_elapsed = 0.0
 	_play_on_active(TRACKS[_track_idx]["intro"])
+
+
+## Zou ステージ用: カウントダウンが終わるまで無音で待機し、resume_ingame() でタイトルBGMをイントロから開始する。
+func start_zou_bgm() -> void:
+	_stop_all()
+	_active_player = 0
+	_track_idx = _INGAME_TRACK_COUNT  # title track (index 5)
+	_motif_idx = 0
+	_in_intro = false
+	_in_pre_countdown = false
+	_waiting_for_resume = false
+	_countdown_active = false
+	_first_stage_pending = false
+	_first_stage_bgm_pending = false
+	_zou_bgm_pending = true
+	_clear_boost_active = false
+	_virtual_pos = 0.0
+	_virtual_elapsed = 0.0
 
 
 ## ①: デモ画面からステージ1へ。BGMを停止し、無音でカウントダウン待機状態に入る。
 ## resume_ingame() から1秒後に play_ingame() が呼ばれてイントロ再生が始まる。
 func start_first_stage() -> void:
 	_stop_all()
-	_track_idx = 0
+	_track_idx = _ingame_track_idx
 	_motif_idx = 0
 	_in_intro = false
 	_in_pre_countdown = false
@@ -214,8 +309,8 @@ func begin_pre_countdown() -> void:
 ## プリカウントダウン中でまだモチーフ再生中なら残り時間を再チェックしてクロスフェード判断。
 ## BGM音量を -3dB 低下させる。
 func begin_countdown() -> void:
-	if _first_stage_pending:
-		return  # ①: 無音のまま
+	if _first_stage_pending or _zou_bgm_pending:
+		return  # ①/Zou: 無音のまま
 	if _in_pre_countdown and not _in_intro:
 		# カウントダウン開始時点で再チェック
 		if _motif_remaining() < 1.0:
@@ -230,6 +325,14 @@ func begin_countdown() -> void:
 func resume_ingame() -> void:
 	_waiting_for_resume = false
 	_countdown_active = false
+
+	if _zou_bgm_pending:
+		# Zou: タイトルBGMをイントロ先頭から即時開始
+		_zou_bgm_pending = false
+		_in_intro = true
+		_play_on_active(TRACKS[_track_idx]["intro"])
+		get_tree().create_timer(1.0).timeout.connect(func(): _sync_volume())
+		return
 
 	if _first_stage_pending:
 		# ①: 1秒後に _0000 から再生開始
@@ -252,6 +355,9 @@ func resume_ingame() -> void:
 			_motif_idx = _pre_countdown_motif_idx
 			_in_intro = false
 			_crossfade_to(_current_motif_path(), 0.0)
+		elif not _players[_active_player].playing:
+			# B案: stop() で止まっていた場合（Zou クリア後の再プレイ等）は再起動
+			play_ingame()
 		# else: モチーフN 再生継続 → 自然終了後 N+1 へ（B案）
 		return
 
@@ -283,6 +389,61 @@ func resume_stage_select() -> void:
 	_sync_volume()
 
 
+## ステージセレクト: 次のインゲームBGMへ切り替え（解放済みトラックのみ）。
+func select_next_bgm() -> void:
+	var cur_pos: int = _unlocked_track_indices.find(_ingame_track_idx)
+	if cur_pos < 0:
+		cur_pos = 0
+	cur_pos = (cur_pos + 1) % _unlocked_track_indices.size()
+	_ingame_track_idx = _unlocked_track_indices[cur_pos]
+	play_ingame()
+
+
+## ステージセレクト: 前のインゲームBGMへ切り替え（解放済みトラックのみ）。
+func select_prev_bgm() -> void:
+	var cur_pos: int = _unlocked_track_indices.find(_ingame_track_idx)
+	if cur_pos < 0:
+		cur_pos = 0
+	cur_pos = (cur_pos - 1 + _unlocked_track_indices.size()) % _unlocked_track_indices.size()
+	_ingame_track_idx = _unlocked_track_indices[cur_pos]
+	play_ingame()
+
+
+## 現在のインゲームBGMインデックスを返す（0〜_INGAME_TRACK_COUNT-1）。
+func get_ingame_track_idx() -> int:
+	return _ingame_track_idx
+
+
+## 解放済みBGM IDリストをセット（ステージセレクト起動時に呼ぶ）。
+func set_unlocked_bgm_ids(ids: Array) -> void:
+	_unlocked_track_indices = PackedInt32Array([0])
+	for id in ids:
+		if _BGM_ID_TO_TRACK_IDX.has(id):
+			var idx: int = _BGM_ID_TO_TRACK_IDX[id]
+			if not _unlocked_track_indices.has(idx):
+				_unlocked_track_indices.append(idx)
+	_unlocked_track_indices.sort()
+	if not _unlocked_track_indices.has(_ingame_track_idx):
+		_ingame_track_idx = 0
+
+
+## 新たに解放されたBGM IDをアンロックし、即座にそのトラックへ切り替える。
+func unlock_bgm(bgm_id: String) -> void:
+	if not _BGM_ID_TO_TRACK_IDX.has(bgm_id):
+		return
+	var idx: int = _BGM_ID_TO_TRACK_IDX[bgm_id]
+	if not _unlocked_track_indices.has(idx):
+		_unlocked_track_indices.append(idx)
+		_unlocked_track_indices.sort()
+	_ingame_track_idx = idx
+	play_ingame()
+
+
+## 解放済みトラック数を返す（矢印ボタン表示制御用）。
+func get_unlocked_track_count() -> int:
+	return _unlocked_track_indices.size()
+
+
 ## 全停止・状態リセット。
 func stop() -> void:
 	_stop_all()
@@ -292,6 +453,7 @@ func stop() -> void:
 	_countdown_active = false
 	_first_stage_pending = false
 	_first_stage_bgm_pending = false
+	_zou_bgm_pending = false
 	_clear_boost_active = false
 	_track_idx = 0
 	_motif_idx = 0

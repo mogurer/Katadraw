@@ -9,6 +9,9 @@ var stage_manager: StageManager
 var input_handler: InputHandler
 var ui_renderer: UIRenderer
 
+# --- Clear カード（位置揺らぎ用 Node2D）---
+var _clear_card_canvas: Node2D = null
+
 # --- Constants ---
 const CIRCLE_SEGMENTS := 128
 
@@ -44,6 +47,8 @@ var hovered_index: int = -1
 var game_state: String = "title"
 var start_time: float = 0.0
 var clear_time: float = 0.0
+var _new_record_time: bool = false
+var _new_record_moves: bool = false
 var min_radius: float = 0.0
 var max_radius: float = 0.0
 var clear_threshold: float = 5.0
@@ -52,6 +57,13 @@ var display_rate_min_pct: float = 50.0  # 実現率表示の下限（min～目�
 var font: Font
 var font_bold: Font
 var font_din: Font
+
+# --- ZOU スタッフロール ---
+const _ZOU_ROLL_TOTAL_LINES: int = 11  # ui_renderer.gd の ZOU_STAFF_ROLL_LINES.size() と一致させること
+var _zou_roll_started: bool = false
+var _zou_roll_index: int = 0
+var _zou_roll_last_time: float = 0.0
+var _zou_ending_start: float = 0.0
 
 # --- Circle Metrics (primary / group 1) ---
 var current_centroid: Vector2 = Vector2.ZERO
@@ -221,10 +233,13 @@ func get_polygon_prev_vertex_index(vert_idx: int) -> int:
 var menu_index: int = 0          # 0=Game Start, 1=Config, 2=Quit
 var menu_confirm_quit: bool = false
 var menu_confirm_index: int = 1  # 0=はい, 1=いいえ
-var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像度,2=カーソル…,6=戻る
+var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像度,2=カーソル…,6=クレジット,7=戻る
 var config_reset_hovered: bool = false
 var config_reset_confirm: bool = false
 var config_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
+var config_zou_reset_hovered: bool = false
+var config_zou_reset_confirm: bool = false
+var config_zou_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
 ## コンフィグ画面レイアウト（ui_renderer._draw_config とヒット判定で共通）
 const CONFIG_MENU_BASE_Y_RATIO := 0.28
 const CONFIG_MENU_SPACING := 103.5
@@ -239,6 +254,9 @@ const CONFIG_MENU_LABEL_GAP_TO_ARROW := 20.0
 const CONFIG_RESET_BTN_FS := 28
 const CONFIG_RESET_BTN_W  := 130.0
 const CONFIG_RESET_BTN_MARGIN := 36.0
+## STAGE60 ZOU トグルボタンのフォントサイズと幅（左下に単独配置、全クリア後のみ表示）
+const CONFIG_ZOU_RESET_BTN_FS := 22
+const CONFIG_ZOU_RESET_BTN_W  := 260.0
 ## コンフィグ 0〜3 行のホバー拡大（set_btn_hover / get_btn_scale と同一 ID）
 const CONFIG_ROW_BTN_IDS: Array[String] = [
 	"cfg_row_display_mode",
@@ -516,7 +534,30 @@ var sfx_stageclear02: AudioStreamPlayer
 var sfx_point: AudioStreamPlayer
 var sfx_motion: AudioStreamPlayer
 var sfx_stagestart: AudioStreamPlayer
+var sfx_cat: AudioStreamPlayer
+var sfx_spot: AudioStreamPlayer
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
+var _sfx_ui_in: AudioStreamPlayer = null    # [DEBUG] 引力SE
+var _sfx_ui_out: AudioStreamPlayer = null   # [DEBUG] 斥力SE
+var _sfx_ui_in_active: bool = false         # [DEBUG] 引力SE 繰り返し継続フラグ
+var _sfx_ui_out_active: bool = false        # [DEBUG] 斥力SE 繰り返し継続フラグ
+# --- SE設定画面 ---
+var _se_config_lt_ready: bool = true  # LTトリガー立ち上がり検出
+var _se_config_rt_ready: bool = true  # RTトリガー立ち上がり検出
+var _sfx_ui_in_timer: Timer = null          # [DEBUG] 引力SE 折り返しタイマー
+var _sfx_ui_out_timer: Timer = null         # [DEBUG] 斥力SE 折り返しタイマー
+const _DBG_SE_IN_LOOP_SEC  := 0.5           # [DEBUG] 引力SE 折り返し間隔（秒）
+const _DBG_SE_OUT_LOOP_SEC := 0.5           # [DEBUG] 斥力SE 折り返し間隔（秒）
+
+# コナミコマンド（タイトル画面での全クリア直前状態セット）
+const _KONAMI_SEQ: Array[String] = ["up", "up", "dn", "dn", "lt", "rt", "lt", "rt", "b", "a"]
+var _konami_idx: int = 0
+var _konami_last_msec: int = 0
+var _konami_used: bool = false
+
+# --- Trial ---
+var _trial_stage_ids: Array[int] = []
+var _trial_idx: int = 0
 
 # --- Debug ---
 ## F2 から入る STAGE DEBUG 系でのみ有効にするデバッグフラグ
@@ -524,6 +565,8 @@ var debug_mode: bool = false
 
 
 func _ready() -> void:
+	if GameConfig.IS_TRIAL:
+		_trial_stage_ids = GameConfig.get_trial_stage_ids()
 	_register_translations_from_csv()
 	stage_manager = StageManager.new()
 	ui_renderer = UIRenderer.new(self)
@@ -531,6 +574,7 @@ func _ready() -> void:
 	input_handler.on_points_changed = _on_input_points_changed
 	input_handler.on_selection_changed = _on_selection_changed
 	TranslationServer.set_locale("ja")
+	_load_settings()
 	var mplus_font: Font = load("res://assets/fonts/Mplus2-Medium.otf")
 	if mplus_font:
 		mplus_font.fallbacks = [ThemeDB.fallback_font]
@@ -554,6 +598,7 @@ func _ready() -> void:
 	# タイトル前の仮値（本番は _begin_stage で上書き）。HUD 用基準点と式を揃える
 	shape_center = _default_stage_shape_center(vp, -1)
 	_setup_audio()
+	DebugSFXConfig.load_saved()
 	# Load logo texture
 	logo_texture = _load_texture("res://assets/UI/messed_logo.png")
 	title_logo_texture = _load_texture("res://assets/UI/kata-draw_logo.png")
@@ -569,14 +614,43 @@ func _ready() -> void:
 	_setup_content_scale()
 	get_window().size_changed.connect(_on_window_size_changed)
 	_sync_window_display_from_os()
-	if not is_fullscreen:
-		call_deferred("_apply_window_pixel_size_impl", _window_client_size_for_display_mode())
-	if not GameConfig.IS_DEMO and StageSelectManager.pending_stage_id >= 0:
+	# ロードした display_mode（またはOSから同期したフルスクリーン状態）を適用する
+	call_deferred("_apply_video_mode_from_display_mode")
+	if not GameConfig.IS_TRIAL and StageSelectManager.pending_stage_id >= 0:
 		_start_game_from_stage_select()
 	else:
 		game_state = "logo"
 		logo_start_time = Time.get_ticks_msec() / 1000.0
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	_setup_clear_card_canvas()
+
+
+## STAGE CLEAR カード用 Node2D をセットアップ（位置揺らぎのみ・シェーダーなし）
+func _setup_clear_card_canvas() -> void:
+	_clear_card_canvas = Node2D.new()
+	_clear_card_canvas.z_index = 50
+	_clear_card_canvas.visible = false
+	add_child(_clear_card_canvas)
+	_clear_card_canvas.draw.connect(_on_clear_card_canvas_draw)
+	ui_renderer._clear_card_canvas = _clear_card_canvas
+
+
+func _on_clear_card_canvas_draw() -> void:
+	var vp_size: Vector2 = get_viewport_rect().size
+	var elapsed: float = Time.get_ticks_msec() / 1000.0 - ui_renderer._clear_anim_time \
+		if ui_renderer._clear_anim_time > 0.0 else 10.0
+
+	const FLOAT_RANGE: float = 15.0  # 位置揺らぎ ±px（合計 30px 範囲）
+	const PERIOD_PX: float = 8.3     # 水平揺らぎ周期（秒）
+	const PERIOD_PY: float = 6.1     # 垂直揺らぎ周期（秒）
+
+	# ポップイン（0〜0.5秒）完了後に揺らぎが立ち上がる
+	var float_alpha: float = clampf((elapsed - 0.5) / 0.5, 0.0, 1.0)
+	var pos_x: float = sin(elapsed * TAU / PERIOD_PX) * FLOAT_RANGE * float_alpha
+	var pos_y: float = sin(elapsed * TAU / PERIOD_PY + 1.7) * FLOAT_RANGE * float_alpha
+	_clear_card_canvas.position = Vector2(pos_x, pos_y)
+
+	ui_renderer._draw_card_content_to(_clear_card_canvas, vp_size, elapsed)
 
 
 ## Translation.csv を直接読み込み、TranslationServer に登録する（.translation バイナリに依存しない）。
@@ -713,6 +787,29 @@ func _cursor_register_pad_activity() -> void:
 	_cursor_mouse_motion_accum = Vector2.ZERO
 	if game_state == "playing":
 		playing_mouse_steers_player = false
+		input_handler.notify_pad_steering_active()
+
+
+## マウス移動を input_handler へ渡すか（誤反応対策 B + C）。
+## reveal_threshold_reached: 本イベントで累積 36px に達した（リセット前の判定結果）
+func _should_forward_mouse_motion_to_handler(reveal_threshold_reached: bool = false) -> bool:
+	var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
+	var accum_ok: bool = reveal_threshold_reached or _cursor_mouse_motion_accum.length_squared() >= thr_sq
+	var already_mouse: bool = input_handler.get_last_input_method() == "mouse"
+	# B: カーソル表示と同じ累積 36px 以上、または既にマウス操作モード
+	if not accum_ok and not already_mouse:
+		return false
+	# C: プレイ中はクリックまたは一定量のマウス操作で制御を移す
+	if game_state == "playing" and not playing_mouse_steers_player:
+		var mouse_engaged: bool = (
+			Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+			or accum_ok
+		)
+		if not mouse_engaged:
+			return false
+		playing_mouse_steers_player = true
+	return true
 
 
 func _cursor_visible_mode() -> Input.MouseMode:
@@ -745,6 +842,8 @@ func _update_player_hover() -> void:
 		return
 	if not input_handler.player_position_initialized:
 		return
+	if not is_inside_tree():
+		return
 	var pos: Vector2 = input_handler.player_position
 	var vp: Vector2 = get_viewport_rect().size
 
@@ -770,29 +869,41 @@ func _update_player_hover() -> void:
 
 	if game_state == "config":
 		if _menu_hover_holdoff_frames <= 0:
-			if config_reset_confirm:
+			if _cursor_pad_override_hidden:
+				# パッド/キーボード操作中はマウスホバーによる選択行の上書きをスキップ
+				config_reset_hovered = false
+				config_zou_reset_hovered = false
+			elif config_zou_reset_confirm:
+				if pos.x < vp.x / 2.0:
+					config_zou_reset_confirm_index = 0
+				else:
+					config_zou_reset_confirm_index = 1
+			elif config_reset_confirm:
 				if pos.x < vp.x / 2.0:
 					config_reset_confirm_index = 0
 				else:
 					config_reset_confirm_index = 1
 			else:
-				var items_count: int = 7
 				var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
-				var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-				for i in range(items_count):
-					if i < 5:
-						var geom: Dictionary = config_row_scaled_layout(vp, i)
-						var bh: float = geom["bh"]
-						var top: float = geom["Lp"].y - bh * 0.5
-						var bottom: float = top + bh
-						if pos.y >= top - 5.0 and pos.y <= bottom + 5.0:
-							config_index = i
-					else:
-						var extra_y: float = vp.y * 0.07
-						var item_y: float = base_y + i * CONFIG_MENU_SPACING
-						if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y:
-							config_index = i
+				for i in range(5):
+					var geom: Dictionary = config_row_scaled_layout(vp, i)
+					var bh: float = geom["bh"]
+					var top: float = geom["Lp"].y - bh * 0.5
+					var bottom: float = top + bh
+					if pos.y >= top - 5.0 and pos.y <= bottom + 5.0:
+						config_index = i
+				var btn_h_act: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+				var btn_base_cy: float = base_y + 5.0 * CONFIG_MENU_SPACING + btn_h_act * 0.5 - 16.0 + vp.y * 0.07 - 230.0
+				for btn_i in range(3):
+					var act_i: int = 5 + btn_i
+					var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)
+					if pos.y >= btn_cy - btn_h_act * 0.5 - 5.0 and pos.y <= btn_cy + btn_h_act * 0.5 + 5.0:
+						config_index = act_i
 				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
+				if StageSelectManager.all_cleared:
+					config_zou_reset_hovered = get_config_zou_reset_button_rect(vp).has_point(pos)
+				else:
+					config_zou_reset_hovered = false
 		return
 
 	if game_state == "playing" and pause_active:
@@ -872,6 +983,16 @@ func _setup_audio() -> void:
 	sfx_stagestart.volume_db = -14.5
 	add_child(sfx_stagestart)
 
+	sfx_cat = AudioStreamPlayer.new()
+	sfx_cat.stream = _load_audio("res://assets/sounds/cat.wav")
+	sfx_cat.volume_db = -14.5
+	add_child(sfx_cat)
+
+	sfx_spot = AudioStreamPlayer.new()
+	sfx_spot.stream = _load_audio("res://assets/sounds/se_spot02.wav")
+	sfx_spot.volume_db = -14.5
+	add_child(sfx_spot)
+
 	sfx_click = AudioStreamPlayer.new()
 	sfx_click.stream = _load_audio("res://assets/sounds/se_click.wav")
 	sfx_click.volume_db = -14.5
@@ -897,6 +1018,22 @@ func _setup_audio() -> void:
 	sfx_move.volume_db = -14.5
 	add_child(sfx_move)
 
+	DebugSFXConfig.ensure_counted()
+	_sfx_ui_in = AudioStreamPlayer.new()
+	_sfx_ui_in.volume_db = -10.0
+	add_child(_sfx_ui_in)
+	_sfx_ui_in_timer = Timer.new()
+	_sfx_ui_in_timer.one_shot = true
+	add_child(_sfx_ui_in_timer)
+	_sfx_ui_in_timer.timeout.connect(_on_sfx_ui_in_timer_timeout)
+	_sfx_ui_out = AudioStreamPlayer.new()
+	_sfx_ui_out.volume_db = -10.0
+	add_child(_sfx_ui_out)
+	_sfx_ui_out_timer = Timer.new()
+	_sfx_ui_out_timer.one_shot = true
+	add_child(_sfx_ui_out_timer)
+	_sfx_ui_out_timer.timeout.connect(_on_sfx_ui_out_timer_timeout)
+
 	sfx_stageclear = AudioStreamPlayer.new()
 	sfx_stageclear.stream = _load_audio("res://assets/sounds/se_stageclear.wav")
 	sfx_stageclear.volume_db = -14.5
@@ -921,10 +1058,86 @@ func _play_sfx(player: AudioStreamPlayer) -> void:
 		player.play()
 
 func _start_sfx_move() -> void:
+	if _debug_tools_enabled() and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
+		return
 	if sfx_move and sfx_move.stream:
 		if not sfx_move.playing:
 			sfx_move.play()
 		_sfx_move_playing = true
+
+
+func play_sfx_spot() -> void:
+	_play_sfx(sfx_spot)
+
+
+func play_sfx_ui_in() -> void:
+	if not _sfx_ui_in:
+		return
+	# 斥力SEが鳴っていれば即停止（切り替え）
+	_sfx_ui_out_active = false
+	if _sfx_ui_out_timer:
+		_sfx_ui_out_timer.stop()
+	if _sfx_ui_out and _sfx_ui_out.playing:
+		_sfx_ui_out.stop()
+	# 引力SE 開始 + タイマー起動
+	var path := DebugSFXConfig.in_path(DebugSFXConfig.in_idx)
+	if _sfx_ui_in.stream == null or _sfx_ui_in.stream.resource_path != path:
+		_sfx_ui_in.stream = load(path) if FileAccess.file_exists(path) else null
+	if _sfx_ui_in.stream:
+		_sfx_ui_in_active = true
+		_sfx_ui_in.stop()
+		_sfx_ui_in.play()
+		_sfx_ui_in_timer.start(_DBG_SE_IN_LOOP_SEC)
+
+
+func stop_sfx_ui_in() -> void:
+	# ボタン離し：タイマー停止のみ。オーディオは最後まで自然再生させる
+	_sfx_ui_in_active = false
+	if _sfx_ui_in_timer:
+		_sfx_ui_in_timer.stop()
+
+
+func _on_sfx_ui_in_timer_timeout() -> void:
+	if not _sfx_ui_in_active or not _sfx_ui_in or not _sfx_ui_in.stream:
+		return
+	_sfx_ui_in.stop()
+	_sfx_ui_in.play()
+	_sfx_ui_in_timer.start(_DBG_SE_IN_LOOP_SEC)
+
+
+func play_sfx_ui_out() -> void:
+	if not _sfx_ui_out:
+		return
+	# 引力SEが鳴っていれば即停止（切り替え）
+	_sfx_ui_in_active = false
+	if _sfx_ui_in_timer:
+		_sfx_ui_in_timer.stop()
+	if _sfx_ui_in and _sfx_ui_in.playing:
+		_sfx_ui_in.stop()
+	# 斥力SE 開始 + タイマー起動
+	var path := DebugSFXConfig.out_path(DebugSFXConfig.out_idx)
+	if _sfx_ui_out.stream == null or _sfx_ui_out.stream.resource_path != path:
+		_sfx_ui_out.stream = load(path) if FileAccess.file_exists(path) else null
+	if _sfx_ui_out.stream:
+		_sfx_ui_out_active = true
+		_sfx_ui_out.stop()
+		_sfx_ui_out.play()
+		_sfx_ui_out_timer.start(_DBG_SE_OUT_LOOP_SEC)
+
+
+func stop_sfx_ui_out() -> void:
+	# ボタン離し：タイマー停止のみ。オーディオは最後まで自然再生させる
+	_sfx_ui_out_active = false
+	if _sfx_ui_out_timer:
+		_sfx_ui_out_timer.stop()
+
+
+func _on_sfx_ui_out_timer_timeout() -> void:
+	if not _sfx_ui_out_active or not _sfx_ui_out or not _sfx_ui_out.stream:
+		return
+	_sfx_ui_out.stop()
+	_sfx_ui_out.play()
+	_sfx_ui_out_timer.start(_DBG_SE_OUT_LOOP_SEC)
 
 func _stop_sfx_move() -> void:
 	# _sfx_move_playing と実再生がずれた場合でも確実に止める（クリア直後など）
@@ -1096,6 +1309,8 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	playing_mouse_steers_player = false
 	if reset_move_track:
 		stage_move_count = 0
+		_new_record_time = false
+		_new_record_moves = false
 		_reset_stage_move_track_internal()
 	clear_polygon_walk_order()
 	input_handler.reset_for_stage()
@@ -1105,6 +1320,8 @@ func _begin_stage_with_config(idx: int, cfg: Dictionary, center: Vector2, next_s
 	hints_triggered = [false, false]
 	guide_count_played = 0
 	_metrics_dirty = true
+	_zou_roll_started = false
+	_zou_roll_index = 0
 	queue_redraw()
 
 
@@ -1113,7 +1330,10 @@ func _start_stage(idx: int) -> void:
 	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
 	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
 	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp, idx))
-	BGMManager.begin_pre_countdown()  # ☆: ガイド表示前にプリカウントダウン状態へ
+	if idx == StageSelectManager._zou_stage_idx:
+		BGMManager.start_zou_bgm()
+	else:
+		BGMManager.begin_pre_countdown()  # ☆: ガイド表示前にプリカウントダウン状態へ
 
 
 func _calculate_metrics() -> void:
@@ -1135,6 +1355,8 @@ func _is_selected(idx: int) -> bool:
 
 
 func _stage_display_number_text() -> String:
+	if current_stage == StageSelectManager._zou_stage_idx:
+		return "00"
 	if current_stage >= 0:
 		return "%d" % (current_stage + 1)
 	return "-"
@@ -1143,7 +1365,11 @@ func _stage_display_number_text() -> String:
 func _check_clear() -> void:
 	if game_state != "playing":
 		return
-	if input_handler.is_snap_clear():
+	var _snap_ok: bool = input_handler.is_snap_clear()
+	if not _snap_ok and current_stage == StageSelectManager._zou_stage_idx:
+		# 複雑な魚形は巡回順一致が困難なため、全コーナー占有のみで判定
+		_snap_ok = input_handler.is_all_corners_occupied()
+	if _snap_ok:
 		is_dragging = false
 		game_state = "cleared"
 		input_handler.release_mouse_grab()
@@ -1155,9 +1381,15 @@ func _check_clear() -> void:
 		ui_renderer.spawn_particles(current_centroid)
 		_play_sfx(sfx_clear)
 		_play_sfx(sfx_stageclear)
-		BGMManager.play_clear()
-		if not GameConfig.IS_DEMO:
+		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:
+			BGMManager.stop()
+		else:
+			BGMManager.play_clear()
+		if not GameConfig.IS_TRIAL:
 			StageSelectManager.mark_cleared(current_stage)
+			var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
+			_new_record_time = _rec.time
+			_new_record_moves = _rec.moves
 		_save_dwell_log()
 
 
@@ -1356,7 +1588,7 @@ func _ui_menu_stick_nav_horizontal_first(delta: float) -> Vector2i:
 
 func _process_config_stick_navigation(delta: float) -> void:
 	# 上下＝行移動、左右＝値変更（全項目で同じ優先: 縦を先に処理）
-	var items_count: int = 7
+	var items_count: int = 8
 	var ly: float = _ui_stick_ly
 	var lx: float = _ui_stick_lx
 	var vy: int = _ui_menu_stick_vertical_step(delta, ly)
@@ -1458,13 +1690,18 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton:
 		_cursor_register_mouse_activity()
+		if game_state == "playing" and event.pressed:
+			if event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT:
+				playing_mouse_steers_player = true
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event as InputEventMouseMotion
 		_cursor_mouse_motion_accum += mm.relative
 		var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
-		if _cursor_mouse_motion_accum.length_squared() >= thr_sq:
+		var reveal_threshold_reached: bool = _cursor_mouse_motion_accum.length_squared() >= thr_sq
+		if reveal_threshold_reached:
 			_cursor_register_mouse_activity()
-		input_handler.handle_mouse_motion(mm.position, mm.relative)
+		if _should_forward_mouse_motion_to_handler(reveal_threshold_reached):
+			input_handler.handle_mouse_motion(mm.position, mm.relative)
 	elif _cursor_event_should_hide_for_pad(event):
 		_cursor_register_pad_activity()
 
@@ -1485,6 +1722,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "title":
+		_konami_process_input(event)
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
 			_enter_stage_debug_screen()
 		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
@@ -1508,6 +1746,14 @@ func _input(event: InputEvent) -> void:
 		_input_config(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
 
+	if game_state == "se_config":
+		_input_se_config(event)
+		return
+
+	if game_state == "credit":
+		_input_credit(event, is_confirm_key, is_confirm_pad, is_confirm_click)
+		return
+
 	if game_state == "stage_edit":
 		_input_stage_edit(event)
 		return
@@ -1525,13 +1771,27 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "guide_info":
+		var is_gi_pause_key: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START)
+		)
+		if pause_active:
+			_input_pause(event, is_confirm, is_gi_pause_key)
+			return
+		if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START:
+			pause_active = true
+			pause_index = 0
+			pause_elapsed = 0.0
+			ui_renderer._pause_anim_time = Time.get_ticks_msec() / 1000.0
+			queue_redraw()
+			return
 		var is_guide_cancel: bool = (
 			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
 			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
 		)
 		if (
 			is_guide_cancel
-			and not GameConfig.IS_DEMO
+			and not GameConfig.IS_TRIAL
 			and not stage_session.debug_test_mode
 			and not _pbd_return_after_test
 		):
@@ -1539,6 +1799,11 @@ func _input(event: InputEvent) -> void:
 			return
 		# ボタンなし: 任意の箇所で クリック / Enter / A で次へ（目標図形を隠さない）
 		if is_confirm:
+			if not ui_renderer.is_guide_typewriter_done():
+				# タイプライター演出中 → スキップして全文表示
+				ui_renderer.skip_guide_typewriter()
+				queue_redraw()
+				return
 			game_state = "guide_countdown"
 			guide_start_time = Time.get_ticks_msec() / 1000.0
 			guide_count_played = 0
@@ -1547,6 +1812,19 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "guide_countdown":
+		var is_cd_pause_key: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START)
+		)
+		if pause_active:
+			_input_pause(event, is_confirm, is_cd_pause_key)
+			return
+		if is_cd_pause_key:
+			pause_active = true
+			pause_index = 0
+			pause_elapsed = Time.get_ticks_msec() / 1000.0 - guide_start_time
+			ui_renderer._pause_anim_time = Time.get_ticks_msec() / 1000.0
+			queue_redraw()
 		return
 
 	if game_state == "results":
@@ -1598,6 +1876,16 @@ func _input(event: InputEvent) -> void:
 			queue_redraw()
 		return
 
+	if game_state == "zou_ending":
+		var is_any_key: bool = (
+			(event is InputEventKey and event.pressed and not event.echo)
+			or (event is InputEventJoypadButton and event.pressed)
+			or (event is InputEventMouseButton and event.pressed)
+		)
+		if is_any_key and (Time.get_ticks_msec() / 1000.0 - _zou_ending_start) >= 1.0:
+			_trigger_zou_ending_return()
+		return
+
 	if game_state == "cleared":
 		# デバッグ用: [S] でバランス調整画面を開く
 		if (
@@ -1613,29 +1901,33 @@ func _input(event: InputEvent) -> void:
 		# 通常プレイ（debug_test_mode が true でもデバッグオーバーレイ目的の場合）はステージセレクトへ。
 		if _pbd_return_after_test:
 			if is_confirm_key or is_confirm_pad:
-				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					BGMManager.stop()  # BGMManager に移行
-					_return_to_title_or_stage_debug_from_test()
-					queue_redraw()
-				, false)
-				queue_redraw()
-			elif is_confirm_click and _hit_cleared_button(input_handler.player_position):
-				ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-					BGMManager.stop()  # BGMManager に移行
-					_return_to_title_or_stage_debug_from_test()
-					queue_redraw()
-				, false)
+				BGMManager.stop()
+				_return_to_title_or_stage_debug_from_test()
 				queue_redraw()
 			return
-		if is_confirm_key or is_confirm_pad:
-			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-				_advance_stage()
-			, false)
-			queue_redraw()
-		elif is_confirm_click and _hit_cleared_button(input_handler.player_position):
-			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func():
-				_advance_stage()
-			, false)
+		var is_cleared_advance_key: bool = (
+			event is InputEventKey and event.pressed and not event.echo
+			and (
+				event.keycode == KEY_ENTER
+				or event.keycode == KEY_KP_ENTER
+				or event.keycode == KEY_SPACE
+				or event.keycode == KEY_ESCAPE
+			)
+		)
+		var is_cleared_advance_pad: bool = (
+			event is InputEventJoypadButton and event.pressed
+			and (
+				event.button_index == JOY_BUTTON_A
+				or event.button_index == JOY_BUTTON_X
+				or event.button_index == JOY_BUTTON_B
+				or event.button_index == JOY_BUTTON_START
+			)
+		)
+		var is_cleared_advance_click: bool = (
+			event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
+		)
+		if is_cleared_advance_key or is_cleared_advance_pad or is_cleared_advance_click:
+			_advance_stage()
 			queue_redraw()
 		return
 
@@ -1659,6 +1951,18 @@ func _input(event: InputEvent) -> void:
 		and event.keycode == KEY_S
 	):
 		_enter_play_balance_debug()
+		return
+
+	# デバッグ用: [F1] で現在ステージを強制クリア（エディタからの実行時のみ。エクスポート版では無効）
+	if (
+		game_state == "playing"
+		and _debug_tools_enabled()
+		and event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_F1
+	):
+		_force_clear_for_debug()
 		return
 
 	if game_state == "playing" and is_pause_key:
@@ -1742,9 +2046,12 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 				_start_game()
 			elif idx == 1:
 				_sync_window_display_from_os()
-				game_state = "config"
-				config_index = 0
-				_reset_ui_menu_stick_navigation()
+				TransitionManager.play_diagonal(func():
+					game_state = "config"
+					config_index = 0
+					_reset_ui_menu_stick_navigation()
+					queue_redraw()
+				)
 			elif idx == 2:
 				menu_confirm_quit = true
 				menu_confirm_index = 1  # デフォルト「いいえ」
@@ -1807,8 +2114,46 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 
 
 func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
-	var items_count: int = 7
+	var items_count: int = 8
 	var moved: bool = false
+
+	# ---------- STAGE60 RESET 確認ダイアログ ----------
+	if config_zou_reset_confirm:
+		var vp2: Vector2 = get_viewport_rect().size
+		var cbtn_gap: float = vp2.x * 0.10
+		var cbtn_cy: float = vp2.y * 0.60
+		var cbtn_w: float = vp2.x * 0.16
+
+		var is_back2: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
+		)
+		if is_back2:
+			config_zou_reset_confirm = false
+			queue_redraw()
+			return
+
+		var do_confirm2: bool = is_confirm_key or is_confirm_pad
+		if is_confirm_click:
+			var cx: float = vp2.x / 2.0
+			var bh: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+			var click_pos: Vector2 = input_handler.player_position
+			if click_pos.y >= cbtn_cy - bh / 2.0 and click_pos.y <= cbtn_cy + bh / 2.0:
+				if click_pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
+					config_zou_reset_confirm_index = 0
+					do_confirm2 = true
+				elif click_pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
+					config_zou_reset_confirm_index = 1
+					do_confirm2 = true
+		if do_confirm2:
+			if config_zou_reset_confirm_index == 0:
+				StageSelectManager.reset_zou_cleared()
+				_play_sfx(sfx_window_close)
+			else:
+				_play_sfx(sfx_window_close)
+			config_zou_reset_confirm = false
+			queue_redraw()
+		return
 
 	# ---------- RESET 確認ダイアログ ----------
 	if config_reset_confirm:
@@ -1858,6 +2203,8 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	if is_back:
 		config_reset_hovered = false
 		config_reset_confirm = false
+		config_zou_reset_hovered = false
+		config_zou_reset_confirm = false
 		game_state = "menu"
 		_reset_ui_menu_stick_navigation()
 		queue_redraw()
@@ -1866,27 +2213,39 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_UP:
 			config_index = (config_index - 1 + items_count) % items_count
+			_cursor_register_pad_activity()
 			moved = true
 		elif event.keycode == KEY_DOWN:
 			config_index = (config_index + 1) % items_count
+			_cursor_register_pad_activity()
 			moved = true
 		elif event.keycode == KEY_LEFT:
 			if config_index < 5:
+				_cursor_register_pad_activity()
 				_config_apply_main_horizontal(-1)
 				moved = true
 		elif event.keycode == KEY_RIGHT:
 			if config_index < 5:
+				_cursor_register_pad_activity()
 				_config_apply_main_horizontal(1)
 				moved = true
 
 	if is_confirm_click:
-		# RESET ボタンクリック（メインリストより先に判定）
+		# RESET / STAGE60 RESET ボタンクリック（メインリストより先に判定）
 		var vp_r: Vector2 = get_viewport_rect().size
 		var click_pos: Vector2 = input_handler.player_position
 		if get_config_reset_button_rect(vp_r).has_point(click_pos):
 			config_reset_confirm = true
 			config_reset_confirm_index = 1
 			_play_sfx(sfx_window_open)
+			queue_redraw()
+			return
+		if StageSelectManager.all_cleared and get_config_zou_reset_button_rect(vp_r).has_point(click_pos):
+			if StageSelectManager.zou_cleared:
+				StageSelectManager.reset_zou_cleared()
+			else:
+				StageSelectManager.mark_zou_cleared()
+			_play_sfx(sfx_window_close)
 			queue_redraw()
 			return
 		var adj: Dictionary = _hit_config_value_arrows(click_pos)
@@ -1905,23 +2264,160 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 			config_index = int(hit["main"])
 			do_confirm = true
 	if do_confirm and config_index == 5:
-		ui_renderer.set_btn_press_with_callback(tr("CONFIG_PRACTICE"), func():
-			StageSelectManager.tutorial_return_to = "config"
-			_enter_rules()
+		ui_renderer.set_btn_press_with_callback(tr("CONFIG_SE_SETTING"), func():
+			_se_config_lt_ready = true
+			_se_config_rt_ready = true
+			game_state = "se_config"
 			queue_redraw()
 		)
 		queue_redraw()
 	if do_confirm and config_index == 6:
+		ui_renderer.set_btn_press_with_callback(tr("CONFIG_CREDIT"), func():
+			TransitionManager.play_diagonal(func():
+				game_state = "credit"
+				queue_redraw()
+			)
+		)
+		queue_redraw()
+	if do_confirm and config_index == 7:
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
 			config_reset_hovered = false
 			config_reset_confirm = false
-			game_state = "menu"
-			_reset_ui_menu_stick_navigation()
-			queue_redraw()
+			config_zou_reset_hovered = false
+			config_zou_reset_confirm = false
+			TransitionManager.play_diagonal(func():
+				game_state = "menu"
+				_reset_ui_menu_stick_navigation()
+				queue_redraw()
+			)
 		)
 		queue_redraw()
 	if moved:
 		queue_redraw()
+
+
+func _input_se_config(event: InputEvent) -> void:
+	# ESC / B / START → 保存してコンフィグへ戻る
+	var is_back: bool = (
+		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+		or (event is InputEventJoypadButton and event.pressed and (
+			event.button_index == JOY_BUTTON_B or event.button_index == JOY_BUTTON_START
+		))
+	)
+	if is_back:
+		stop_sfx_ui_in()
+		stop_sfx_ui_out()
+		DebugSFXConfig.save()
+		game_state = "config"
+		queue_redraw()
+		return
+
+	# コントローラー: ボタン押下
+	if event is InputEventJoypadButton:
+		if event.pressed:
+			match event.button_index:
+				JOY_BUTTON_LEFT_SHOULDER:  # L → out 上（前へ）
+					DebugSFXConfig.out_idx = posmod(DebugSFXConfig.out_idx - 1, DebugSFXConfig.out_count)
+					_play_sfx(sfx_click)
+					queue_redraw()
+				JOY_BUTTON_RIGHT_SHOULDER:  # R → in 上（前へ）
+					DebugSFXConfig.in_idx = posmod(DebugSFXConfig.in_idx - 1, DebugSFXConfig.in_count)
+					_play_sfx(sfx_click)
+					queue_redraw()
+				JOY_BUTTON_A:  # A → OUT テスト再生
+					play_sfx_ui_out()
+				JOY_BUTTON_X:  # X → IN テスト再生
+					play_sfx_ui_in()
+		else:
+			match event.button_index:
+				JOY_BUTTON_A:
+					stop_sfx_ui_out()
+				JOY_BUTTON_X:
+					stop_sfx_ui_in()
+
+	# コントローラー: LT/RT トリガー（立ち上がり検出）
+	if event is InputEventJoypadMotion:
+		if event.axis == JOY_AXIS_TRIGGER_LEFT:
+			if event.axis_value < 0.2:
+				_se_config_lt_ready = true
+			elif event.axis_value >= 0.5 and _se_config_lt_ready:
+				_se_config_lt_ready = false
+				DebugSFXConfig.out_idx = posmod(DebugSFXConfig.out_idx + 1, DebugSFXConfig.out_count)
+				_play_sfx(sfx_click)
+				queue_redraw()
+		elif event.axis == JOY_AXIS_TRIGGER_RIGHT:
+			if event.axis_value < 0.2:
+				_se_config_rt_ready = true
+			elif event.axis_value >= 0.5 and _se_config_rt_ready:
+				_se_config_rt_ready = false
+				DebugSFXConfig.in_idx = posmod(DebugSFXConfig.in_idx + 1, DebugSFXConfig.in_count)
+				_play_sfx(sfx_click)
+				queue_redraw()
+
+	# マウス
+	if event is InputEventMouseButton:
+		var vp: Vector2 = get_viewport_rect().size
+		var click_pos: Vector2 = input_handler.player_position
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				# ラジオボタンのクリック判定（左パネル: out）
+				var hit_out: int = _hit_se_config_radio_out(click_pos, vp)
+				if hit_out >= 0:
+					DebugSFXConfig.out_idx = hit_out
+					_play_sfx(sfx_click)
+					queue_redraw()
+					return
+				# ラジオボタンのクリック判定（右パネル: in）
+				var hit_in: int = _hit_se_config_radio_in(click_pos, vp)
+				if hit_in >= 0:
+					DebugSFXConfig.in_idx = hit_in
+					_play_sfx(sfx_click)
+					queue_redraw()
+					return
+				# それ以外: OUTテスト再生
+				play_sfx_ui_out()
+			else:
+				stop_sfx_ui_out()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				play_sfx_ui_in()
+			else:
+				stop_sfx_ui_in()
+
+
+# ラジオボタンのヒット判定。ヒットした場合は 0〜4 のインデックスを返す、外れは -1。
+func _hit_se_config_radio_out(pos: Vector2, vp: Vector2) -> int:
+	var rx: float = 200.0
+	var ry0: float = vp.y * 0.37
+	var ystep: float = 85.0
+	for i in range(DebugSFXConfig.out_count):
+		var cy: float = ry0 + i * ystep
+		if Rect2(rx - 20.0, cy - 36.0, 340.0, 72.0).has_point(pos):
+			return i
+	return -1
+
+
+func _hit_se_config_radio_in(pos: Vector2, vp: Vector2) -> int:
+	var rx: float = vp.x - 200.0
+	var ry0: float = vp.y * 0.37
+	var ystep: float = 85.0
+	for i in range(DebugSFXConfig.in_count):
+		var cy: float = ry0 + i * ystep
+		if Rect2(rx - 320.0, cy - 36.0, 340.0, 72.0).has_point(pos):
+			return i
+	return -1
+
+
+func _input_credit(_event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
+	var is_back: bool = (
+		(_event is InputEventKey and _event.pressed and not _event.echo and _event.keycode == KEY_ESCAPE)
+		or (_event is InputEventJoypadButton and _event.pressed and _event.button_index == JOY_BUTTON_B)
+	)
+	if is_back or is_confirm_key or is_confirm_pad or is_confirm_click:
+		TransitionManager.play_diagonal(func():
+			game_state = "config"
+			queue_redraw()
+		)
 
 
 ## コンフィグ: 値行の左右（±1）。0=画面モード、1=マウス制限、2=言語、3=BGM、4=SE
@@ -1944,6 +2440,7 @@ func _config_apply_main_horizontal(delta: int) -> void:
 			se_volume = clampi(se_volume + delta, 0, 10)
 			_apply_se_volume()
 			_play_sfx(sfx_click)
+	_save_settings()
 
 
 func _window_client_size_for_display_mode() -> Vector2i:
@@ -2025,8 +2522,34 @@ func config_mouse_confine_ui_label() -> String:
 	return tr("CONFIG_MOUSE_CONFINE_ON") if mouse_confine_to_window else tr("CONFIG_MOUSE_CONFINE_OFF")
 
 
+const _SETTINGS_PATH := "user://config.cfg"
+const _SETTINGS_SECTION := "settings"
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value(_SETTINGS_SECTION, "bgm_volume", bgm_volume)
+	cfg.set_value(_SETTINGS_SECTION, "se_volume", se_volume)
+	cfg.set_value(_SETTINGS_SECTION, "display_mode", display_mode)
+	cfg.set_value(_SETTINGS_SECTION, "mouse_confine_to_window", mouse_confine_to_window)
+	cfg.set_value(_SETTINGS_SECTION, "language", TranslationServer.get_locale())
+	cfg.save(_SETTINGS_PATH)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_SETTINGS_PATH) != OK:
+		return
+	bgm_volume = clampi(int(cfg.get_value(_SETTINGS_SECTION, "bgm_volume", 5)), 0, 10)
+	se_volume = clampi(int(cfg.get_value(_SETTINGS_SECTION, "se_volume", 5)), 0, 10)
+	display_mode = clampi(int(cfg.get_value(_SETTINGS_SECTION, "display_mode", DISPLAY_MODE_WINDOW_1080)), 0, 2)
+	mouse_confine_to_window = bool(cfg.get_value(_SETTINGS_SECTION, "mouse_confine_to_window", false))
+	var lang: String = str(cfg.get_value(_SETTINGS_SECTION, "language", "ja"))
+	if lang == "en" or lang == "ja":
+		TranslationServer.set_locale(lang)
+
+
 func _center_window() -> void:
-	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(0)
+	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(DisplayServer.get_primary_screen())
 	var win_size: Vector2i = get_window().get_size_with_decorations()
 	get_window().position = screen_rect.position + (screen_rect.size / 2 - win_size / 2)
 
@@ -2055,6 +2578,17 @@ func _apply_window_pixel_size_impl(new_size: Vector2i, fs_retries: int = 18) -> 
 		return
 	DisplayServer.window_set_size(new_size, wid)
 	win.size = new_size
+	# 装飾込みサイズが使用可能領域の高さを超える場合、クライアント高を縮小する。
+	# 内部解像度（1920×1080）は変わらないため、縮小分はレターボックスとして表示される。
+	var usable: Rect2i = DisplayServer.screen_get_usable_rect(DisplayServer.get_primary_screen())
+	var deco_h: int = win.get_size_with_decorations().y - win.size.y
+	if deco_h < 0:
+		deco_h = 0
+	if win.get_size_with_decorations().y > usable.size.y and usable.size.y > deco_h:
+		var clamped_h: int = usable.size.y - deco_h
+		var clamped_size := Vector2i(new_size.x, clamped_h)
+		DisplayServer.window_set_size(clamped_size, wid)
+		win.size = clamped_size
 	is_fullscreen = false
 	display_mode = DISPLAY_MODE_WINDOW_1080 if new_size == WINDOW_CLIENT_SIZE_1080 else DISPLAY_MODE_WINDOW_720
 	_menu_hover_holdoff_frames = MENU_HOVER_HOLDOFF_FRAMES
@@ -2074,28 +2608,38 @@ func _apply_bgm_volume() -> void:
 	BGMManager.set_volume_db(_volume_offset_db(bgm_volume))
 
 
+## SE 基準 dB（-14.5dB + SE音量オフセット）。外部スクリプトからも参照可能。
+func _se_base_db() -> float:
+	return -14.5 + _volume_offset_db(se_volume)
+
+
 func _apply_se_volume() -> void:
-	var offset_db: float = _volume_offset_db(se_volume)
-	sfx_count.volume_db = -14.5 + offset_db
-	sfx_clear.volume_db = -14.5 + offset_db
-	sfx_on.volume_db = -14.5 + offset_db
-	sfx_click.volume_db = -14.5 + offset_db
-	sfx_window_open.volume_db = -14.5 + offset_db
-	sfx_window_close.volume_db = -14.5 + offset_db
-	sfx_catch.volume_db = -14.5 + offset_db
-	sfx_move.volume_db = -14.5 + offset_db
-	sfx_stageclear.volume_db = -14.5 + offset_db
-	sfx_stageclear02.volume_db = -14.5 + offset_db
-	sfx_point.volume_db = -14.5 + offset_db
-	sfx_motion.volume_db = -14.5 + offset_db
-	sfx_stagestart.volume_db = -14.5 + offset_db
+	var base_db: float = _se_base_db()
+	sfx_count.volume_db = base_db
+	sfx_clear.volume_db = base_db
+	sfx_on.volume_db = base_db
+	sfx_click.volume_db = base_db
+	sfx_window_open.volume_db = base_db
+	sfx_window_close.volume_db = base_db
+	sfx_catch.volume_db = base_db
+	sfx_move.volume_db = base_db
+	sfx_stageclear.volume_db = base_db
+	sfx_stageclear02.volume_db = base_db
+	sfx_point.volume_db = base_db
+	sfx_motion.volume_db = base_db
+	sfx_stagestart.volume_db = base_db
+	sfx_cat.volume_db = base_db
+	sfx_spot.volume_db = base_db
+	TransitionManager.set_se_volume_db(base_db)
+	var ui_move_db: float = -10.0 + _volume_offset_db(se_volume)
+	if _sfx_ui_in:
+		_sfx_ui_in.volume_db = ui_move_db
+	if _sfx_ui_out:
+		_sfx_ui_out.volume_db = ui_move_db
 
 
 func _volume_offset_db(level: int) -> float:
-	# 0=ミュート(-80dB), 1〜10: -20dB 〜 +10dB（5で0dB）
-	if level <= 0:
-		return -80.0
-	return (level - 5) * 3.0
+	return GameConfig.se_volume_offset_db(level)
 
 
 # --- Rules デモ ---
@@ -2196,9 +2740,13 @@ func _rules_proceed() -> void:
 		config_index = 0
 		_reset_ui_menu_stick_navigation()
 		queue_redraw()
+	elif StageSelectManager.tutorial_return_to == "trial":
+		StageSelectManager.tutorial_return_to = ""
+		BGMManager.start_first_stage()
+		_start_stage(_trial_stage_ids[0])
 	else:
 		StageSelectManager.tutorial_return_to = ""
-		# A-1: チュートリアル完了 → ステージ1 開始（初回のみ無音カウントダウン待機）
+		# チュートリアル完了 → ステージ1 開始（初回のみ無音カウントダウン待機）
 		BGMManager.start_first_stage()
 		stage_session.clear_results()
 		pause_retry_elapsed = -1.0
@@ -2224,22 +2772,6 @@ func _rules_exit_to_caller() -> void:
 
 func _hit_rules_button(pos: Vector2) -> bool:
 	return get_rules_next_button_rect().has_point(pos)
-
-
-func _hit_cleared_button(pos: Vector2) -> bool:
-	var vp: Vector2 = get_viewport_rect().size
-	var cx: float = vp.x / 2.0
-	var cy: float = vp.y / 2.0
-	var w: float = 850.0 * 1.2
-	var h: float = 650.0 * 1.2
-	var x: float = cx - w / 2.0
-	var y: float = cy - h / 2.0
-	var btn_w: float = w * 0.6
-	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
-	var btn_cx: float = x + w / 2.0
-	var btn_cy: float = y + h - btn_h / 2.0 - 26.0
-	var rect := Rect2(btn_cx - btn_w / 2.0, btn_cy - btn_h / 2.0, btn_w, btn_h)
-	return rect.has_point(pos)
 
 
 func _hit_results_button(pos: Vector2) -> bool:
@@ -2308,19 +2840,18 @@ func _hit_menu_item(pos: Vector2) -> int:
 
 
 func _hit_config_item(pos: Vector2) -> Dictionary:
-	# 「練習」「戻る」ボタン行（index 5, 6）のクリック判定。値行の ◀▶ は _hit_config_value_arrows。
+	# 「練習」「クレジット」「戻る」ボタン行（index 5, 6, 7）のクリック判定。値行の ◀▶ は _hit_config_value_arrows。
 	var vp: Vector2 = get_viewport_rect().size
 	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
-	var spacing: float = CONFIG_MENU_SPACING
-	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO
-	var box_h: float = (font.get_ascent(34) + font.get_descent(34)) * 1.5
-	var extra_y: float = vp.y * 0.07
-	var btn_half_w: float = box_w / 2.0
+	var btn_h_act: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+	var btn_base_cy: float = base_y + 5.0 * CONFIG_MENU_SPACING + btn_h_act * 0.5 - 16.0 + vp.y * 0.07 - 230.0
 	var btn_cx: float = vp.x / 2.0
-	for i in [5, 6]:
-		var item_y: float = base_y + i * spacing
-		if pos.y >= item_y - 20.0 + extra_y and pos.y <= item_y - 16.0 + box_h + extra_y and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
-			return { "ok": true, "main": i }
+	var btn_half_w: float = 350.0
+	for btn_i in range(3):
+		var act_i: int = 5 + btn_i
+		var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)
+		if pos.y >= btn_cy - btn_h_act * 0.5 - 20.0 and pos.y <= btn_cy + btn_h_act * 0.5 and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
+			return { "ok": true, "main": act_i }
 	return {}
 
 
@@ -2331,6 +2862,17 @@ func get_config_reset_button_rect(vp: Vector2) -> Rect2:
 		vp.x - CONFIG_RESET_BTN_W - CONFIG_RESET_BTN_MARGIN,
 		vp.y - btn_h - CONFIG_RESET_BTN_MARGIN,
 		CONFIG_RESET_BTN_W,
+		btn_h
+	)
+
+
+## コンフィグ左下の STAGE60 RESET ボタン領域を返す（全クリア後のみ使用）。
+func get_config_zou_reset_button_rect(vp: Vector2) -> Rect2:
+	var btn_h: float = (font.get_ascent(CONFIG_ZOU_RESET_BTN_FS) + font.get_descent(CONFIG_ZOU_RESET_BTN_FS)) * 1.5
+	return Rect2(
+		CONFIG_RESET_BTN_MARGIN,
+		vp.y - btn_h - CONFIG_RESET_BTN_MARGIN,
+		CONFIG_ZOU_RESET_BTN_W,
 		btn_h
 	)
 
@@ -2368,7 +2910,7 @@ func _hit_config_value_arrows(pos: Vector2) -> Dictionary:
 
 ## コンフィグ 値行 0〜4 のボックス中心・矢印位置（get_btn_scale 適用後）。描画とヒット判定で共通。
 func config_row_scaled_layout(vp: Vector2, item_idx: int) -> Dictionary:
-	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
+	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO - 180.0
 	var spacing: float = CONFIG_MENU_SPACING
 	var vx: float = vp.x * CONFIG_MENU_VX_RATIO
 	var box_w: float = vp.x * CONFIG_MENU_BOX_W_RATIO
@@ -2434,7 +2976,7 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 						BGMManager.stop()
 						_play_sfx(sfx_window_close)
 						_return_to_title_or_stage_debug_from_test()
-					elif not GameConfig.IS_DEMO:
+					elif not GameConfig.IS_TRIAL:
 						_return_to_stage_select_preserve_bgm()
 					else:
 						BGMManager.stop()
@@ -2536,7 +3078,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 					BGMManager.stop()
 					_play_sfx(sfx_window_close)
 					_return_to_title_or_stage_debug_from_test()
-				elif not GameConfig.IS_DEMO:
+				elif not GameConfig.IS_TRIAL:
 					_return_to_stage_select_preserve_bgm()
 				else:
 					BGMManager.stop()
@@ -2558,8 +3100,11 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 
 func _resume_from_pause() -> void:
 	pause_active = false
-	# Restore timer: adjust start_time so elapsed stays the same
-	start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
+	# Restore timer: adjust the relevant time base so elapsed stays the same
+	if game_state == "guide_countdown":
+		guide_start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
+	else:
+		start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
 	_play_sfx(sfx_window_close)
 	queue_redraw()
 
@@ -2568,28 +3113,34 @@ func _start_game() -> void:
 	stage_session.clear_debug_test()
 	input_recorder = null
 
-	if not GameConfig.IS_DEMO:
-		if not StageSelectManager.tutorial_shown:
-			# A-1: 初回 → チュートリアル → ステージ1
-			StageSelectManager.tutorial_shown = true
-			StageSelectManager.tutorial_return_to = "stage1"
-			StageSelectManager._save_states()
-			_enter_rules()
-			return
-		# B: 2回目以降 → インゲームBGM開始してステージセレクトへ
-		BGMManager.play_ingame()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	if GameConfig.IS_TRIAL:
+		# 体験版: 毎回チュートリアルを表示してから _trial_stage_ids[0] を開始
+		_trial_idx = 0
+		stage_session.clear_results()
+		pause_retry_elapsed = -1.0
+		StageSelectManager.tutorial_return_to = "trial"
+		_enter_rules()
 		return
 
-	# IS_DEMO=true: 従来どおり
-	BGMManager.start_first_stage()  # ①: 無音でカウントダウン待機
-	stage_session.clear_results()
-	pause_retry_elapsed = -1.0
-	_start_stage(0)
+	# 製品版
+	if not StageSelectManager.tutorial_shown:
+		# 初回 → チュートリアル → ステージ1
+		StageSelectManager.tutorial_shown = true
+		StageSelectManager.tutorial_return_to = "stage1"
+		StageSelectManager._save_states()
+		_enter_rules()
+		return
+	# 2回目以降 → タイトルBGM停止→斜めワイプ→インゲームBGM開始＋ステージセレクトへ
+	BGMManager.stop()
+	TransitionManager.play_diagonal(func():
+		BGMManager.play_ingame()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	)
 
 
 func _start_game_from_stage_select() -> void:
 	var sid: int = StageSelectManager.pending_stage_id
+	StageSelectManager.last_played_stage_id = sid
 	StageSelectManager.pending_stage_id = -1
 	stage_session.clear_debug_test()
 	input_recorder = null
@@ -2598,21 +3149,106 @@ func _start_game_from_stage_select() -> void:
 	_start_stage(sid)
 
 
+func _konami_event_to_token(event: InputEvent) -> String:
+	if event is InputEventKey and event.pressed and not event.echo:
+		match event.keycode:
+			KEY_UP:    return "up"
+			KEY_DOWN:  return "dn"
+			KEY_LEFT:  return "lt"
+			KEY_RIGHT: return "rt"
+			KEY_B:     return "b"
+			KEY_A:     return "a"
+	elif event is InputEventJoypadButton and event.pressed:
+		match event.button_index:
+			JOY_BUTTON_DPAD_UP:    return "up"
+			JOY_BUTTON_DPAD_DOWN:  return "dn"
+			JOY_BUTTON_DPAD_LEFT:  return "lt"
+			JOY_BUTTON_DPAD_RIGHT: return "rt"
+			JOY_BUTTON_B:          return "b"
+			JOY_BUTTON_A:          return "a"
+	return ""
+
+
+func _konami_process_input(event: InputEvent) -> void:
+	if _konami_used:
+		return
+	var token: String = _konami_event_to_token(event)
+	if token.is_empty():
+		return
+	var now: int = Time.get_ticks_msec()
+	if _konami_idx > 0 and now - _konami_last_msec > 3000:
+		_konami_idx = 0
+	_konami_last_msec = now
+	if token == _KONAMI_SEQ[_konami_idx]:
+		_konami_idx += 1
+		if _konami_idx >= _KONAMI_SEQ.size():
+			_konami_activate()
+			_konami_idx = 0
+	else:
+		_konami_idx = 1 if token == _KONAMI_SEQ[0] else 0
+
+
+func _konami_activate() -> void:
+	_konami_used = true
+	_play_sfx(sfx_cat)
+	# 全ステージをCLEAREDにセット
+	for i in range(StageSelectManager.STAGE_COUNT):
+		StageSelectManager._states[i] = StageSelectManager.StageState.CLEARED
+	# id >= 4 からランダムに1つ選んでUNLOCKEDに戻す（全クリア直前状態）
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var pick: int = 4 + rng.randi() % (StageSelectManager.STAGE_COUNT - 4)
+	StageSelectManager._states[pick] = StageSelectManager.StageState.UNLOCKED
+	# all_cleared は false のまま（全クリア演出をトリガーしないため）
+	StageSelectManager._save_states()
+
+
 func _return_to_stage_select_preserve_bgm() -> void:
 	pause_active = false
 	pause_confirm_title = false
 	pause_retry_elapsed = -1.0
 	BGMManager.resume_stage_select()
 	_play_sfx(sfx_window_close)
-	get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 
 
 func _advance_stage() -> void:
-	if not GameConfig.IS_DEMO:
-		# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
-		BGMManager.resume_stage_select()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	if GameConfig.IS_TRIAL:
+		_trial_idx += 1
+		if _trial_idx < _trial_stage_ids.size():
+			_start_stage(_trial_stage_ids[_trial_idx])
+		else:
+			# 10ステージ完走 → 全ステージ結果画面（Twitter共有を兼ねた体験版完了画面）
+			game_state = "results"
+			queue_redraw()
 		return
+
+	# 製品版
+	if StageSelectManager._zou_stage_idx >= 0 and StageSelectManager.last_played_stage_id == StageSelectManager._zou_stage_idx:
+		if not StageSelectManager.zou_cleared:
+			# 初回クリア: エンディング画面へ
+			StageSelectManager.mark_zou_cleared()
+			_zou_ending_start = Time.get_ticks_msec() / 1000.0
+			game_state = "zou_ending"
+			queue_redraw()
+		else:
+			# リプレイ: ステージセレクトへ
+			BGMManager.resume_stage_select()
+			TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
+		return
+	# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
+	BGMManager.resume_stage_select()
+	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
+
+
+func _trigger_zou_ending_return() -> void:
+	if game_state != "zou_ending":
+		return
+	game_state = "zou_transition"
+	TransitionManager.play_triangle(func():
+		BGMManager.play_ingame()
+		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+	)
 	if current_stage < GameConfig.get_max_stage_index():
 		_start_stage(current_stage + 1)
 	else:
@@ -2643,6 +3279,13 @@ func _enter_results_screen_debug() -> void:
 
 func _return_to_title_or_stage_debug_from_test() -> void:
 	_screenshot_folder_opened = false
+	if GameConfig.IS_TRIAL:
+		BGMManager.stop()
+		debug_mode = false
+		game_state = "title"
+		title_start_time = Time.get_ticks_msec() / 1000.0
+		_apply_title_bgm_for_debug_mode()
+		return
 	if _pbd_return_after_test and _debug_tools_enabled():
 		_pbd_return_after_test = false
 		stage_session.clear_debug_test()
@@ -2665,9 +3308,9 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 		stage_debug_state.last_error = ""
 		title_start_time = Time.get_ticks_msec() / 1000.0
 		BGMManager.stop()  # BGMManager に移行
-	elif not GameConfig.IS_DEMO:
+	elif not GameConfig.IS_TRIAL:
 		BGMManager.resume_stage_select()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 	else:
 		debug_mode = false
 		game_state = "title"
@@ -2920,9 +3563,9 @@ func _pbd_start_test() -> void:
 func _pbd_exit_to_stage_select() -> void:
 	stage_debug_state.field_focus_idx = -1
 	debug_mode = false
-	if not GameConfig.IS_DEMO:
+	if not GameConfig.IS_TRIAL:
 		BGMManager.resume_stage_select()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
+		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 	else:
 		game_state = "title"
 		title_start_time = Time.get_ticks_msec() / 1000.0
@@ -3074,6 +3717,10 @@ func _stage_debug_list_width_for_split(split: float) -> float:
 
 func _stage_debug_list_right_edge_x(split: float) -> float:
 	return split - STAGE_DEBUG_SCROLLBAR_W - STAGE_DEBUG_SCROLLBAR_GAP * 2.0
+
+
+func _stage_debug_clear_badge_rect(row_y: float, list_left: float) -> Rect2:
+	return Rect2(list_left + 8.0, row_y + 50.0, 44.0, 18.0)
 
 
 func _stage_debug_scrollbar_track_rect(vp: Vector2) -> Rect2:
@@ -4343,10 +4990,20 @@ func _input_stage_debug(event: InputEvent) -> void:
 		var n: int = _stage_debug_total_rows()
 		var y0: float = STAGE_DEBUG_LIST_TOP_Y - stage_debug_state.scroll
 		var list_bottom: float = vp.y - STAGE_DEBUG_CONTENT_BOTTOM_MARGIN
+		var master_n_lc: int = _stage_debug_master_count()
 		for i in range(n):
 			var y1: float = y0 + float(i) * STAGE_DEBUG_ROW_H
 			if pos.y >= y1 and pos.y < y1 + STAGE_DEBUG_ROW_H and pos.y < list_bottom and pos.y >= STAGE_DEBUG_LIST_TOP_Y - 4.0:
 				if pos.x >= 8.0 and pos.x < _stage_debug_list_right_edge_x(split):
+					# CLR バッジ: クリックで ON/OFF 切り替え
+					if i < master_n_lc and _stage_debug_clear_badge_rect(y1, 8.0).has_point(pos):
+						if StageSelectManager.get_state(i) == StageSelectManager.StageState.CLEARED:
+							StageSelectManager._states[i] = StageSelectManager.StageState.UNLOCKED
+						else:
+							StageSelectManager._states[i] = StageSelectManager.StageState.CLEARED
+						StageSelectManager._save_states()
+						queue_redraw()
+						return
 					if i != stage_debug_state.selected:
 						_commit_focused_field_to_pending()
 						if stage_debug_state.last_error != "":
@@ -4511,9 +5168,6 @@ func _flush_debug_input_log() -> void:
 # =============================================================================
 
 func _process_pad(delta: float) -> void:
-	# イントロ演出中はパッド処理もスキップ
-	if game_state == "playing" and not ui_renderer.is_stage_intro_done():
-		return
 	var prev_grab: bool = input_handler.grab_input_active
 	input_handler.process_pad(delta)
 	# プレイヤー円が影響を与え始めた瞬間にキャッチSE
@@ -4587,7 +5241,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config":
+	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config" or game_state == "credit" or game_state == "se_config":
 		if game_state == "rules":
 			if _metrics_settle_timer > 0.0:
 				_metrics_settle_timer -= delta
@@ -4621,6 +5275,8 @@ func _process(delta: float) -> void:
 			_play_sfx(sfx_count)
 		if elapsed >= 3.0:
 			game_state = "playing"
+			if input_handler.get_last_input_method() == "mouse":
+				playing_mouse_steers_player = true
 			_dwell_times  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 			_dwell_counts = [0,   0,   0,   0,   0,   0,   0,   0,   0,   0  ]
 			_dwell_prev_bucket = clampi(int(current_circularity / 10.0), 0, 9)
@@ -4680,6 +5336,22 @@ func _process(delta: float) -> void:
 						hint_alpha = 0.8
 						break
 		ui_renderer.update_spore_particles(delta)
+		if input_handler.cat_anim_triggered:
+			input_handler.cat_anim_triggered = false
+			_play_sfx(sfx_cat)
+			ui_renderer.start_cat_anim()
+		# ZOU スタッフロール: 初回クリア前（zou_cleared=false）のみ表示
+		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:
+			var now_roll: float = Time.get_ticks_msec() / 1000.0
+			if not _zou_roll_started and input_handler.get_snap_score() >= 0.2:
+				_zou_roll_started = true
+				_zou_roll_index = 0
+				_zou_roll_last_time = now_roll
+				queue_redraw()
+			elif _zou_roll_started and _zou_roll_index < _ZOU_ROLL_TOTAL_LINES and (now_roll - _zou_roll_last_time) >= 18.0:
+				_zou_roll_index += 1
+				_zou_roll_last_time = now_roll
+				queue_redraw()
 		# 描画の分離: 以下のいずれかの場合のみ queue_redraw を発行する。
 		# moved=true のとき input_handler.update_drag_physics が既に発行済みのため重複しても問題ない。
 		var _has_particles: bool = not ui_renderer.spore_particles.is_empty()
@@ -4694,8 +5366,15 @@ func _process(delta: float) -> void:
 	elif game_state == "cleared":
 		ui_renderer.update_particles(delta)
 		queue_redraw()
+		if _clear_card_canvas != null:
+			_clear_card_canvas.queue_redraw()
 
 	elif game_state == "results":
+		queue_redraw()
+
+	elif game_state == "zou_ending":
+		if Time.get_ticks_msec() / 1000.0 - _zou_ending_start >= 20.0:
+			_trigger_zou_ending_return()
 		queue_redraw()
 
 

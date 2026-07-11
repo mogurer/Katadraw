@@ -300,8 +300,8 @@ func _draw_morph_polygon(
 	fill_alpha: float,
 	white_dot_scale: float = 1.0
 ) -> void:
-	var dot_color := Color(0.26, 0.21, 0.28)
-	var line_color := Color(0.26, 0.21, 0.28)
+	var dot_color := GameConfig.INK_COLOR
+	var line_color := GameConfig.INK_COLOR
 	var line_width: float = 3.0
 
 	var screen_pts: PackedVector2Array = PackedVector2Array()
@@ -310,14 +310,14 @@ func _draw_morph_polygon(
 
 	if fill_alpha > 0.001 and screen_pts.size() >= 3:
 		var tris: PackedInt32Array = Geometry2D.triangulate_polygon(screen_pts)
-		var fill_col := Color(0.26, 0.21, 0.28, 0.22 * fill_alpha)
+		var fill_col := Color(GameConfig.INK_COLOR,0.22 * fill_alpha)
 		for ti in range(0, tris.size(), 3):
-			var tri: PackedVector2Array = PackedVector2Array([
-				screen_pts[tris[ti]],
-				screen_pts[tris[ti + 1]],
-				screen_pts[tris[ti + 2]],
-			])
-			_game.draw_colored_polygon(tri, fill_col)
+			var p0: Vector2 = screen_pts[tris[ti]]
+			var p1: Vector2 = screen_pts[tris[ti + 1]]
+			var p2: Vector2 = screen_pts[tris[ti + 2]]
+			if absf((p1 - p0).cross(p2 - p0)) < 1.0:
+				continue
+			_game.draw_colored_polygon(PackedVector2Array([p0, p1, p2]), fill_col)
 
 	for edge in K_EDGES:
 		var a: int = edge[0]
@@ -506,7 +506,7 @@ func draw(vp: Vector2) -> void:
 			var remaining: float = phase5_end - elapsed
 			if remaining < TI_MOTION_FADE_DUR and _game.sfx_motion.playing:
 				var fade_t: float = remaining / TI_MOTION_FADE_DUR  # 1.0→0.0
-				_game.sfx_motion.volume_db = -14.5 + linear_to_db(maxf(fade_t, 0.001))
+				_game.sfx_motion.volume_db = _game._se_base_db() + linear_to_db(maxf(fade_t, 0.001))
 		# Phase 6: ロゴ完成状態で静止（1.5秒）
 		elif elapsed < phase6_end:
 			_draw_ti_logo_reveal(vp, 1.0)
@@ -547,8 +547,8 @@ func _draw_ti_k_complete(
 	white_dot_scale: float = 1.0
 ) -> void:
 	"""Kの完成形を描画（白点変化・変形対応）。white_dot_scale は右上○の倍率（Phase4 以降で 1.5 など）。"""
-	var dot_color := Color(0.26, 0.21, 0.28)
-	var line_color := Color(0.26, 0.21, 0.28)
+	var dot_color := GameConfig.INK_COLOR
+	var line_color := GameConfig.INK_COLOR
 	var line_width: float = 3.0
 
 	# P2（右上先端）の変形位置を計算（初期位置→ロゴ最終位置）
