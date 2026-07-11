@@ -320,6 +320,15 @@ func _ready() -> void:
 	_sfx_telop_soft = AudioStreamPlayer.new()
 	_sfx_telop_soft.stream = load("res://assets/sounds/Telop_Soft_25.wav")
 	add_child(_sfx_telop_soft)
+	# SE音量を設定ファイルから読み込み、各 SE プレイヤーの初期音量に反映する
+	var _ss_cfg := ConfigFile.new()
+	if _ss_cfg.load("user://config.cfg") == OK:
+		var se_vol: int = clampi(int(_ss_cfg.get_value("settings", "se_volume", 5)), 0, 10)
+		var offset_db: float = -80.0 if se_vol <= 0 else (se_vol - 5) * 3.0
+		_sfx_hover.volume_db  = -10.0 + offset_db
+		_sfx_click.volume_db  = -14.5 + offset_db
+		_sfx_on.volume_db     = -14.5 + offset_db
+		_sfx_spot02.volume_db = -10.0 + offset_db
 	_onpu_texture      = load("res://assets/UI/onpu.svg")      as Texture2D
 	_onpu_icon_texture = load("res://assets/UI/onpu_icon.svg") as Texture2D
 	_left_q_texture    = load("res://assets/UI/LEFT_Q.svg")     as Texture2D

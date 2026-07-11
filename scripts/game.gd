@@ -2608,23 +2608,29 @@ func _apply_bgm_volume() -> void:
 	BGMManager.set_volume_db(_volume_offset_db(bgm_volume))
 
 
+## SE 基準 dB（-14.5dB + SE音量オフセット）。外部スクリプトからも参照可能。
+func _se_base_db() -> float:
+	return -14.5 + _volume_offset_db(se_volume)
+
+
 func _apply_se_volume() -> void:
-	var offset_db: float = _volume_offset_db(se_volume)
-	sfx_count.volume_db = -14.5 + offset_db
-	sfx_clear.volume_db = -14.5 + offset_db
-	sfx_on.volume_db = -14.5 + offset_db
-	sfx_click.volume_db = -14.5 + offset_db
-	sfx_window_open.volume_db = -14.5 + offset_db
-	sfx_window_close.volume_db = -14.5 + offset_db
-	sfx_catch.volume_db = -14.5 + offset_db
-	sfx_move.volume_db = -14.5 + offset_db
-	sfx_stageclear.volume_db = -14.5 + offset_db
-	sfx_stageclear02.volume_db = -14.5 + offset_db
-	sfx_point.volume_db = -14.5 + offset_db
-	sfx_motion.volume_db = -14.5 + offset_db
-	sfx_stagestart.volume_db = -14.5 + offset_db
-	sfx_cat.volume_db = -14.5 + offset_db
-	sfx_spot.volume_db = -14.5 + offset_db
+	var base_db: float = _se_base_db()
+	sfx_count.volume_db = base_db
+	sfx_clear.volume_db = base_db
+	sfx_on.volume_db = base_db
+	sfx_click.volume_db = base_db
+	sfx_window_open.volume_db = base_db
+	sfx_window_close.volume_db = base_db
+	sfx_catch.volume_db = base_db
+	sfx_move.volume_db = base_db
+	sfx_stageclear.volume_db = base_db
+	sfx_stageclear02.volume_db = base_db
+	sfx_point.volume_db = base_db
+	sfx_motion.volume_db = base_db
+	sfx_stagestart.volume_db = base_db
+	sfx_cat.volume_db = base_db
+	sfx_spot.volume_db = base_db
+	TransitionManager.set_se_volume_db(base_db)
 
 
 func _volume_offset_db(level: int) -> float:

@@ -506,7 +506,7 @@ func draw(vp: Vector2) -> void:
 			var remaining: float = phase5_end - elapsed
 			if remaining < TI_MOTION_FADE_DUR and _game.sfx_motion.playing:
 				var fade_t: float = remaining / TI_MOTION_FADE_DUR  # 1.0→0.0
-				_game.sfx_motion.volume_db = -14.5 + linear_to_db(maxf(fade_t, 0.001))
+				_game.sfx_motion.volume_db = _game._se_base_db() + linear_to_db(maxf(fade_t, 0.001))
 		# Phase 6: ロゴ完成状態で静止（1.5秒）
 		elif elapsed < phase6_end:
 			_draw_ti_logo_reveal(vp, 1.0)

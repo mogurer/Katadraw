@@ -36,6 +36,12 @@ func _ready() -> void:
 	_sfx_triangle = _make_sfx("res://assets/sounds/ts02.wav")
 	_sfx_polygon  = _make_sfx("res://assets/sounds/ts03.wav")
 	_sfx_diagonal = _make_sfx("res://assets/sounds/ts01.wav")
+	# SE音量を設定ファイルから読み込んで初期適用（game.gd が後から set_se_volume_db() で上書きする）
+	var cfg := ConfigFile.new()
+	if cfg.load("user://config.cfg") == OK:
+		var se_vol: int = clampi(int(cfg.get_value("settings", "se_volume", 5)), 0, 10)
+		var offset_db: float = -80.0 if se_vol <= 0 else (se_vol - 5) * 3.0
+		set_se_volume_db(-14.5 + offset_db)
 
 
 func _make_sfx(path: String) -> AudioStreamPlayer:
@@ -44,6 +50,13 @@ func _make_sfx(path: String) -> AudioStreamPlayer:
 	p.volume_db = -14.5
 	add_child(p)
 	return p
+
+
+## game.gd の _apply_se_volume() から呼ばれる。SE 音量変更時に遷移 SE を同期する。
+func set_se_volume_db(base_db: float) -> void:
+	_sfx_triangle.volume_db = base_db
+	_sfx_polygon.volume_db  = base_db
+	_sfx_diagonal.volume_db = base_db
 
 
 func is_active() -> bool:
