@@ -997,9 +997,20 @@ func _draw() -> void:
 				else:
 					var _bt: float = Time.get_ticks_msec() / 1000.0
 					var _raw: float = (sin(_bt * PI) + 1.0) * 0.5
-					var _eased: float = _raw * _raw * (3.0 - 2.0 * _raw)
+					var _eased: float = _raw
 					var _dot_color: Color = Color(0.50, 0.07, 0.14).lerp(_UNLOCKED_COLOR, _eased)
 					var _dot_r: float = lerpf(draw_radius, draw_radius * 1.5, _eased)
+					# 水紋: ピーク（最大輝度・最大サイズ）に同期して1発放出、外へ広がりながらフェード
+					# sin(_bt*PI)=1 のピークは _cycle_t=0.5 → そこを _rp=0 にオフセット
+					var _cycle_t: float = fmod(_bt, 2.0)
+					var _rp: float = fmod(_cycle_t - 0.5 + 2.0, 2.0) / 2.0
+					var _rr: float = lerpf(draw_radius * 1.6, draw_radius * 3.5, _rp)
+					var _ra: float = (1.0 - _rp) * 0.5
+					var _spread: float = lerpf(0.0, draw_radius * 0.5, _rp)
+					draw_arc(pos, _rr - _spread, 0.0, TAU, 32, Color(_UNLOCKED_COLOR, _ra * 0.3), 6.0, true)
+					draw_arc(pos, _rr,           0.0, TAU, 32, Color(_UNLOCKED_COLOR, _ra * 0.8), 6.0, true)
+					draw_arc(pos, _rr + _spread, 0.0, TAU, 32, Color(_UNLOCKED_COLOR, _ra * 0.3), 6.0, true)
+					# メインドット（最前面）
 					draw_circle(pos, _dot_r, _dot_color)
 			StageSelectManager.StageState.CLEARED:
 				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _CLEARED_COLOR)
