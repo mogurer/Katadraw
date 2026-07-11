@@ -1778,16 +1778,16 @@ func _input(event: InputEvent) -> void:
 		if pause_active:
 			_input_pause(event, is_confirm, is_gi_pause_key)
 			return
-		if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START:
+		if is_gi_pause_key:
 			pause_active = true
 			pause_index = 0
 			pause_elapsed = 0.0
 			ui_renderer._pause_anim_time = Time.get_ticks_msec() / 1000.0
+			_play_sfx(sfx_window_open)
 			queue_redraw()
 			return
 		var is_guide_cancel: bool = (
-			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
-			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
+			event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B
 		)
 		if (
 			is_guide_cancel
@@ -1812,19 +1812,9 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "guide_countdown":
-		var is_cd_pause_key: bool = (
-			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
-			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START)
-		)
-		if pause_active:
-			_input_pause(event, is_confirm, is_cd_pause_key)
-			return
-		if is_cd_pause_key:
-			pause_active = true
-			pause_index = 0
-			pause_elapsed = Time.get_ticks_msec() / 1000.0 - guide_start_time
-			ui_renderer._pause_anim_time = Time.get_ticks_msec() / 1000.0
-			queue_redraw()
+		# カウントダウン中は ESC / Start を無効化する。
+		# カウントダウン中にメニューを開くと裏側の状態遷移（guide_start_time の補正等）で
+		# 不整合が起きるため、意図的に何も処理せず return する。
 		return
 
 	if game_state == "results":
@@ -3101,10 +3091,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 func _resume_from_pause() -> void:
 	pause_active = false
 	# Restore timer: adjust the relevant time base so elapsed stays the same
-	if game_state == "guide_countdown":
-		guide_start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
-	else:
-		start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
+	start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
 	_play_sfx(sfx_window_close)
 	queue_redraw()
 
