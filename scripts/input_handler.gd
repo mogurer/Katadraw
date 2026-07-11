@@ -2829,24 +2829,37 @@ func _apply_snap_separation_forces(forces: Array[Vector2]) -> void:
 	for i in range(n - 1):
 		if _is_locked(i):
 			continue
-		if i < sn and _snap_point_state[i] != 0:
-			continue  # 吸着済みは対象外
+		var i_snapped: bool = i < sn and _snap_point_state[i] != 0
 		var pi: Vector2 = _game.point_positions[i]
 		for j in range(i + 1, n):
 			if _is_locked(j):
 				continue
-			if j < sn and _snap_point_state[j] != 0:
-				continue  # 吸着済みは対象外
+			var j_snapped: bool = j < sn and _snap_point_state[j] != 0
+			# 両方吸着済みは別頂点に固定済みなのでスキップ
+			if i_snapped and j_snapped:
+				continue
 			var pj: Vector2 = _game.point_positions[j]
 			var delta_v: Vector2 = pi - pj
 			var dist: float = delta_v.length()
-			if dist < 0.001 or dist >= SNAP_SEPARATION_DISTANCE:
+			var dir: Vector2
+			var falloff: float
+			if dist < 0.001:
+				# 方針2: ゼロ距離フォールバック — インデックス差から決定論的な固定方向を生成
+				# 黄金比スケールにより各ペアが均等分散した異なる方向を持つ
+				var angle: float = float(i - j) * PI * 0.6180339887
+				dir = Vector2(cos(angle), sin(angle))
+				falloff = 1.0  # 最大斥力
+			elif dist >= SNAP_SEPARATION_DISTANCE:
 				continue
-			var dir: Vector2 = delta_v / dist
-			var falloff: float = 1.0 - dist / SNAP_SEPARATION_DISTANCE
+			else:
+				dir = delta_v / dist
+				falloff = 1.0 - dist / SNAP_SEPARATION_DISTANCE
 			var fmag: float = SNAP_SEPARATION_STRENGTH * falloff * falloff
-			forces[i] += dir * fmag
-			forces[j] -= dir * fmag
+			# 方針1: 吸着済みは固定障害物として扱い、未吸着側にのみ力を適用
+			if not i_snapped:
+				forces[i] += dir * fmag
+			if not j_snapped:
+				forces[j] -= dir * fmag
 
 
 ## 吸着後の弱いバネ力を forces に加算する。
@@ -3153,6 +3166,28 @@ func _snap_validate_and_fix_consistency() -> void:
 			_snap_point_state[i] = 0
 			if i < cn:
 				_snap_point_corner_idx[i] = -1
+
+	# Pass 4: 保険 — 任意2点間の完全重複（dist < 0.5px）を検出し強制分離
+	# 方針1・2で通常は発生しないが、別経路の重複に対するフォールバック。
+	# ロック・吸着状態に関わらずチェックし、未ロック側の座標を直接修正する。
+	for i in range(n - 1):
+		if _is_locked(i):
+			continue
+		for j in range(i + 1, n):
+			if _is_locked(j):
+				continue
+			var pi4: Vector2 = _game.point_positions[i]
+			var pj4: Vector2 = _game.point_positions[j]
+			var d4: float = pi4.distance_to(pj4)
+			if d4 >= 0.5:
+				continue
+			push_warning("[snap] frame=%d OVERLAP: pi=%d(%s) pj=%d(%s) dist=%.4f" % [
+				frame, i, str(pi4), j, str(pj4), d4])
+			var angle4: float = float(i - j) * PI * 0.6180339887
+			var sep_dir: Vector2 = Vector2(cos(angle4), sin(angle4))
+			# 片側 0.25px ずつ計 0.5px 分離
+			_game.point_positions[i] = pi4 + sep_dir * 0.25
+			_game.point_positions[j] = pj4 - sep_dir * 0.25
 
 
 ## ===== 旧スナップシステム（未使用、互換性のため残存）=====
