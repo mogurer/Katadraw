@@ -40,8 +40,7 @@ func _ready() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load("user://config.cfg") == OK:
 		var se_vol: int = clampi(int(cfg.get_value("settings", "se_volume", 5)), 0, 10)
-		var offset_db: float = -80.0 if se_vol <= 0 else (se_vol - 5) * 3.0
-		set_se_volume_db(-14.5 + offset_db)
+		set_se_volume_db(-14.5 + GameConfig.se_volume_offset_db(se_vol))
 
 
 func _make_sfx(path: String) -> AudioStreamPlayer:

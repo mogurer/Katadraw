@@ -2639,10 +2639,7 @@ func _apply_se_volume() -> void:
 
 
 func _volume_offset_db(level: int) -> float:
-	# 0=ミュート(-80dB), 1〜10: -20dB 〜 +10dB（5で0dB）
-	if level <= 0:
-		return -80.0
-	return (level - 5) * 3.0
+	return GameConfig.se_volume_offset_db(level)
 
 
 # --- Rules デモ ---
