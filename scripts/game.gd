@@ -574,6 +574,7 @@ func _ready() -> void:
 	input_handler.on_points_changed = _on_input_points_changed
 	input_handler.on_selection_changed = _on_selection_changed
 	TranslationServer.set_locale("ja")
+	_load_settings()
 	var mplus_font: Font = load("res://assets/fonts/Mplus2-Medium.otf")
 	if mplus_font:
 		mplus_font.fallbacks = [ThemeDB.fallback_font]
@@ -613,8 +614,8 @@ func _ready() -> void:
 	_setup_content_scale()
 	get_window().size_changed.connect(_on_window_size_changed)
 	_sync_window_display_from_os()
-	if not is_fullscreen:
-		call_deferred("_apply_window_pixel_size_impl", _window_client_size_for_display_mode())
+	# ロードした display_mode（またはOSから同期したフルスクリーン状態）を適用する
+	call_deferred("_apply_video_mode_from_display_mode")
 	if not GameConfig.IS_TRIAL and StageSelectManager.pending_stage_id >= 0:
 		_start_game_from_stage_select()
 	else:
@@ -868,7 +869,11 @@ func _update_player_hover() -> void:
 
 	if game_state == "config":
 		if _menu_hover_holdoff_frames <= 0:
-			if config_zou_reset_confirm:
+			if _cursor_pad_override_hidden:
+				# パッド/キーボード操作中はマウスホバーによる選択行の上書きをスキップ
+				config_reset_hovered = false
+				config_zou_reset_hovered = false
+			elif config_zou_reset_confirm:
 				if pos.x < vp.x / 2.0:
 					config_zou_reset_confirm_index = 0
 				else:
@@ -2208,16 +2213,20 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_UP:
 			config_index = (config_index - 1 + items_count) % items_count
+			_cursor_register_pad_activity()
 			moved = true
 		elif event.keycode == KEY_DOWN:
 			config_index = (config_index + 1) % items_count
+			_cursor_register_pad_activity()
 			moved = true
 		elif event.keycode == KEY_LEFT:
 			if config_index < 5:
+				_cursor_register_pad_activity()
 				_config_apply_main_horizontal(-1)
 				moved = true
 		elif event.keycode == KEY_RIGHT:
 			if config_index < 5:
+				_cursor_register_pad_activity()
 				_config_apply_main_horizontal(1)
 				moved = true
 
@@ -2431,6 +2440,7 @@ func _config_apply_main_horizontal(delta: int) -> void:
 			se_volume = clampi(se_volume + delta, 0, 10)
 			_apply_se_volume()
 			_play_sfx(sfx_click)
+	_save_settings()
 
 
 func _window_client_size_for_display_mode() -> Vector2i:
@@ -2512,6 +2522,32 @@ func config_mouse_confine_ui_label() -> String:
 	return tr("CONFIG_MOUSE_CONFINE_ON") if mouse_confine_to_window else tr("CONFIG_MOUSE_CONFINE_OFF")
 
 
+const _SETTINGS_PATH := "user://config.cfg"
+const _SETTINGS_SECTION := "settings"
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value(_SETTINGS_SECTION, "bgm_volume", bgm_volume)
+	cfg.set_value(_SETTINGS_SECTION, "se_volume", se_volume)
+	cfg.set_value(_SETTINGS_SECTION, "display_mode", display_mode)
+	cfg.set_value(_SETTINGS_SECTION, "mouse_confine_to_window", mouse_confine_to_window)
+	cfg.set_value(_SETTINGS_SECTION, "language", TranslationServer.get_locale())
+	cfg.save(_SETTINGS_PATH)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_SETTINGS_PATH) != OK:
+		return
+	bgm_volume = clampi(int(cfg.get_value(_SETTINGS_SECTION, "bgm_volume", 5)), 0, 10)
+	se_volume = clampi(int(cfg.get_value(_SETTINGS_SECTION, "se_volume", 5)), 0, 10)
+	display_mode = clampi(int(cfg.get_value(_SETTINGS_SECTION, "display_mode", DISPLAY_MODE_WINDOW_1080)), 0, 2)
+	mouse_confine_to_window = bool(cfg.get_value(_SETTINGS_SECTION, "mouse_confine_to_window", false))
+	var lang: String = str(cfg.get_value(_SETTINGS_SECTION, "language", "ja"))
+	if lang == "en" or lang == "ja":
+		TranslationServer.set_locale(lang)
+
+
 func _center_window() -> void:
 	var screen_rect: Rect2i = DisplayServer.screen_get_usable_rect(DisplayServer.get_primary_screen())
 	var win_size: Vector2i = get_window().get_size_with_decorations()
@@ -2542,6 +2578,17 @@ func _apply_window_pixel_size_impl(new_size: Vector2i, fs_retries: int = 18) -> 
 		return
 	DisplayServer.window_set_size(new_size, wid)
 	win.size = new_size
+	# 装飾込みサイズが使用可能領域の高さを超える場合、クライアント高を縮小する。
+	# 内部解像度（1920×1080）は変わらないため、縮小分はレターボックスとして表示される。
+	var usable: Rect2i = DisplayServer.screen_get_usable_rect(DisplayServer.get_primary_screen())
+	var deco_h: int = win.get_size_with_decorations().y - win.size.y
+	if deco_h < 0:
+		deco_h = 0
+	if win.get_size_with_decorations().y > usable.size.y and usable.size.y > deco_h:
+		var clamped_h: int = usable.size.y - deco_h
+		var clamped_size := Vector2i(new_size.x, clamped_h)
+		DisplayServer.window_set_size(clamped_size, wid)
+		win.size = clamped_size
 	is_fullscreen = false
 	display_mode = DISPLAY_MODE_WINDOW_1080 if new_size == WINDOW_CLIENT_SIZE_1080 else DISPLAY_MODE_WINDOW_720
 	_menu_hover_holdoff_frames = MENU_HOVER_HOLDOFF_FRAMES

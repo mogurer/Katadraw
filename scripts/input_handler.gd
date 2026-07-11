@@ -1443,6 +1443,9 @@ func _step_drag_physics(delta: float) -> bool:
 	if topology_changed:
 		_snap_release_far_points()
 
+	# スナップ状態の整合性チェック（ghost occupancy・二重スナップを検出・修正）
+	_snap_validate_and_fix_consistency()
+
 	if not player_force_active and not _has_active_point_velocity():
 		_zero_all_point_velocities()
 
@@ -3031,6 +3034,15 @@ func _apply_snap_vertex_forces(forces: Array[Vector2]) -> void:
 func _snap_permute_after_reorder(ord: PackedInt32Array) -> void:
 	var n: int = ord.size()
 	if n == 0 or _snap_point_state.size() != n or _snap_point_target.size() != n:
+		# サイズ不一致: 置換を安全に行えないため、全スナップ状態をリセットして整合性を復元する。
+		# 黙って return すると座標順序だけ書き換わり、スナップ状態が旧インデックスのまま残る。
+		push_warning("[snap] _snap_permute_after_reorder: サイズ不一致 ord=%d state=%d target=%d cidx=%d — 全スナップ状態をリセット" % [
+			n, _snap_point_state.size(), _snap_point_target.size(), _snap_point_corner_idx.size()])
+		_snap_corner_occupant.clear()
+		for i in range(_snap_point_state.size()):
+			_snap_point_state[i] = 0
+		for i in range(_snap_point_corner_idx.size()):
+			_snap_point_corner_idx[i] = -1
 		return
 	# 逆置換 (old_idx → new_idx)
 	var inv: PackedInt32Array = PackedInt32Array()
@@ -3052,13 +3064,95 @@ func _snap_permute_after_reorder(ord: PackedInt32Array) -> void:
 	_snap_point_state = new_state
 	_snap_point_target = new_target
 	_snap_point_corner_idx = new_cidx
-	# コーナー占有辞書のポイントインデックスを新インデックスに更新
+	# コーナー占有辞書のポイントインデックスを新インデックスに更新。
+	# old_pi の state が 0（ghost occupancy）のエントリは引き継がない。
 	var new_occ: Dictionary = {}
 	for ci in _snap_corner_occupant:
 		var old_pi: int = int(_snap_corner_occupant[ci])
-		if old_pi >= 0 and old_pi < n:
+		if old_pi >= 0 and old_pi < n and _snap_point_state[old_pi] == 1:
 			new_occ[ci] = inv[old_pi]
 	_snap_corner_occupant = new_occ
+
+
+## スナップ状態の整合性を毎フレーム検証し、ghost occupancy と二重スナップを修正する（方針2・3）
+func _snap_validate_and_fix_consistency() -> void:
+	var n: int = _game.point_positions.size()
+	if n == 0:
+		return
+	var sn: int = _snap_point_state.size()
+	var cn: int = _snap_point_corner_idx.size()
+	var corners: Array = _snap_cached_corner_world
+	var frame: int = Engine.get_process_frames()
+
+	# Pass 1: _snap_corner_occupant の ghost エントリを除去
+	# dict[ci]=pi なのに state[pi]!=1 または corner_idx[pi]!=ci のエントリ
+	var ghost_cis: Array[int] = []
+	for ci: int in _snap_corner_occupant:
+		var pi: int = int(_snap_corner_occupant[ci])
+		if pi < 0 or pi >= sn:
+			ghost_cis.append(ci)
+			push_warning("[snap] frame=%d ghost: ci=%d pi=%d (out of range, sn=%d n=%d)" % [frame, ci, pi, sn, n])
+			continue
+		var actual_state: int = int(_snap_point_state[pi])
+		var actual_ci: int = int(_snap_point_corner_idx[pi]) if pi < cn else -1
+		if actual_state != 1 or actual_ci != ci:
+			ghost_cis.append(ci)
+			push_warning("[snap] frame=%d ghost: ci=%d pi=%d state=%d corner_idx=%d (expected state=1 ci=%d)" % [
+				frame, ci, pi, actual_state, actual_ci, ci])
+	for ci: int in ghost_cis:
+		_snap_corner_occupant.erase(ci)
+
+	# Pass 2: 同一コーナーに state=1 が2つ以上存在する二重スナップを距離優先で解消
+	# 孤立スナップ解除（Pass 3）より先に実行することで、辞書が敗者を指していても
+	# 距離で正しい勝者を決定してから辞書を上書きできる。
+	var corner_claimants: Dictionary = {}
+	for i in range(mini(sn, n)):
+		if int(_snap_point_state[i]) != 1:
+			continue
+		var ci: int = int(_snap_point_corner_idx[i]) if i < cn else -1
+		if ci < 0:
+			continue
+		if not corner_claimants.has(ci):
+			corner_claimants[ci] = [] as Array
+		(corner_claimants[ci] as Array).append(i)
+
+	for ci: int in corner_claimants:
+		var pts: Array = corner_claimants[ci] as Array
+		if pts.size() <= 1:
+			continue
+		var pt_states: Array = pts.map(func(p: int) -> int: return int(_snap_point_state[p]))
+		push_warning("[snap] frame=%d DOUBLE SNAP ci=%d points=%s states=%s n=%d sn=%d" % [
+			frame, ci, str(pts), str(pt_states), n, sn])
+		var corner_pos: Vector2 = (corners[ci] as Vector2) if ci < corners.size() else Vector2.ZERO
+		var best_pi: int = -1
+		var best_d: float = INF
+		for pi: int in pts:
+			var d: float = _game.point_positions[pi].distance_to(corner_pos)
+			if d < best_d:
+				best_d = d
+				best_pi = pi
+		# 勝者を辞書に上書き（辞書が敗者を指していた場合も確実に更新）
+		_snap_corner_occupant[ci] = best_pi
+		for pi: int in pts:
+			if pi == best_pi:
+				continue
+			_snap_point_state[pi] = 0
+			if pi < cn:
+				_snap_point_corner_idx[pi] = -1
+
+	# Pass 3: state=1 なのに辞書と食い違うポイント（孤立スナップ）を解除
+	# Pass 2 で二重スナップが解消済みのため、辞書は正しい勝者を指している前提で動作する。
+	for i in range(mini(sn, n)):
+		if int(_snap_point_state[i]) != 1:
+			continue
+		var ci: int = int(_snap_point_corner_idx[i]) if i < cn else -1
+		var dict_owner: int = int(_snap_corner_occupant.get(ci, -1))
+		if ci < 0 or dict_owner != i:
+			push_warning("[snap] frame=%d orphan snap: pi=%d state=1 ci=%d dict_owner=%d" % [
+				frame, i, ci, dict_owner])
+			_snap_point_state[i] = 0
+			if i < cn:
+				_snap_point_corner_idx[i] = -1
 
 
 ## ===== 旧スナップシステム（未使用、互換性のため残存）=====
