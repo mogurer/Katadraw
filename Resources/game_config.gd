@@ -107,3 +107,12 @@ const TWITTER_SHARE_TEXT_PATH := "res://Resources/Text/Twitter.txt"
 ## ファイル未同梱・読み取り失敗時に使う既定文（Twitter.txt と揃えること）
 const TWITTER_SHARE_TEXT_DEFAULT := "#KATADRAW"
 const TWITTER_INTENT_URL := "https://twitter.com/intent/tweet"
+
+# --- SE音量 ---
+## SE音量レベル（0〜10）から dB オフセットを返す共通ヘルパー。
+## 各 AudioStreamPlayer の volume_db = 基準dB + se_volume_offset_db(level) で統一する。
+## 0=ミュート(-80dB)、1〜10: -20dB〜+15dB（5で0dB）
+static func se_volume_offset_db(level: int) -> float:
+	if level <= 0:
+		return -80.0
+	return (level - 5) * 3.0
