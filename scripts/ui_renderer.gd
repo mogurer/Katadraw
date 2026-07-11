@@ -827,7 +827,7 @@ func _draw_menu_quit_confirm(vp: Vector2) -> void:
 	var cx: float = vp.x / 2.0
 	var dlg_cy: float = vp.y / 2.0
 	var dlg_w: float = 700.0
-	var dlg_h: float = 260.0
+	var dlg_h: float = 250.0
 	var dlg_rect := Rect2(Vector2(cx - dlg_w / 2.0, dlg_cy - dlg_h / 2.0), Vector2(dlg_w, dlg_h))
 	# 白背景ダイアログ
 	var dlg_shadow := Vector2(15.0, 15.0)
@@ -842,8 +842,8 @@ func _draw_menu_quit_confirm(vp: Vector2) -> void:
 	var cbtn_cy: float = dlg_cy + 50.0
 	var yes_off: bool = _game.menu_confirm_index != 0
 	var no_off: bool = _game.menu_confirm_index != 1
-	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
-	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
+	_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w, 64.0)
+	_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w, 64.0)
 
 	if _quit_border_phase_t >= QUIT_BORDER_WAIT:
 		var anim_t: float = minf((_quit_border_phase_t - QUIT_BORDER_WAIT) / QUIT_BORDER_ANIM_DUR, 1.0)
@@ -3019,10 +3019,10 @@ func _draw_rect_border_with_corners(rect: Rect2, color: Color, border_w: float, 
 	c.draw_circle(rect.end, dot_r, color)
 
 
-func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_FONT_SIZE, alpha: float = 1.0, is_off: bool = false, fixed_w: float = -1.0) -> Rect2:
+func _draw_auto_button_with_shadow(center: Vector2, text: String, fs: int = BTN_FONT_SIZE, alpha: float = 1.0, is_off: bool = false, fixed_w: float = -1.0, fixed_h: float = -1.0) -> Rect2:
 	"""ボタンを描画。選択(is_off=false)時はホバーアニメーション付き"""
 	var btn_w: float = fixed_w if fixed_w > 0.0 else _game.font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * 1.5
-	var btn_h: float = (_game.font.get_ascent(fs) + _game.font.get_descent(fs)) * 1.5
+	var btn_h: float = fixed_h if fixed_h > 0.0 else (_game.font.get_ascent(fs) + _game.font.get_descent(fs)) * 1.5
 
 	# ホバーアニメーション（選択中ボタンのみ）
 	var btn_id: String = text
@@ -4154,7 +4154,7 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 	if _game.pause_confirm_title:
 		# 確認ダイアログ（白背景、大きめ、ボタン幅広）
 		var dlg_w: float = 640.0
-		var dlg_h: float = 260.0
+		var dlg_h: float = 250.0
 		var dlg_rect := Rect2(Vector2(play_cx - dlg_w / 2.0, play_cy - dlg_h / 2.0), Vector2(dlg_w, dlg_h))
 		# 白背景で描画
 		var dlg_shadow := Vector2(15.0, 15.0)
@@ -4169,8 +4169,8 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 		var cbtn_cy: float = play_cy + 50.0
 		var yes_off: bool = _game.pause_confirm_index != 0
 		var no_off: bool = _game.pause_confirm_index != 1
-		_draw_auto_button_with_shadow(Vector2(play_cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
-		_draw_auto_button_with_shadow(Vector2(play_cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w)
+		_draw_auto_button_with_shadow(Vector2(play_cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w, 64.0)
+		_draw_auto_button_with_shadow(Vector2(play_cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"), BTN_FONT_SIZE, 1.0, no_off, cbtn_w, 64.0)
 	else:
 		# メイン: パネル90%縮小、インゲーム領域中央配置
 		var ps: float = 0.9  # パネルスケール

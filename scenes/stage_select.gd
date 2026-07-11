@@ -9,12 +9,15 @@ extends Node2D
 
 const _GAME_SCENE := "res://scenes/game.tscn"
 
+# SE UI 一時無効化フラグ（再搭載時は true に戻す）
+const _SE_UI_VISIBLE: bool = false
+
 # --- 色 ---
 const _BG_COLOR       := Color(1.0, 0.937, 0.89)
 const _LINE_COLOR      := GameConfig.INK_COLOR
 const _LOCKED_COLOR    := Color(0.72, 0.62, 0.60)
 const _UNLOCKED_COLOR  := Color(0.95, 0.19, 0.32)
-const _CLEARED_COLOR   := Color(0.95, 0.19, 0.32, 0.55)
+const _CLEARED_COLOR   := Color(0.725, 0.460, 0.478, 1.0)
 const _HOVER_COLOR     := Color(1.0, 0.10, 0.20)
 const _CHAR_COLOR      := GameConfig.INK_COLOR
 const _BUBBLE_BG       := Color(1.0, 0.98, 0.96)
@@ -297,7 +300,6 @@ func _ready() -> void:
 	if _is_debug() or StageSelectManager.all_cleared or StageSelectManager.zou_cleared:
 		StageSelectManager._zou_stage_idx = _find_zou_stage_idx()
 	_bgm_canvas = $BgmUI
-	_setup_bgm_ui()
 	_sfx_hover = AudioStreamPlayer.new()
 	_sfx_hover.stream = load("res://assets/sounds/pinon.wav")
 	_sfx_hover.volume_db = -10.0
@@ -358,6 +360,7 @@ func _ready() -> void:
 	_z_key_tex = load("res://assets/UI/Z_key.svg") as Texture2D
 	_x_key_tex = load("res://assets/UI/X_key.svg") as Texture2D
 	_sfx_out_sel = clampi(DebugSFXConfig.out_idx, 0, 4)
+	_setup_bgm_ui()
 	# 直前クリアで解放されたステージがあれば演出を開始する
 	var unlocked: Array[int] = StageSelectManager.last_unlocked_ids.duplicate()
 	StageSelectManager.last_unlocked_ids.clear()
@@ -805,9 +808,9 @@ func _input(event: InputEvent) -> void:
 			_bgm_lr_collapse_timer = 0.5
 			if not _bgm_expanded:
 				_bgm_do_expand()
-		elif event.keycode == KEY_Z:
+		elif _SE_UI_VISIBLE and event.keycode == KEY_Z:
 			_cycle_sfx_in()
-		elif event.keycode == KEY_X:
+		elif _SE_UI_VISIBLE and event.keycode == KEY_X:
 			_cycle_sfx_out()
 
 	# 右クリック保持で BGM 拡大パネル表示
@@ -855,7 +858,7 @@ func _input(event: InputEvent) -> void:
 			_bgm_do_collapse()
 
 	# LT/RT トリガーでSE順送り（ポップアップ非表示中のみ）
-	if event is InputEventJoypadMotion and _popup_stage < 0 and not _esc_popup:
+	if _SE_UI_VISIBLE and event is InputEventJoypadMotion and _popup_stage < 0 and not _esc_popup:
 		if event.axis == JOY_AXIS_TRIGGER_LEFT:
 			if event.axis_value < 0.2:
 				_lt_ready = true
@@ -989,7 +992,15 @@ func _draw() -> void:
 
 		match state:
 			StageSelectManager.StageState.UNLOCKED:
-				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _UNLOCKED_COLOR)
+				if is_near:
+					draw_circle(pos, draw_radius, _HOVER_COLOR)
+				else:
+					var _bt: float = Time.get_ticks_msec() / 1000.0
+					var _raw: float = (sin(_bt * PI) + 1.0) * 0.5
+					var _eased: float = _raw * _raw * (3.0 - 2.0 * _raw)
+					var _dot_color: Color = Color(0.50, 0.07, 0.14).lerp(_UNLOCKED_COLOR, _eased)
+					var _dot_r: float = lerpf(draw_radius, draw_radius * 1.5, _eased)
+					draw_circle(pos, _dot_r, _dot_color)
 			StageSelectManager.StageState.CLEARED:
 				draw_circle(pos, draw_radius, _HOVER_COLOR if is_near else _CLEARED_COLOR)
 				draw_circle(pos, draw_radius * 0.35, Color.WHITE)
@@ -1042,64 +1053,65 @@ func _draw() -> void:
 		draw_string(_font, Vector2(panel_x + pad_x + icon_w + gap, panel_y + pad_y + icon_h * 0.78),
 			hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs, Color.WHITE)
 
-		# --- 引力SE設定ラベル ---
-		var se_icon_size: float = 26.0
-		var se_gap: float = 30.0
-		var se_pad_x: float = 10.0
-		var se_pad_y: float = 6.0
-		var n_se: int = 6
-		var se_content_w: float = se_icon_size * n_se + se_gap * (n_se - 1)
-		var se_panel_w: float = se_content_w + se_pad_x * 2.0
-		var se_panel_h: float = se_icon_size + se_pad_y * 2.0
-		var se_panel_x: float = panel_x + panel_w + 80.0
-		var se_panel_y: float = vp.y - 14.0 - se_panel_h
-		# ヒント幅を先算出してパネルを拡張（ヒントはパネル内右端に収める）
-		var se_hint_h: float = se_icon_size * 0.85
-		var in_hint_tex: Texture2D = _lt_tex if _input_mode == 1 else _z_key_tex
-		var in_hint_w: float = 0.0
-		if in_hint_tex != null:
-			in_hint_w = se_hint_h * float(in_hint_tex.get_width()) / float(in_hint_tex.get_height())
-		_sfx_in_panel_rect = Rect2(se_panel_x, se_panel_y, se_panel_w + 30.0 + in_hint_w + 15.0, se_panel_h)
-		draw_style_box(_title_hint_style, _sfx_in_panel_rect)
-		var se_iy: float = se_panel_y + se_pad_y
-		if _s_in_texture != null:
-			draw_texture_rect(_s_in_texture,
-				Rect2(se_panel_x + se_pad_x, se_iy, se_icon_size, se_icon_size), false)
-		for i in range(5):
-			if i < _s_num_textures.size() and _s_num_textures[i] != null:
-				var se_ix: float = se_panel_x + se_pad_x + (se_icon_size + se_gap) * (i + 1)
-				var nc: Color = Color.WHITE if _sfx_in_sel == i else Color(0.518, 0.506, 0.506)
-				draw_texture_rect(_s_num_textures[i], Rect2(se_ix, se_iy, se_icon_size, se_icon_size), false, nc)
-		# 引力SEキーヒント（Z_key / LT）：コンテンツ右端から30px
-		if in_hint_tex != null:
-			var iy_hint: float = se_panel_y + (se_panel_h - se_hint_h) * 0.5
-			draw_texture_rect(in_hint_tex,
-				Rect2(se_panel_x + se_panel_w + 30.0, iy_hint, in_hint_w, se_hint_h), false, Color("#338FFF"))
+		if _SE_UI_VISIBLE:
+			# --- 引力SE設定ラベル ---
+			var se_icon_size: float = 26.0
+			var se_gap: float = 30.0
+			var se_pad_x: float = 10.0
+			var se_pad_y: float = 6.0
+			var n_se: int = 6
+			var se_content_w: float = se_icon_size * n_se + se_gap * (n_se - 1)
+			var se_panel_w: float = se_content_w + se_pad_x * 2.0
+			var se_panel_h: float = se_icon_size + se_pad_y * 2.0
+			var se_panel_x: float = panel_x + panel_w + 80.0
+			var se_panel_y: float = vp.y - 14.0 - se_panel_h
+			# ヒント幅を先算出してパネルを拡張（ヒントはパネル内右端に収める）
+			var se_hint_h: float = se_icon_size * 0.85
+			var in_hint_tex: Texture2D = _lt_tex if _input_mode == 1 else _z_key_tex
+			var in_hint_w: float = 0.0
+			if in_hint_tex != null:
+				in_hint_w = se_hint_h * float(in_hint_tex.get_width()) / float(in_hint_tex.get_height())
+			_sfx_in_panel_rect = Rect2(se_panel_x, se_panel_y, se_panel_w + 30.0 + in_hint_w + 15.0, se_panel_h)
+			draw_style_box(_title_hint_style, _sfx_in_panel_rect)
+			var se_iy: float = se_panel_y + se_pad_y
+			if _s_in_texture != null:
+				draw_texture_rect(_s_in_texture,
+					Rect2(se_panel_x + se_pad_x, se_iy, se_icon_size, se_icon_size), false)
+			for i in range(5):
+				if i < _s_num_textures.size() and _s_num_textures[i] != null:
+					var se_ix: float = se_panel_x + se_pad_x + (se_icon_size + se_gap) * (i + 1)
+					var nc: Color = Color.WHITE if _sfx_in_sel == i else Color(0.518, 0.506, 0.506)
+					draw_texture_rect(_s_num_textures[i], Rect2(se_ix, se_iy, se_icon_size, se_icon_size), false, nc)
+			# 引力SEキーヒント（Z_key / LT）：コンテンツ右端から30px
+			if in_hint_tex != null:
+				var iy_hint: float = se_panel_y + (se_panel_h - se_hint_h) * 0.5
+				draw_texture_rect(in_hint_tex,
+					Rect2(se_panel_x + se_panel_w + 30.0, iy_hint, in_hint_w, se_hint_h), false, Color("#338FFF"))
 
-		# --- 斥力SE設定ラベル ---
-		# 斥力ヒント幅を先算出してパネルを拡張
-		var out_hint_tex: Texture2D = _rt_tex if _input_mode == 1 else _x_key_tex
-		var out_hint_w: float = 0.0
-		if out_hint_tex != null:
-			out_hint_w = se_hint_h * float(out_hint_tex.get_width()) / float(out_hint_tex.get_height())
-		var seki_panel_x: float = _sfx_in_panel_rect.end.x + 40.0
-		var seki_panel_y: float = vp.y - 14.0 - se_panel_h
-		_sfx_out_panel_rect = Rect2(seki_panel_x, seki_panel_y, se_panel_w + 30.0 + out_hint_w + 15.0, se_panel_h)
-		draw_style_box(_title_hint_style, _sfx_out_panel_rect)
-		var seki_iy: float = seki_panel_y + se_pad_y
-		if _s_seki_texture != null:
-			draw_texture_rect(_s_seki_texture,
-				Rect2(seki_panel_x + se_pad_x, seki_iy, se_icon_size, se_icon_size), false)
-		for i in range(5):
-			if i < _s_num_textures.size() and _s_num_textures[i] != null:
-				var seki_ix: float = seki_panel_x + se_pad_x + (se_icon_size + se_gap) * (i + 1)
-				var oc: Color = Color.WHITE if _sfx_out_sel == i else Color(0.518, 0.506, 0.506)
-				draw_texture_rect(_s_num_textures[i], Rect2(seki_ix, seki_iy, se_icon_size, se_icon_size), false, oc)
-		# 斥力SEキーヒント（X_key / RT）：コンテンツ右端から30px
-		if out_hint_tex != null:
-			var oy_hint: float = seki_panel_y + (se_panel_h - se_hint_h) * 0.5
-			draw_texture_rect(out_hint_tex,
-				Rect2(seki_panel_x + se_panel_w + 30.0, oy_hint, out_hint_w, se_hint_h), false, Color("#EB2E61"))
+			# --- 斥力SE設定ラベル ---
+			# 斥力ヒント幅を先算出してパネルを拡張
+			var out_hint_tex: Texture2D = _rt_tex if _input_mode == 1 else _x_key_tex
+			var out_hint_w: float = 0.0
+			if out_hint_tex != null:
+				out_hint_w = se_hint_h * float(out_hint_tex.get_width()) / float(out_hint_tex.get_height())
+			var seki_panel_x: float = _sfx_in_panel_rect.end.x + 40.0
+			var seki_panel_y: float = vp.y - 14.0 - se_panel_h
+			_sfx_out_panel_rect = Rect2(seki_panel_x, seki_panel_y, se_panel_w + 30.0 + out_hint_w + 15.0, se_panel_h)
+			draw_style_box(_title_hint_style, _sfx_out_panel_rect)
+			var seki_iy: float = seki_panel_y + se_pad_y
+			if _s_seki_texture != null:
+				draw_texture_rect(_s_seki_texture,
+					Rect2(seki_panel_x + se_pad_x, seki_iy, se_icon_size, se_icon_size), false)
+			for i in range(5):
+				if i < _s_num_textures.size() and _s_num_textures[i] != null:
+					var seki_ix: float = seki_panel_x + se_pad_x + (se_icon_size + se_gap) * (i + 1)
+					var oc: Color = Color.WHITE if _sfx_out_sel == i else Color(0.518, 0.506, 0.506)
+					draw_texture_rect(_s_num_textures[i], Rect2(seki_ix, seki_iy, se_icon_size, se_icon_size), false, oc)
+			# 斥力SEキーヒント（X_key / RT）：コンテンツ右端から30px
+			if out_hint_tex != null:
+				var oy_hint: float = seki_panel_y + (se_panel_h - se_hint_h) * 0.5
+				draw_texture_rect(out_hint_tex,
+					Rect2(seki_panel_x + se_panel_w + 30.0, oy_hint, out_hint_w, se_hint_h), false, Color("#EB2E61"))
 
 	# 確認ポップアップ
 	if _popup_stage >= 0:
@@ -2073,7 +2085,14 @@ func _draw_popup_btn(rect: Rect2, label: String, hovered: bool) -> void:
 		var so := Vector2(12.5, 12.5)
 		draw_colored_polygon(PackedVector2Array([pts[0]+so, pts[1]+so, pts[2]+so, pts[3]+so]),
 			Color(GameConfig.INK_COLOR,0.30))
-		draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.9))
+		draw_polygon(pts, PackedColorArray([
+			Color(1.00, 0.28, 0.40, 0.9),
+			Color(1.00, 0.28, 0.40, 0.9),
+			Color(0.50, 0.07, 0.14, 0.9),
+			Color(0.50, 0.07, 0.14, 0.9),
+		]))
+		var hl_pts := PackedVector2Array([pts[0], pts[1], pts[1].lerp(pts[2], 0.26), pts[0].lerp(pts[3], 0.26)])
+		draw_colored_polygon(hl_pts, Color(1.0, 0.937, 0.89, 0.12))
 		for i in range(4):
 			draw_line(pts[i], pts[(i + 1) % 4], GameConfig.INK_COLOR, BTN_BW, true)
 		for c in pts:
@@ -2081,8 +2100,15 @@ func _draw_popup_btn(rect: Rect2, label: String, hovered: bool) -> void:
 		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
 			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, Color(1.0, 0.937, 0.89))
 	else:
-		draw_rect(Rect2(rect.position + Vector2(12.5, 12.5), rect.size), Color(GameConfig.INK_COLOR,0.30))
-		draw_rect(rect, Color(1.0, 0.937, 0.89))
+		draw_rect(Rect2(rect.position + Vector2(12.5, 12.5), rect.size), Color(GameConfig.INK_COLOR, 0.30))
+		var off_pts := PackedVector2Array([rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)])
+		draw_polygon(off_pts, PackedColorArray([
+			Color(1.00, 0.937, 0.890),
+			Color(1.00, 0.937, 0.890),
+			Color(0.80, 0.750, 0.712),
+			Color(0.80, 0.750, 0.712),
+		]))
+		draw_rect(Rect2(rect.position, Vector2(rect.size.x, rect.size.y * 0.26)), Color(1.0, 1.0, 1.0, 0.22))
 		_draw_rect_border_with_corners_local(rect, GameConfig.INK_COLOR, BTN_BW)
 		draw_string(_font, Vector2(rect.position.x, baseline_y), label,
 			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, fs, GameConfig.INK_COLOR)
@@ -2480,19 +2506,12 @@ func _mk_bgm_btn(label_text: String) -> Button:
 
 
 func _mk_note_label() -> Control:
-	if _onpu_icon_texture != null:
-		var t := TextureRect.new()
-		t.texture = _onpu_icon_texture
-		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		t.custom_minimum_size = Vector2(18, 20)
-		return t
-	var l := Label.new()
-	l.text = "♪"
-	l.add_theme_font_size_override("font_size", _BGM_LABEL_FONT_SIZE)
-	l.add_theme_color_override("font_color", Color.WHITE)
-	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	return l
+	var t := TextureRect.new()
+	t.texture = _onpu_icon_texture
+	t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	t.custom_minimum_size = Vector2(20, 22)
+	return t
 
 
 func _setup_bgm_ui() -> void:
@@ -2516,8 +2535,8 @@ func _setup_bgm_ui() -> void:
 	small_style.set_corner_radius_all(10)
 	small_style.content_margin_left   = 8.0
 	small_style.content_margin_right  = 8.0
-	small_style.content_margin_top    = 4.0
-	small_style.content_margin_bottom = 4.0
+	small_style.content_margin_top    = 3.5
+	small_style.content_margin_bottom = 3.5
 	small_panel.add_theme_stylebox_override("panel", small_style)
 	anchor.add_child(small_panel)
 
@@ -2539,7 +2558,12 @@ func _setup_bgm_ui() -> void:
 		_btn_prev.add_theme_color_override("font_color", Color("#f23052"))
 	_bgm_container.add_child(_btn_prev)
 
-	_bgm_container.add_child(_mk_note_label())
+	# ♪アイコンとBGMラベルを内側コンテナに包み、右側gap=8px(外sep1つ分)に統一
+	var _note_inner := HBoxContainer.new()
+	_note_inner.add_theme_constant_override("separation", 0)
+	_bgm_container.add_child(_note_inner)
+
+	_note_inner.add_child(_mk_note_label())
 
 	_bgm_label = Label.new()
 	_bgm_label.name = "BgmNameLabel"
@@ -2549,8 +2573,8 @@ func _setup_bgm_ui() -> void:
 	if _font_din != null:
 		_bgm_label.add_theme_font_override("font", _font_din)
 	_bgm_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_bgm_label.hide()
-	_bgm_container.add_child(_bgm_label)
+	_bgm_label.modulate = Color(1, 1, 1, 0)
+	_note_inner.add_child(_bgm_label)
 
 	_btn_next = Button.new()
 	_btn_next.flat = true
@@ -2648,7 +2672,7 @@ func _start_bgm_label_anim() -> void:
 	_bgm_text = tr(_BGM_TRACK_KEYS[idx])
 	_bgm_label.text = _bgm_text
 	_bgm_label.visible_characters = 0
-	_bgm_label.show()
+	_bgm_label.modulate = Color.WHITE
 
 	_bgm_tween = create_tween()
 	(_bgm_tween
@@ -2665,7 +2689,7 @@ func _begin_dismiss() -> void:
 
 	var n := len(_bgm_text)
 	if n == 0:
-		_bgm_label.hide()
+		_bgm_label.modulate = Color(1, 1, 1, 0)
 		return
 
 	_bgm_tween = create_tween()
@@ -2674,7 +2698,7 @@ func _begin_dismiss() -> void:
 		_bgm_tween.tween_interval(step)
 		_bgm_tween.tween_callback(_dismiss_step.bind(i + 1))
 	_bgm_tween.tween_callback(func() -> void:
-		_bgm_label.hide()
+		_bgm_label.modulate = Color(1, 1, 1, 0)
 		_bgm_text = ""
 	)
 

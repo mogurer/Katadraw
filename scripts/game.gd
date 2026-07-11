@@ -854,7 +854,7 @@ func _update_player_hover() -> void:
 				var cbtn_w: float = 220.0
 				var cbtn_gap: float = cbtn_w / 2.0 + 30.0
 				var cbtn_cy: float = vp.y / 2.0 + 50.0
-				if pos.y >= cbtn_cy - 35.0 and pos.y <= cbtn_cy + 35.0:
+				if pos.y >= cbtn_cy - 32.0 and pos.y <= cbtn_cy + 32.0:
 					if pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
 						menu_confirm_index = 0
 					elif pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
@@ -912,7 +912,7 @@ func _update_player_hover() -> void:
 			var cbtn_cy: float = vp.y / 2.0 + 50.0
 			var cbtn_w: float = 220.0
 			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-			var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+			var btn_h: float = 64.0
 			if pos.y >= cbtn_cy - btn_h / 2.0 and pos.y <= cbtn_cy + btn_h / 2.0:
 				if pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
 					pause_confirm_index = 0
