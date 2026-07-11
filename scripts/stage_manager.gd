@@ -652,12 +652,6 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 			_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
 			return
 
-	# 円: 全点をガイド円周上に置き、下半分（画面 +y 側）に偏って配置
-	if stage_type == "circle":
-		if _rebuild_initial_points_hud_circle_guide_lower_bias(point_positions, viewport_size):
-			_finalize_hud_spawn_points_circle_on_guide(point_positions, viewport_size)
-			return
-
 	# 単一閉曲線ステージ（fish / mug / heptagram_silhouette / rugby_ball 等）ほか、
 	# 正方形・六角・円以外: 横長のなめらかな楕円周上に等角度配置（円形リングは使わない）
 	var n_pts: int = num_points
@@ -797,7 +791,7 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 		recompute_hud_guide_layout(shape_center, viewport_size)
 	if not skip_hud_initial_layout:
 		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
-	if current_stage >= 0 and stage_type not in ["triangle", "square", "hexagon", "circle"]:
+	if current_stage >= 0 and stage_type not in ["triangle", "square", "hexagon"]:
 		_constrain_spawn_to_edge_band(point_positions, viewport_size)
 	# ステージ切り替え時は前ステージのキャッシュを破棄し、必ずフル計算を行う
 	_hausdorff_call_counter = 0

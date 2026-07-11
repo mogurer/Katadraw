@@ -495,6 +495,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_menu(vp)
 		"config":
 			_draw_config(vp)
+		"se_config":
+			_draw_se_config(vp)
 		"credit":
 			_draw_credit(vp)
 		"rules":
@@ -1447,7 +1449,7 @@ func _draw_config(vp: Vector2) -> void:
 		tr("CONFIG_LANGUAGE"),
 		tr("CONFIG_BGM_VOLUME"),
 		tr("CONFIG_SE_VOLUME"),
-		tr("CONFIG_PRACTICE"),
+		tr("CONFIG_SE_SETTING"),
 		tr("CONFIG_CREDIT"),
 		tr("CONFIG_BACK"),
 	]
@@ -1585,6 +1587,134 @@ func _draw_config(vp: Vector2) -> void:
 		_draw_auto_button_with_shadow(Vector2(cx2 + cbtn_gap2, cbtn_cy2), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off2,  cbtn_w2)
 
 
+func _draw_se_config(vp: Vector2) -> void:
+	_draw_bg(vp)
+
+	# 背景大文字
+	if not _font_din_config_logo:
+		_font_din_config_logo = FontVariation.new()
+		_font_din_config_logo.base_font = _game.font_din
+		_font_din_config_logo.set_spacing(TextServer.SPACING_GLYPH, -10)
+	var big_fs: int = 400
+	var big_y: float = _font_din_config_logo.get_ascent(big_fs) - 170.0
+	_game.draw_string(_font_din_config_logo, Vector2(-20.0, big_y), "SE", HORIZONTAL_ALIGNMENT_LEFT, -1, big_fs, Color(LINE_COLOR, 0.12))
+
+	# 装飾トライアングル（左下）
+	var deco_w: float = 500.0
+	_draw_tri_deco(Vector2(20.0, vp.y - deco_w * 0.9495 - 20.0), deco_w, Color(LINE_COLOR, 0.2))
+
+	const COL_OUT   := Color("#EB2E61")   # 斥力 pink
+	const COL_OUT_DIM := Color(0.80, 0.35, 0.48, 0.45)
+	const COL_IN    := Color("#338FFF")   # 引力 cyan
+	const COL_IN_DIM  := Color(0.20, 0.55, 1.00, 0.45)
+	const RADIO_R   := 14.0
+	const LABEL_FS  := 32
+	const TITLE_FS  := 38
+
+	var ry0:   float = vp.y * 0.37
+	var ystep: float = 85.0
+
+	# ── 左パネル (OUT / 斥力) ──────────────────────────────────
+	var out_rx: float = 200.0
+	var panel_lx: float = 80.0
+	var panel_w:  float = 400.0
+
+	var title_ascent: float = _game.font_bold.get_ascent(TITLE_FS)
+	var title_y: float = ry0 - 60.0 + title_ascent
+	_game.draw_string(_game.font_bold,
+		Vector2(panel_lx, title_y),
+		"OUT", HORIZONTAL_ALIGNMENT_LEFT, panel_w, TITLE_FS, COL_OUT)
+
+	var cnt_out: int = DebugSFXConfig.out_count
+	var sel_out: int = DebugSFXConfig.out_idx
+	var label_ascent: float = _game.font.get_ascent(LABEL_FS)
+	for i in range(cnt_out):
+		var cy: float = ry0 + i * ystep
+		var is_sel: bool = (i == sel_out)
+		var col: Color = COL_OUT if is_sel else COL_OUT_DIM
+		if is_sel:
+			# 選択行ハイライト背景
+			_game.draw_rect(Rect2(panel_lx, cy - 30.0, panel_w, 60.0), Color(COL_OUT, 0.08))
+		# ラジオ円：外枠
+		_game.draw_arc(Vector2(out_rx, cy), RADIO_R, 0.0, TAU, 32, col, 2.5, true)
+		if is_sel:
+			_game.draw_circle(Vector2(out_rx, cy), RADIO_R * 0.55, col)
+		# ラベル
+		var lbl_x: float = out_rx + RADIO_R + 16.0
+		var lbl_y: float = cy + label_ascent * 0.5
+		_game.draw_string(_game.font, Vector2(lbl_x, lbl_y),
+			"SE %d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, 200.0, LABEL_FS, col)
+
+	# ── 右パネル (IN / 引力) ──────────────────────────────────
+	var in_rx:   float = vp.x - 200.0
+	var panel_rx: float = vp.x - 80.0  # 右端
+
+	_game.draw_string(_game.font_bold,
+		Vector2(panel_rx - panel_w, title_y),
+		"IN", HORIZONTAL_ALIGNMENT_RIGHT, panel_w, TITLE_FS, COL_IN)
+
+	var cnt_in: int = DebugSFXConfig.in_count
+	var sel_in: int = DebugSFXConfig.in_idx
+	for i in range(cnt_in):
+		var cy: float = ry0 + i * ystep
+		var is_sel: bool = (i == sel_in)
+		var col: Color = COL_IN if is_sel else COL_IN_DIM
+		if is_sel:
+			_game.draw_rect(Rect2(panel_rx - panel_w, cy - 30.0, panel_w, 60.0), Color(COL_IN, 0.08))
+		var lbl_x: float = in_rx - RADIO_R - 16.0
+		var lbl_y: float = cy + label_ascent * 0.5
+		_game.draw_string(_game.font, Vector2(lbl_x - 180.0, lbl_y),
+			"SE %d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, 180.0, LABEL_FS, col)
+		_game.draw_arc(Vector2(in_rx, cy), RADIO_R, 0.0, TAU, 32, col, 2.5, true)
+		if is_sel:
+			_game.draw_circle(Vector2(in_rx, cy), RADIO_R * 0.55, col)
+
+	# ── 中央: オクタゴン + 波紋エフェクト ───────────────────────
+	var cx: float = vp.x * 0.5
+	var cy_c: float = vp.y * 0.50
+	const OCT_R:  float = 185.0   # オクタゴン外接円半径（インゲームの force field 相当）
+	const CORE_R: float = 16.0    # プレイヤーアバター半径（InputHandler.PLAYER_RADIUS と同値）
+
+	# 波紋エフェクト（テスト中のみ。インゲームの _draw_player_force_influence_visual を流用）
+	if _game._sfx_ui_in_active or _game._sfx_ui_out_active:
+		var attracting: bool = _game._sfx_ui_in_active   # true=引力(IN/cyan), false=斥力(OUT/pink)
+		_draw_player_force_influence_visual(Vector2(cx, cy_c), CORE_R, OCT_R, attracting, 1.0)
+
+	# オクタゴン（8頂点を順につなぐ。インゲームの draw_stage_lines と同ロジック）
+	var oct_pts := PackedVector2Array()
+	for i in range(8):
+		var a: float = float(i) * TAU / 8.0 - PI / 2.0  # 上頂点から時計回り
+		oct_pts.append(Vector2(cx + OCT_R * cos(a), cy_c + OCT_R * sin(a)))
+	for i in range(8):
+		_game.draw_line(oct_pts[i], oct_pts[(i + 1) % 8], LINE_COLOR, LINE_WIDTH, true)
+	for p in oct_pts:
+		_game.draw_circle(p, POINT_RADIUS, LINE_COLOR)
+
+	# プレイヤーアバター（中心円）
+	_game.draw_circle(Vector2(cx, cy_c), CORE_R, LINE_COLOR)
+
+	# 「テスト中」インジケーター
+	if _game._sfx_ui_out_active:
+		_game.draw_string(_game.font_bold, Vector2(cx - 200.0, cy_c - OCT_R - 40.0),
+			"▶ OUT テスト中", HORIZONTAL_ALIGNMENT_CENTER, 400.0, 28, COL_OUT)
+	elif _game._sfx_ui_in_active:
+		_game.draw_string(_game.font_bold, Vector2(cx - 200.0, cy_c - OCT_R - 40.0),
+			"▶ IN テスト中", HORIZONTAL_ALIGNMENT_CENTER, 400.0, 28, COL_IN)
+
+	# ── 操作ヒント ────────────────────────────────────────────
+	const HINT_FS := 24
+	var hint_c := Color(LINE_COLOR, 0.55)
+	var hint_y_pad: float = vp.y - 80.0
+	var hint_y_ctrl: float = vp.y - 48.0
+
+	_game.draw_string(_game.font, Vector2(0.0, hint_y_pad),
+		"左クリック: OUTテスト  /  右クリック: INテスト",
+		HORIZONTAL_ALIGNMENT_CENTER, vp.x, HINT_FS, hint_c)
+	_game.draw_string(_game.font, Vector2(0.0, hint_y_ctrl),
+		"L/LT: OUT選択▲▼   A: OUTテスト   R/RT: IN選択▲▼   X: INテスト   ESC/START: 保存して戻る",
+		HORIZONTAL_ALIGNMENT_CENTER, vp.x, HINT_FS, hint_c)
+
+
 func _draw_credit(vp: Vector2) -> void:
 	_draw_bg(vp)
 
@@ -1717,9 +1847,6 @@ func _draw_stage_playing_controller_hint(vp: Vector2) -> void:
 		"hexagon":
 			t_second = 2.5
 			second_file = "con_bt_X1.png"
-		"circle":
-			t_second = 2.5
-			second_file = "con_bt_AX1.png"
 		_:
 			return
 	var cycle: float = t_first + t_second
@@ -1815,11 +1942,8 @@ const _CTRL_MOUSE_ITEMS: Array[Array] = [
 const _CTRL_PAD_ITEMS: Array[Array] = [
 	["CTRL_PAD_LSTICK_KEY", "CTRL_PAD_LSTICK_DESC", 180],
 	["CTRL_PAD_RSTICK_KEY", "CTRL_PAD_RSTICK_DESC", 180],
-	["CTRL_PAD_DPAD_KEY", "CTRL_PAD_DPAD_DESC", 180],
 	["CTRL_PAD_A_KEY", "CTRL_PAD_A_REPEL_DESC", 180],
 	["CTRL_PAD_X_KEY", "CTRL_PAD_X_ATTRACT_DESC", 180],
-	["CTRL_PAD_B_KEY", "CTRL_PAD_B_CANCEL_DESC", 180],
-	["CTRL_PAD_LBRB_KEY", "CTRL_PAD_LBRB_DESC", 180],
 ]
 
 
@@ -4080,14 +4204,6 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 			var is_off: bool = not sel
 			_draw_auto_button_with_shadow(Vector2(bcx, base_cy), labels[i], BTN_FONT_SIZE, 1.0, is_off, btn_w)
 
-		# 中央: ステージのお手本（操作ガイド下端とボタン上端の中間）
-		var btn_top: float = base_cy - (_game.font.get_ascent(BTN_FONT_SIZE) + _game.font.get_descent(BTN_FONT_SIZE)) * 1.5 / 2.0
-		var shape_available_h: float = btn_top - controls_bottom_y
-		var shape_available_w: float = panel_w * 0.9
-		var shape_cy: float = controls_bottom_y + shape_available_h / 2.0
-		var guide_box_w: float = minf(shape_available_w, 384.0)
-		var guide_box_h: float = minf(shape_available_h, 216.0)
-		_stage_renderer.draw_guide_shape_fit_max(Vector2(play_cx, shape_cy), guide_box_w, guide_box_h, 1.0, 2.5)
 	_draw_player_avatar()
 
 

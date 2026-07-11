@@ -48,6 +48,7 @@ var _bgm_zone_centers: Array[Vector2] = []  # 各ゾーン中心のワールド�
 # 進行状態
 var _states: Array[int] = []
 var _stage_names: Array[String] = []
+var _stage_locale_keys: Array[String] = []
 var _best_times: Dictionary = {}
 var _best_move_counts: Dictionary = {}
 var _unlocked_bgms: Array[String] = []
@@ -89,9 +90,12 @@ func _load_manifest() -> void:
 func _load_stage_names() -> void:
 	_stage_names.resize(STAGE_COUNT)
 	_stage_names.fill("")
+	_stage_locale_keys.resize(STAGE_COUNT)
+	_stage_locale_keys.fill("")
 	var stages: Array = StageData.get_stages()
 	for i in range(mini(stages.size(), STAGE_COUNT)):
 		_stage_names[i] = str(stages[i].get("guide_type_label", ""))
+		_stage_locale_keys[i] = str(stages[i].get("locale_key", ""))
 
 
 ## グリッド座標からワールド座標を返す
@@ -123,6 +127,9 @@ func get_world_pos(stage_id: int) -> Vector2:
 func get_stage_name(stage_id: int) -> String:
 	if stage_id < 0 or stage_id >= _stage_names.size():
 		return ""
+	var lk: String = _stage_locale_keys[stage_id] if stage_id < _stage_locale_keys.size() else ""
+	if not lk.is_empty():
+		return tr(lk)
 	return _stage_names[stage_id]
 
 

@@ -1,4 +1,4 @@
-keys,ja,en,zh_CN,zh_TW
+﻿keys,ja,en,zh_CN,zh_TW
 TITLE_NAME,KATA-DRAW,KATA-DRAW,KATA-DRAW,KATA-DRAW
 TITLE_START,ボタンを押すとスタート,Press a button to start,按下按钮开始,按下按鈕開始
 TITLE_COPYRIGHT,©2026 meseed-software,©2026 meseed-software,©2026 meseed-software,©2026 meseed-software
@@ -53,7 +53,7 @@ CONFIG_DISPLAY_MODE,画面モード,Display mode,画面模式,畫面模式
 CONFIG_LANGUAGE,言語選択,Language,语言选择,語言選擇
 CONFIG_BGM_VOLUME,BGM音量,BGM Volume,BGM音量,BGM音量
 CONFIG_SE_VOLUME,SE音量,SE Volume,SE音量,SE音量
-CONFIG_PRACTICE,練習,Practice,练习,練習
+CONFIG_SE_SETTING,SE設定,SE Settings,SE设定,SE設定
 CONFIG_CREDIT,スタッフクレジット,Staff Credit,职员表,職員表
 CONFIG_BACK,タイトルに戻る,Back to Title,返回标题,返回標題
 CONFIG_FULLSCREEN,フルスクリーン,Fullscreen,全屏,全螢幕
@@ -132,7 +132,7 @@ STAGE_CRAB,無言で食べる,Crab,螃蟹,螃蟹
 STAGE_THREE_STORIED_PAGODA,三階建て,Three-Storied Pagoda,三重塔,三重塔
 STAGE_TULIP,富山とオランダ,Tulip,郁金香,鬱金香
 STAGE_UMBRELLA,雨と太陽に,Umbrella,雨伞,雨傘
-STAGE_ZOU,象,Elephant,象,象
+STAGE_ZOU,象ろう,KATA-DRAW,象,象
 BGM_01-05,Solvrae / Clockwork Prophet,Solvrae / Clockwork Prophet,Solvrae / Clockwork Prophet,Solvrae / Clockwork Prophet
 BGM_01-06,taqumi / Micro'n'Macro,taqumi / Micro'n'Macro,taqumi / Micro'n'Macro,taqumi / Micro'n'Macro
 BGM_01-08,Yebisu303 / Small Routines,Yebisu303 / Small Routines,Yebisu303 / Small Routines,Yebisu303 / Small Routines

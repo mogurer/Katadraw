@@ -148,6 +148,9 @@ var _countdown_active: bool = false
 var _first_stage_pending: bool = false
 var _first_stage_bgm_pending: bool = false  # タイマーが有効かどうか
 
+# Zou: カウントダウン終了まで無音待機。resume_ingame() でタイトルBGMをイントロから開始。
+var _zou_bgm_pending: bool = false
+
 var _players: Array[AudioStreamPlayer] = []
 var _active_player: int = 0
 var _streams: Dictionary = {}
@@ -240,10 +243,29 @@ func play_ingame() -> void:
 	_countdown_active = false
 	_first_stage_pending = false
 	_first_stage_bgm_pending = false
+	_zou_bgm_pending = false
 	_clear_boost_active = false
 	_virtual_pos = 0.0
 	_virtual_elapsed = 0.0
 	_play_on_active(TRACKS[_track_idx]["intro"])
+
+
+## Zou ステージ用: カウントダウンが終わるまで無音で待機し、resume_ingame() でタイトルBGMをイントロから開始する。
+func start_zou_bgm() -> void:
+	_stop_all()
+	_active_player = 0
+	_track_idx = _INGAME_TRACK_COUNT  # title track (index 5)
+	_motif_idx = 0
+	_in_intro = false
+	_in_pre_countdown = false
+	_waiting_for_resume = false
+	_countdown_active = false
+	_first_stage_pending = false
+	_first_stage_bgm_pending = false
+	_zou_bgm_pending = true
+	_clear_boost_active = false
+	_virtual_pos = 0.0
+	_virtual_elapsed = 0.0
 
 
 ## ①: デモ画面からステージ1へ。BGMを停止し、無音でカウントダウン待機状態に入る。
@@ -287,8 +309,8 @@ func begin_pre_countdown() -> void:
 ## プリカウントダウン中でまだモチーフ再生中なら残り時間を再チェックしてクロスフェード判断。
 ## BGM音量を -3dB 低下させる。
 func begin_countdown() -> void:
-	if _first_stage_pending:
-		return  # ①: 無音のまま
+	if _first_stage_pending or _zou_bgm_pending:
+		return  # ①/Zou: 無音のまま
 	if _in_pre_countdown and not _in_intro:
 		# カウントダウン開始時点で再チェック
 		if _motif_remaining() < 1.0:
@@ -303,6 +325,14 @@ func begin_countdown() -> void:
 func resume_ingame() -> void:
 	_waiting_for_resume = false
 	_countdown_active = false
+
+	if _zou_bgm_pending:
+		# Zou: タイトルBGMをイントロ先頭から即時開始
+		_zou_bgm_pending = false
+		_in_intro = true
+		_play_on_active(TRACKS[_track_idx]["intro"])
+		get_tree().create_timer(1.0).timeout.connect(func(): _sync_volume())
+		return
 
 	if _first_stage_pending:
 		# ①: 1秒後に _0000 から再生開始
@@ -325,6 +355,9 @@ func resume_ingame() -> void:
 			_motif_idx = _pre_countdown_motif_idx
 			_in_intro = false
 			_crossfade_to(_current_motif_path(), 0.0)
+		elif not _players[_active_player].playing:
+			# B案: stop() で止まっていた場合（Zou クリア後の再プレイ等）は再起動
+			play_ingame()
 		# else: モチーフN 再生継続 → 自然終了後 N+1 へ（B案）
 		return
 
@@ -420,6 +453,7 @@ func stop() -> void:
 	_countdown_active = false
 	_first_stage_pending = false
 	_first_stage_bgm_pending = false
+	_zou_bgm_pending = false
 	_clear_boost_active = false
 	_track_idx = 0
 	_motif_idx = 0

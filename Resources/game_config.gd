@@ -11,7 +11,7 @@ const INK_COLOR := Color("#433647")
 
 # --- 体験版 ---
 # true: 体験版（manifest_ex.json の10ステージをループなしで固定順プレイ）
-const IS_TRIAL := true
+const IS_TRIAL := false
 
 ## 本編を「1 面だけ」繰り返しプレイするときのマスタ行インデックス（manifest / StageData.get_stages() の 0 始まり）。
 ## -1 で無効（通常は全ステージを順にプレイ）。例: 星 10 点のみ試すなら 3（star_10.json の並び）

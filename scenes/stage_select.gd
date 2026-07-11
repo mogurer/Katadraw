@@ -757,6 +757,7 @@ func _input(event: InputEvent) -> void:
 		_popup_no_hovered = false
 		_popup_stick_ready = true
 		_sfx_click.play()
+		_snap_cursor_to_popup_yes()
 		queue_redraw()
 		return
 
@@ -766,6 +767,7 @@ func _input(event: InputEvent) -> void:
 		_popup_no_hovered = false
 		_popup_stick_ready = true
 		_sfx_click.play()
+		_snap_cursor_to_popup_yes()
 		queue_redraw()
 		return
 
@@ -1466,6 +1468,14 @@ func _draw_popup(vp: Vector2) -> void:
 				tail_d, head_d, Color(0.95, 0.19, 0.32))
 
 
+func _snap_cursor_to_popup_yes() -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	var r: Dictionary = _stage_popup_rects(vp)
+	var yes_center: Vector2 = (r["yes"] as Rect2).get_center()
+	get_viewport().warp_mouse(yes_center)
+	_char_target = get_canvas_transform().affine_inverse() * yes_center
+
+
 func _update_popup_hover(pos: Vector2) -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var r: Dictionary = _stage_popup_rects(vp)
@@ -1473,8 +1483,9 @@ func _update_popup_hover(pos: Vector2) -> void:
 	var new_no: bool  = (r["no"]  as Rect2).has_point(pos)
 	if (new_yes and not _popup_yes_hovered) or (new_no and not _popup_no_hovered):
 		_sfx_on.play()
-	_popup_yes_hovered = new_yes
-	_popup_no_hovered  = new_no
+	if new_yes or new_no:
+		_popup_yes_hovered = new_yes
+		_popup_no_hovered  = new_no
 
 
 func _handle_popup_click(pos: Vector2) -> void:

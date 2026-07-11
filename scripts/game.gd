@@ -541,6 +541,9 @@ var _sfx_ui_in: AudioStreamPlayer = null    # [DEBUG] 引力SE
 var _sfx_ui_out: AudioStreamPlayer = null   # [DEBUG] 斥力SE
 var _sfx_ui_in_active: bool = false         # [DEBUG] 引力SE 繰り返し継続フラグ
 var _sfx_ui_out_active: bool = false        # [DEBUG] 斥力SE 繰り返し継続フラグ
+# --- SE設定画面 ---
+var _se_config_lt_ready: bool = true  # LTトリガー立ち上がり検出
+var _se_config_rt_ready: bool = true  # RTトリガー立ち上がり検出
 var _sfx_ui_in_timer: Timer = null          # [DEBUG] 引力SE 折り返しタイマー
 var _sfx_ui_out_timer: Timer = null         # [DEBUG] 斥力SE 折り返しタイマー
 const _DBG_SE_IN_LOOP_SEC  := 0.5           # [DEBUG] 引力SE 折り返し間隔（秒）
@@ -594,6 +597,7 @@ func _ready() -> void:
 	# タイトル前の仮値（本番は _begin_stage で上書き）。HUD 用基準点と式を揃える
 	shape_center = _default_stage_shape_center(vp, -1)
 	_setup_audio()
+	DebugSFXConfig.load_saved()
 	# Load logo texture
 	logo_texture = _load_texture("res://assets/UI/messed_logo.png")
 	title_logo_texture = _load_texture("res://assets/UI/kata-draw_logo.png")
@@ -1321,7 +1325,10 @@ func _start_stage(idx: int) -> void:
 	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
 	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
 	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp, idx))
-	BGMManager.begin_pre_countdown()  # ☆: ガイド表示前にプリカウントダウン状態へ
+	if idx == StageSelectManager._zou_stage_idx:
+		BGMManager.start_zou_bgm()
+	else:
+		BGMManager.begin_pre_countdown()  # ☆: ガイド表示前にプリカウントダウン状態へ
 
 
 func _calculate_metrics() -> void:
@@ -1343,6 +1350,8 @@ func _is_selected(idx: int) -> bool:
 
 
 func _stage_display_number_text() -> String:
+	if current_stage == StageSelectManager._zou_stage_idx:
+		return "00"
 	if current_stage >= 0:
 		return "%d" % (current_stage + 1)
 	return "-"
@@ -1732,6 +1741,10 @@ func _input(event: InputEvent) -> void:
 		_input_config(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
 
+	if game_state == "se_config":
+		_input_se_config(event)
+		return
+
 	if game_state == "credit":
 		_input_credit(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
@@ -1753,6 +1766,20 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "guide_info":
+		var is_gi_pause_key: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START)
+		)
+		if pause_active:
+			_input_pause(event, is_confirm, is_gi_pause_key)
+			return
+		if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START:
+			pause_active = true
+			pause_index = 0
+			pause_elapsed = 0.0
+			ui_renderer._pause_anim_time = Time.get_ticks_msec() / 1000.0
+			queue_redraw()
+			return
 		var is_guide_cancel: bool = (
 			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
 			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
@@ -1780,6 +1807,19 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "guide_countdown":
+		var is_cd_pause_key: bool = (
+			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START)
+		)
+		if pause_active:
+			_input_pause(event, is_confirm, is_cd_pause_key)
+			return
+		if is_cd_pause_key:
+			pause_active = true
+			pause_index = 0
+			pause_elapsed = Time.get_ticks_msec() / 1000.0 - guide_start_time
+			ui_renderer._pause_anim_time = Time.get_ticks_msec() / 1000.0
+			queue_redraw()
 		return
 
 	if game_state == "results":
@@ -1860,12 +1900,28 @@ func _input(event: InputEvent) -> void:
 				_return_to_title_or_stage_debug_from_test()
 				queue_redraw()
 			return
-		var is_any_advance: bool = (
-			(event is InputEventKey and event.pressed and not event.echo and event.keycode != KEY_PRINT)
-			or (event is InputEventJoypadButton and event.pressed)
-			or (event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT))
+		var is_cleared_advance_key: bool = (
+			event is InputEventKey and event.pressed and not event.echo
+			and (
+				event.keycode == KEY_ENTER
+				or event.keycode == KEY_KP_ENTER
+				or event.keycode == KEY_SPACE
+				or event.keycode == KEY_ESCAPE
+			)
 		)
-		if is_any_advance:
+		var is_cleared_advance_pad: bool = (
+			event is InputEventJoypadButton and event.pressed
+			and (
+				event.button_index == JOY_BUTTON_A
+				or event.button_index == JOY_BUTTON_X
+				or event.button_index == JOY_BUTTON_B
+				or event.button_index == JOY_BUTTON_START
+			)
+		)
+		var is_cleared_advance_click: bool = (
+			event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
+		)
+		if is_cleared_advance_key or is_cleared_advance_pad or is_cleared_advance_click:
 			_advance_stage()
 			queue_redraw()
 		return
@@ -2199,9 +2255,10 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 			config_index = int(hit["main"])
 			do_confirm = true
 	if do_confirm and config_index == 5:
-		ui_renderer.set_btn_press_with_callback(tr("CONFIG_PRACTICE"), func():
-			StageSelectManager.tutorial_return_to = "config"
-			_enter_rules()
+		ui_renderer.set_btn_press_with_callback(tr("CONFIG_SE_SETTING"), func():
+			_se_config_lt_ready = true
+			_se_config_rt_ready = true
+			game_state = "se_config"
 			queue_redraw()
 		)
 		queue_redraw()
@@ -2228,6 +2285,118 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		queue_redraw()
 	if moved:
 		queue_redraw()
+
+
+func _input_se_config(event: InputEvent) -> void:
+	# ESC / B / START → 保存してコンフィグへ戻る
+	var is_back: bool = (
+		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+		or (event is InputEventJoypadButton and event.pressed and (
+			event.button_index == JOY_BUTTON_B or event.button_index == JOY_BUTTON_START
+		))
+	)
+	if is_back:
+		stop_sfx_ui_in()
+		stop_sfx_ui_out()
+		DebugSFXConfig.save()
+		game_state = "config"
+		queue_redraw()
+		return
+
+	# コントローラー: ボタン押下
+	if event is InputEventJoypadButton:
+		if event.pressed:
+			match event.button_index:
+				JOY_BUTTON_LEFT_SHOULDER:  # L → out 上（前へ）
+					DebugSFXConfig.out_idx = posmod(DebugSFXConfig.out_idx - 1, DebugSFXConfig.out_count)
+					_play_sfx(sfx_click)
+					queue_redraw()
+				JOY_BUTTON_RIGHT_SHOULDER:  # R → in 上（前へ）
+					DebugSFXConfig.in_idx = posmod(DebugSFXConfig.in_idx - 1, DebugSFXConfig.in_count)
+					_play_sfx(sfx_click)
+					queue_redraw()
+				JOY_BUTTON_A:  # A → OUT テスト再生
+					play_sfx_ui_out()
+				JOY_BUTTON_X:  # X → IN テスト再生
+					play_sfx_ui_in()
+		else:
+			match event.button_index:
+				JOY_BUTTON_A:
+					stop_sfx_ui_out()
+				JOY_BUTTON_X:
+					stop_sfx_ui_in()
+
+	# コントローラー: LT/RT トリガー（立ち上がり検出）
+	if event is InputEventJoypadMotion:
+		if event.axis == JOY_AXIS_TRIGGER_LEFT:
+			if event.axis_value < 0.2:
+				_se_config_lt_ready = true
+			elif event.axis_value >= 0.5 and _se_config_lt_ready:
+				_se_config_lt_ready = false
+				DebugSFXConfig.out_idx = posmod(DebugSFXConfig.out_idx + 1, DebugSFXConfig.out_count)
+				_play_sfx(sfx_click)
+				queue_redraw()
+		elif event.axis == JOY_AXIS_TRIGGER_RIGHT:
+			if event.axis_value < 0.2:
+				_se_config_rt_ready = true
+			elif event.axis_value >= 0.5 and _se_config_rt_ready:
+				_se_config_rt_ready = false
+				DebugSFXConfig.in_idx = posmod(DebugSFXConfig.in_idx + 1, DebugSFXConfig.in_count)
+				_play_sfx(sfx_click)
+				queue_redraw()
+
+	# マウス
+	if event is InputEventMouseButton:
+		var vp: Vector2 = get_viewport_rect().size
+		var click_pos: Vector2 = input_handler.player_position
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				# ラジオボタンのクリック判定（左パネル: out）
+				var hit_out: int = _hit_se_config_radio_out(click_pos, vp)
+				if hit_out >= 0:
+					DebugSFXConfig.out_idx = hit_out
+					_play_sfx(sfx_click)
+					queue_redraw()
+					return
+				# ラジオボタンのクリック判定（右パネル: in）
+				var hit_in: int = _hit_se_config_radio_in(click_pos, vp)
+				if hit_in >= 0:
+					DebugSFXConfig.in_idx = hit_in
+					_play_sfx(sfx_click)
+					queue_redraw()
+					return
+				# それ以外: OUTテスト再生
+				play_sfx_ui_out()
+			else:
+				stop_sfx_ui_out()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				play_sfx_ui_in()
+			else:
+				stop_sfx_ui_in()
+
+
+# ラジオボタンのヒット判定。ヒットした場合は 0〜4 のインデックスを返す、外れは -1。
+func _hit_se_config_radio_out(pos: Vector2, vp: Vector2) -> int:
+	var rx: float = 200.0
+	var ry0: float = vp.y * 0.37
+	var ystep: float = 85.0
+	for i in range(DebugSFXConfig.out_count):
+		var cy: float = ry0 + i * ystep
+		if Rect2(rx - 20.0, cy - 36.0, 340.0, 72.0).has_point(pos):
+			return i
+	return -1
+
+
+func _hit_se_config_radio_in(pos: Vector2, vp: Vector2) -> int:
+	var rx: float = vp.x - 200.0
+	var ry0: float = vp.y * 0.37
+	var ystep: float = 85.0
+	for i in range(DebugSFXConfig.in_count):
+		var cy: float = ry0 + i * ystep
+		if Rect2(rx - 320.0, cy - 36.0, 340.0, 72.0).has_point(pos):
+			return i
+	return -1
 
 
 func _input_credit(_event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, is_confirm_click: bool) -> void:
@@ -2876,8 +3045,11 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 
 func _resume_from_pause() -> void:
 	pause_active = false
-	# Restore timer: adjust start_time so elapsed stays the same
-	start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
+	# Restore timer: adjust the relevant time base so elapsed stays the same
+	if game_state == "guide_countdown":
+		guide_start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
+	else:
+		start_time = Time.get_ticks_msec() / 1000.0 - pause_elapsed
 	_play_sfx(sfx_window_close)
 	queue_redraw()
 
@@ -5014,7 +5186,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config" or game_state == "credit":
+	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config" or game_state == "credit" or game_state == "se_config":
 		if game_state == "rules":
 			if _metrics_settle_timer > 0.0:
 				_metrics_settle_timer -= delta
