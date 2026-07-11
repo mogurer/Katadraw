@@ -2631,6 +2631,11 @@ func _apply_se_volume() -> void:
 	sfx_cat.volume_db = base_db
 	sfx_spot.volume_db = base_db
 	TransitionManager.set_se_volume_db(base_db)
+	var ui_move_db: float = -10.0 + _volume_offset_db(se_volume)
+	if _sfx_ui_in:
+		_sfx_ui_in.volume_db = ui_move_db
+	if _sfx_ui_out:
+		_sfx_ui_out.volume_db = ui_move_db
 
 
 func _volume_offset_db(level: int) -> float:
