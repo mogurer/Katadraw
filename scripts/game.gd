@@ -1366,9 +1366,6 @@ func _check_clear() -> void:
 	if game_state != "playing":
 		return
 	var _snap_ok: bool = input_handler.is_snap_clear()
-	if not _snap_ok and current_stage == StageSelectManager._zou_stage_idx:
-		# 複雑な魚形は巡回順一致が困難なため、全コーナー占有のみで判定
-		_snap_ok = input_handler.is_all_corners_occupied()
 	if _snap_ok:
 		is_dragging = false
 		game_state = "cleared"

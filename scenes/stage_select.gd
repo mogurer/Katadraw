@@ -97,6 +97,7 @@ const _BGM_LABEL_COLOR     := Color(0.5, 0.3, 0.3)
 const _BGM_TYPEWRITER_SEC  := 1.0
 const _BGM_HOLD_SEC        := 5.0
 const _BGM_DISMISS_SEC     := 2.0
+const _BGM_WHEEL_COOLDOWN_SEC := 0.18
 
 var _camera: Camera2D = null  # コードで生成する Camera2D
 
@@ -208,6 +209,7 @@ var _bgm_x_btn_held: bool = false
 var _bgm_lr_collapse_timer: float = -1.0
 var _bgm_expand_tween: Tween = null
 var _bgm_expanded: bool = false
+var _bgm_wheel_last_input_msec: int = -1000000
 
 # --- 入力モード ---
 static var _saved_input_mode: int = 0  # シーン再生成をまたいで保持
@@ -850,6 +852,19 @@ func _input(event: InputEvent) -> void:
 				_esc_popup_stick_ready = true
 				_sfx_click.play()
 				queue_redraw()
+
+	# マウスホイールでBGM切り替え（ポップアップ非表示中のみ）
+	if event is InputEventMouseButton and event.pressed and _popup_stage < 0 and not _esc_popup:
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN or event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if BGMManager.get_unlocked_track_count() > 1:
+				var now_msec := Time.get_ticks_msec()
+				if now_msec - _bgm_wheel_last_input_msec >= int(_BGM_WHEEL_COOLDOWN_SEC * 1000):
+					_bgm_wheel_last_input_msec = now_msec
+					if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+						BGMManager.select_next_bgm()
+					else:
+						BGMManager.select_prev_bgm()
+					_start_bgm_label_anim()
 
 	# X ボタンリリースで収納
 	if event is InputEventJoypadButton and not event.pressed and event.button_index == JOY_BUTTON_X:

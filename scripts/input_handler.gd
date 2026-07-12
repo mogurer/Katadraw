@@ -2943,6 +2943,7 @@ func is_snap_clear() -> bool:
 
 
 ## 全頂点が占有されているか（巡回順チェックなし）
+## NOTE: 2026-07時点で未使用（zouステージのクリア判定フォールバックを廃止したため）
 func is_all_corners_occupied() -> bool:
 	var n_corners: int = _game.stage_manager.shape_corner_points.size()
 	var n: int = _game.point_positions.size()
