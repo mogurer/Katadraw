@@ -304,26 +304,26 @@ func _ready() -> void:
 		StageSelectManager._zou_stage_idx = _find_zou_stage_idx()
 	_bgm_canvas = $BgmUI
 	_sfx_hover = AudioStreamPlayer.new()
-	_sfx_hover.stream = load("res://assets/sounds/pinon.wav")
+	_sfx_hover.stream = load("res://assets/sounds/SE/pinon.wav")
 	_sfx_hover.volume_db = -10.0
 	add_child(_sfx_hover)
 	_sfx_click = AudioStreamPlayer.new()
-	_sfx_click.stream = load("res://assets/sounds/se_click.wav")
+	_sfx_click.stream = load("res://assets/sounds/SE/se_click.wav")
 	_sfx_click.volume_db = -14.5
 	add_child(_sfx_click)
 	_sfx_on = AudioStreamPlayer.new()
-	_sfx_on.stream = load("res://assets/sounds/se_on.wav")
+	_sfx_on.stream = load("res://assets/sounds/SE/se_on.wav")
 	_sfx_on.volume_db = -14.5
 	add_child(_sfx_on)
 	_sfx_se_preview = AudioStreamPlayer.new()
 	_sfx_se_preview.volume_db = -10.0
 	add_child(_sfx_se_preview)
 	_sfx_spot02 = AudioStreamPlayer.new()
-	_sfx_spot02.stream = load("res://assets/sounds/skill_airdash.wav")
+	_sfx_spot02.stream = load("res://assets/sounds/SE/skill_airdash.wav")
 	_sfx_spot02.volume_db = -10.0
 	add_child(_sfx_spot02)
 	_sfx_telop_soft = AudioStreamPlayer.new()
-	_sfx_telop_soft.stream = load("res://assets/sounds/Telop_Soft_25.wav")
+	_sfx_telop_soft.stream = load("res://assets/sounds/SE/Telop_Soft_25.wav")
 	add_child(_sfx_telop_soft)
 	# SE音量を設定ファイルから読み込み、各 SE プレイヤーの初期音量に反映する
 	var _ss_cfg := ConfigFile.new()

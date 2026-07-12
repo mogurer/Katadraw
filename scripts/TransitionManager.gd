@@ -33,9 +33,9 @@ func _ready() -> void:
 	dn.mgr = self
 	_node = dn
 	add_child(_node)
-	_sfx_triangle = _make_sfx("res://assets/sounds/ts02.wav")
-	_sfx_polygon  = _make_sfx("res://assets/sounds/ts03.wav")
-	_sfx_diagonal = _make_sfx("res://assets/sounds/ts01.wav")
+	_sfx_triangle = _make_sfx("res://assets/sounds/SE/ts02.wav")
+	_sfx_polygon  = _make_sfx("res://assets/sounds/SE/ts03.wav")
+	_sfx_diagonal = _make_sfx("res://assets/sounds/SE/ts01.wav")
 	# SE音量を設定ファイルから読み込んで初期適用（game.gd が後から set_se_volume_db() で上書きする）
 	var cfg := ConfigFile.new()
 	if cfg.load("user://config.cfg") == OK:

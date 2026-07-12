@@ -954,67 +954,67 @@ func _notification(what: int) -> void:
 func _setup_audio() -> void:
 	# BGMManager に移行: bgm_title / bgm_game / bgm_result は BGMManager が管理
 	sfx_count = AudioStreamPlayer.new()
-	sfx_count.stream = _load_audio("res://assets/sounds/se_count.wav")
+	sfx_count.stream = _load_audio("res://assets/sounds/SE/se_count.wav")
 	sfx_count.volume_db = -14.5
 	add_child(sfx_count)
 
 	sfx_clear = AudioStreamPlayer.new()
-	sfx_clear.stream = _load_audio("res://assets/sounds/se_match.mp3")
+	sfx_clear.stream = _load_audio("res://assets/sounds/SE/se_match.mp3")
 	sfx_clear.volume_db = -14.5
 	add_child(sfx_clear)
 
 	sfx_on = AudioStreamPlayer.new()
-	sfx_on.stream = _load_audio("res://assets/sounds/se_on.wav")
+	sfx_on.stream = _load_audio("res://assets/sounds/SE/se_on.wav")
 	sfx_on.volume_db = -14.5
 	add_child(sfx_on)
 
 	sfx_point = AudioStreamPlayer.new()
-	sfx_point.stream = _load_audio("res://assets/sounds/se_point.wav")
+	sfx_point.stream = _load_audio("res://assets/sounds/SE/se_point.wav")
 	sfx_point.volume_db = -14.5
 	add_child(sfx_point)
 
 	sfx_motion = AudioStreamPlayer.new()
-	sfx_motion.stream = _load_audio("res://assets/sounds/se_motion.mp3")
+	sfx_motion.stream = _load_audio("res://assets/sounds/SE/se_motion.mp3")
 	sfx_motion.volume_db = -14.5
 	add_child(sfx_motion)
 
 	sfx_stagestart = AudioStreamPlayer.new()
-	sfx_stagestart.stream = _load_audio("res://assets/sounds/katadraw_stagestart.wav")
+	sfx_stagestart.stream = _load_audio("res://assets/sounds/SE/katadraw_stagestart.wav")
 	sfx_stagestart.volume_db = -14.5
 	add_child(sfx_stagestart)
 
 	sfx_cat = AudioStreamPlayer.new()
-	sfx_cat.stream = _load_audio("res://assets/sounds/cat.wav")
+	sfx_cat.stream = _load_audio("res://assets/sounds/SE/cat.wav")
 	sfx_cat.volume_db = -14.5
 	add_child(sfx_cat)
 
 	sfx_spot = AudioStreamPlayer.new()
-	sfx_spot.stream = _load_audio("res://assets/sounds/se_spot02.wav")
+	sfx_spot.stream = _load_audio("res://assets/sounds/SE/se_spot02.wav")
 	sfx_spot.volume_db = -14.5
 	add_child(sfx_spot)
 
 	sfx_click = AudioStreamPlayer.new()
-	sfx_click.stream = _load_audio("res://assets/sounds/se_click.wav")
+	sfx_click.stream = _load_audio("res://assets/sounds/SE/se_click.wav")
 	sfx_click.volume_db = -14.5
 	add_child(sfx_click)
 
 	sfx_window_open = AudioStreamPlayer.new()
-	sfx_window_open.stream = _load_audio("res://assets/sounds/se_window_open.wav")
+	sfx_window_open.stream = _load_audio("res://assets/sounds/SE/se_window_open.wav")
 	sfx_window_open.volume_db = -14.5
 	add_child(sfx_window_open)
 
 	sfx_window_close = AudioStreamPlayer.new()
-	sfx_window_close.stream = _load_audio("res://assets/sounds/se_window_close.wav")
+	sfx_window_close.stream = _load_audio("res://assets/sounds/SE/se_window_close.wav")
 	sfx_window_close.volume_db = -14.5
 	add_child(sfx_window_close)
 
 	sfx_catch = AudioStreamPlayer.new()
-	sfx_catch.stream = _load_audio("res://assets/sounds/se_catch.wav")
+	sfx_catch.stream = _load_audio("res://assets/sounds/SE/se_catch.wav")
 	sfx_catch.volume_db = -14.5
 	add_child(sfx_catch)
 
 	sfx_move = AudioStreamPlayer.new()
-	sfx_move.stream = _load_audio("res://assets/sounds/se_move.wav")
+	sfx_move.stream = _load_audio("res://assets/sounds/SE/se_move.wav")
 	sfx_move.volume_db = -14.5
 	add_child(sfx_move)
 
@@ -1035,12 +1035,12 @@ func _setup_audio() -> void:
 	_sfx_ui_out_timer.timeout.connect(_on_sfx_ui_out_timer_timeout)
 
 	sfx_stageclear = AudioStreamPlayer.new()
-	sfx_stageclear.stream = _load_audio("res://assets/sounds/se_stageclear.wav")
+	sfx_stageclear.stream = _load_audio("res://assets/sounds/SE/se_stageclear.wav")
 	sfx_stageclear.volume_db = -14.5
 	add_child(sfx_stageclear)
 
 	sfx_stageclear02 = AudioStreamPlayer.new()
-	sfx_stageclear02.stream = _load_audio("res://assets/sounds/se_stageclear02.wav")
+	sfx_stageclear02.stream = _load_audio("res://assets/sounds/SE/se_stageclear02.wav")
 	sfx_stageclear02.volume_db = -14.5
 	add_child(sfx_stageclear02)
 
