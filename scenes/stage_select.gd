@@ -209,6 +209,7 @@ var _bgm_x_btn_held: bool = false
 var _bgm_lr_collapse_timer: float = -1.0
 var _bgm_expand_tween: Tween = null
 var _bgm_expanded: bool = false
+var _bgm_label_cross_tween: Tween = null
 var _bgm_wheel_last_input_msec: int = -1000000
 
 # --- 入力モード ---
@@ -804,12 +805,16 @@ func _input(event: InputEvent) -> void:
 			_bgm_lr_collapse_timer = 0.5
 			if not _bgm_expanded:
 				_bgm_do_expand()
+			if _bgm_expanded:
+				_bgm_update_expanded_label(true)
 		elif event.keycode == KEY_E:
 			BGMManager.select_next_bgm()
 			_start_bgm_label_anim()
 			_bgm_lr_collapse_timer = 0.5
 			if not _bgm_expanded:
 				_bgm_do_expand()
+			if _bgm_expanded:
+				_bgm_update_expanded_label(true)
 		elif _SE_UI_VISIBLE and event.keycode == KEY_Z:
 			_cycle_sfx_in()
 		elif _SE_UI_VISIBLE and event.keycode == KEY_X:
@@ -833,12 +838,16 @@ func _input(event: InputEvent) -> void:
 			_bgm_lr_collapse_timer = 0.5
 			if not _bgm_expanded:
 				_bgm_do_expand()
+			if _bgm_expanded:
+				_bgm_update_expanded_label(true)
 		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			BGMManager.select_next_bgm()
 			_start_bgm_label_anim()
 			_bgm_lr_collapse_timer = 0.5
 			if not _bgm_expanded:
 				_bgm_do_expand()
+			if _bgm_expanded:
+				_bgm_update_expanded_label(true)
 		# X ボタン保持で BGM 拡大パネル表示
 		elif event.button_index == JOY_BUTTON_X:
 			_bgm_x_btn_held = true
@@ -865,6 +874,11 @@ func _input(event: InputEvent) -> void:
 					else:
 						BGMManager.select_prev_bgm()
 					_start_bgm_label_anim()
+					_bgm_lr_collapse_timer = 0.5
+					if not _bgm_expanded:
+						_bgm_do_expand()
+					if _bgm_expanded:
+						_bgm_update_expanded_label(true)
 
 	# X ボタンリリースで収納
 	if event is InputEventJoypadButton and not event.pressed and event.button_index == JOY_BUTTON_X:
@@ -2825,17 +2839,43 @@ func _bgm_do_collapse() -> void:
 	_bgm_expand_tween.tween_callback(func() -> void: _bgm_expanded_panel.visible = false)
 
 
-func _bgm_update_expanded_label() -> void:
+func _bgm_update_expanded_label(animate: bool = false) -> void:
 	if not _bgm_expanded_name_label:
 		return
 	var idx := BGMManager.get_ingame_track_idx()
+	var new_text: String = ""
 	if idx >= 0 and idx < _BGM_TRACK_KEYS.size():
-		_bgm_expanded_name_label.text = tr(_BGM_TRACK_KEYS[idx])
+		new_text = tr(_BGM_TRACK_KEYS[idx])
 	var show_arrows: bool = BGMManager.get_unlocked_track_count() > 1
 	if _bgm_expanded_prev_btn:
 		_bgm_expanded_prev_btn.visible = show_arrows
 	if _bgm_expanded_next_btn:
 		_bgm_expanded_next_btn.visible = show_arrows
+	var lbl := _bgm_expanded_name_label
+	if not animate or lbl.text == "" or lbl.text == new_text:
+		if _bgm_label_cross_tween:
+			_bgm_label_cross_tween.kill()
+			_bgm_label_cross_tween = null
+		lbl.text = new_text
+		lbl.modulate.a = 1.0
+		lbl.position.y = 0.0
+		return
+	if _bgm_label_cross_tween:
+		_bgm_label_cross_tween.kill()
+	_bgm_label_cross_tween = create_tween()
+	# フェードアウト: 上方向にスライドしながら消える（テキスト変更前なのでコンテナ再ソートなし）
+	_bgm_label_cross_tween.tween_property(lbl, "modulate:a", 0.0, 0.12)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_bgm_label_cross_tween.parallel().tween_property(lbl, "position:y", -12.0, 0.12)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# テキスト入れ替え・position.y リセット
+	_bgm_label_cross_tween.tween_callback(func() -> void:
+		lbl.text = new_text
+		lbl.position.y = 0.0
+	)
+	# フェードイン（コンテナ制約によりスライドインは省略・alpha のみ）
+	_bgm_label_cross_tween.tween_property(lbl, "modulate:a", 1.0, 0.12)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 # --- 入力モード切替 ---
