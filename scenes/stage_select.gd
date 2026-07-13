@@ -258,12 +258,20 @@ var _sfx_out_panel_rect: Rect2 = Rect2()
 
 func _ready() -> void:
 	_input_mode = _saved_input_mode
-	var mplus: Font = load("res://assets/fonts/Mplus2-Medium.otf")
+	var mplus: Font = load("res://assets/fonts/Mplus2-SemiBold.otf")
 	if mplus != null:
 		mplus.fallbacks = [ThemeDB.fallback_font]
-		_font = mplus
 	else:
-		_font = ThemeDB.fallback_font
+		mplus = ThemeDB.fallback_font
+	if TranslationServer.get_locale() == "en":
+		var din_regular: FontFile = load("res://assets/fonts/D-DIN-PRO-400-Regular.otf")
+		if din_regular != null:
+			din_regular.fallbacks = [mplus]
+			_font = din_regular
+		else:
+			_font = mplus
+	else:
+		_font = mplus
 	var din_res: FontFile = load("res://assets/fonts/D-DIN-PRO-700-Bold.otf")
 	if din_res != null:
 		din_res.fallbacks = [_font]

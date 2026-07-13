@@ -787,16 +787,16 @@ func _draw_title(vp: Vector2) -> void:
 
 
 func get_menu_btn_cy(vp: Vector2, index: int, count: int) -> float:
-	# 画面の57%〜85%に均等配置し、上下をそれぞれ20px中央に寄せる
-	var area_top: float = vp.y * 0.57
-	var area_bottom: float = vp.y * 0.85
-	var btn_spacing: float = (area_bottom - area_top) / maxf(count - 1, 1)
-	var base_y: float = area_top + index * btn_spacing
+	# ゲームスタートボタンを基準に、ボタン間20px間隔で固定配置
+	var first_btn_cy: float = vp.y * 0.57 - 5.0
 	if index == 0:
-		base_y += 20.0
-	elif index == count - 1:
-		base_y -= 20.0
-	return base_y
+		return first_btn_cy
+	var btn_h: float = get_menu_btn_h()
+	return first_btn_cy + index * (btn_h + 20.0)
+
+
+func get_menu_btn_h() -> float:
+	return (_game.font.get_ascent(BTN_FONT_SIZE) + _game.font.get_descent(BTN_FONT_SIZE)) * 1.5 * 0.9
 
 
 func _draw_menu(vp: Vector2) -> void:
@@ -821,7 +821,7 @@ func _draw_menu(vp: Vector2) -> void:
 		var btn_center_y: float = get_menu_btn_cy(vp, i, menu_count)
 		var is_sel: bool = (i == _game.menu_index)
 		var is_off: bool = not is_sel
-		_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, btn_center_y), labels[i], BTN_FONT_SIZE, 1.0, is_off, vp.x * 0.375)
+		_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, btn_center_y), labels[i], BTN_FONT_SIZE, 1.0, is_off, vp.x * 0.375, get_menu_btn_h())
 
 	_game.draw_string(_game.font, Vector2(0, vp.y - 30), tr("TITLE_COPYRIGHT"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 32, Color(0.45, 0.38, 0.45))
 

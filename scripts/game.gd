@@ -582,18 +582,7 @@ func _ready() -> void:
 	input_handler.on_selection_changed = _on_selection_changed
 	TranslationServer.set_locale("ja")
 	_load_settings()
-	var mplus_font: Font = load("res://assets/fonts/Mplus2-Medium.otf")
-	if mplus_font:
-		mplus_font.fallbacks = [ThemeDB.fallback_font]
-		font = mplus_font
-	else:
-		font = ThemeDB.fallback_font
-	var bold_font: Font = load("res://assets/fonts/Mplus2-Bold.otf")
-	if bold_font:
-		bold_font.fallbacks = [font]
-		font_bold = bold_font
-	else:
-		font_bold = font
+	_apply_locale_fonts()
 	var din_font: FontFile = load("res://assets/fonts/D-DIN-PRO-700-Bold.otf")
 	if din_font:
 		din_font.fallbacks = [font]
@@ -630,6 +619,38 @@ func _ready() -> void:
 		logo_start_time = Time.get_ticks_msec() / 1000.0
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 	_setup_clear_card_canvas()
+
+
+## 現在のロケールに応じて font / font_bold を切り替える（en: DIN、それ以外: Mplus2）。
+## DIN には日本語グリフが無いため、未翻訳や日本語混在時は fallback で Mplus2 が使われる。
+func _apply_locale_fonts() -> void:
+	var jp_regular: Font = load("res://assets/fonts/Mplus2-SemiBold.otf")
+	if jp_regular:
+		jp_regular.fallbacks = [ThemeDB.fallback_font]
+	else:
+		jp_regular = ThemeDB.fallback_font
+	var jp_bold: Font = load("res://assets/fonts/Mplus2-ExtraBold.otf")
+	if jp_bold:
+		jp_bold.fallbacks = [jp_regular]
+	else:
+		jp_bold = jp_regular
+
+	if TranslationServer.get_locale() == "en":
+		var din_regular: FontFile = load("res://assets/fonts/D-DIN-PRO-400-Regular.otf")
+		if din_regular:
+			din_regular.fallbacks = [jp_regular]
+			font = din_regular
+		else:
+			font = jp_regular
+		var din_bold: FontFile = load("res://assets/fonts/D-DIN-PRO-700-Bold.otf")
+		if din_bold:
+			din_bold.fallbacks = [jp_bold]
+			font_bold = din_bold
+		else:
+			font_bold = jp_bold
+	else:
+		font = jp_regular
+		font_bold = jp_bold
 
 
 ## STAGE CLEAR カード用 Node2D をセットアップ（位置揺らぎのみ・シェーダーなし）
@@ -1446,6 +1467,11 @@ func _force_clear_for_debug() -> void:
 	ui_renderer.spawn_particles(current_centroid)
 	_play_sfx(sfx_clear)
 	_play_sfx(sfx_stageclear)
+	if not GameConfig.IS_TRIAL:
+		StageSelectManager.mark_cleared(current_stage)
+		var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
+		_new_record_time = _rec.time
+		_new_record_moves = _rec.moves
 
 
 # =============================================================================
@@ -2566,6 +2592,7 @@ func _config_apply_language_delta(delta: int) -> void:
 	var idx: int = _config_language_ui_index_from_locale()
 	idx = (idx + delta + 2) % 2
 	TranslationServer.set_locale("ja" if idx == 0 else "en")
+	_apply_locale_fonts()
 
 
 ## コンフィグで切り替えるのは日本語・英語のみ（zh 系は UI 上は ja スロットに寄せる）
