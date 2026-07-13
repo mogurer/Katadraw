@@ -93,7 +93,7 @@ const HINT_LOOP_FADE := 1.0
 const HINT_LOOP_HIDE := 3.0
 
 # タイムアタック対象ステージ数（ZOUを除く50ステージ）。StageSelectManager.STAGE_COUNT と同じ値。
-const STAGE_COUNT_FOR_TA := 50
+const STAGE_COUNT_FOR_TA := 5
 
 # --- ロゴ ---
 const LOGO_WAIT1 := 1.0

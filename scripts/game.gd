@@ -124,6 +124,39 @@ var stage_move_count: int = 0
 var _ta_hud_side: String = "left"
 var ta_run_new_record_flags: Array[bool] = []
 var _ta_results_start_time: float = 0.0
+
+
+## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
+## _draw_ta_results()（描画）と ta_results の入力判定の両方がこれを参照する単一の情報源。
+func _ta_results_timeline() -> Dictionary:
+	const TITLE_SHOW_DUR: float = 0.6
+	const TITLE_SCROLL_DUR: float = 0.5
+	const ROW_INTERVAL: float = 0.35
+	const ROW_H: float = 75.0
+	const THANK_YOU_DELAY: float = 1.0
+	const BUTTONS_DELAY: float = 3.0
+	var stage_count: int = stage_session.stage_times.size()
+	var listing_start: float = TITLE_SHOW_DUR + TITLE_SCROLL_DUR
+	var listing_end: float = listing_start + float(stage_count) * ROW_INTERVAL
+	var thank_you_time: float = listing_end + THANK_YOU_DELAY
+	var buttons_time: float = thank_you_time + BUTTONS_DELAY
+	return {
+		"title_show_dur": TITLE_SHOW_DUR,
+		"title_scroll_dur": TITLE_SCROLL_DUR,
+		"row_interval": ROW_INTERVAL,
+		"row_h": ROW_H,
+		"listing_start": listing_start,
+		"listing_end": listing_end,
+		"thank_you_time": thank_you_time,
+		"buttons_time": buttons_time,
+		"elapsed": Time.get_ticks_msec() / 1000.0 - _ta_results_start_time,
+	}
+
+
+## THANK YOU 表示から3秒後（ボタンが出るタイミング）以降かどうか。
+func _ta_results_buttons_active() -> bool:
+	var tl: Dictionary = _ta_results_timeline()
+	return tl.elapsed >= tl.buttons_time
 const STAGE_MOVE_COUNT_PIXEL_THRESHOLD := 22.0
 var _move_grab_was_active: bool = false
 var _move_count_track_valid: bool = false
@@ -1775,33 +1808,61 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "ta_results":
-		var is_results_advance_key: bool = (
-			event is InputEventKey and event.pressed and not event.echo
-			and (
-				event.keycode == KEY_ENTER
-				or event.keycode == KEY_KP_ENTER
-				or event.keycode == KEY_ESCAPE
-			)
-		)
-		var is_results_advance_pad: bool = (
-			event is InputEventJoypadButton and event.pressed
-			and (
-				event.button_index == JOY_BUTTON_A
-				or event.button_index == JOY_BUTTON_X
-				or event.button_index == JOY_BUTTON_B
-				or event.button_index == JOY_BUTTON_START
-			)
-		)
-		var is_results_advance_click: bool = (
-			event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
-		)
-		if is_results_advance_key or is_results_advance_pad or is_results_advance_click:
-			BGMManager.stop()
-			TransitionManager.play_diagonal(func():
-				game_state = "title"
-				title_start_time = Time.get_ticks_msec() / 1000.0
+		# スクロールが終わり THANK YOU 表示から3秒経つ（ボタンが出る）までは一切操作を受け付けない
+		if not _ta_results_buttons_active():
+			return
+		var vp_res: Vector2 = get_viewport_rect().size
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_LEFT:
+				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index - 1 + 3) % 3
 				queue_redraw()
-			)
+				return
+			if event.keycode == KEY_RIGHT:
+				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + 1) % 3
+				queue_redraw()
+				return
+		var is_start_pad: bool = (
+			event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START
+		)
+		if is_confirm_click:
+			var pp: Vector2 = input_handler.player_position
+			if _hit_results_camera_button(pp):
+				_take_screenshot()
+				queue_redraw()
+				return
+			if _hit_results_twitter_button(pp):
+				_open_twitter_post()
+				queue_redraw()
+				return
+			if _hit_results_button(pp):
+				ui_renderer.set_btn_press_with_callback(tr("TA_RESULT_BTN_TITLE"), func():
+					BGMManager.stop()
+					TransitionManager.play_diagonal(func():
+						game_state = "title"
+						title_start_time = Time.get_ticks_msec() / 1000.0
+						queue_redraw()
+					)
+				)
+				queue_redraw()
+				return
+		if is_confirm_key or is_confirm_pad or is_start_pad:
+			var act: int = ui_renderer.get_results_active_focus(vp_res)
+			if act == 0:
+				_take_screenshot()
+			elif act == 1:
+				_open_twitter_post()
+			else:
+				ui_renderer.set_btn_press_with_callback(tr("TA_RESULT_BTN_TITLE"), func():
+					BGMManager.stop()
+					TransitionManager.play_diagonal(func():
+						game_state = "title"
+						title_start_time = Time.get_ticks_msec() / 1000.0
+						queue_redraw()
+					)
+				)
+				queue_redraw()
+				return
+			queue_redraw()
 		return
 
 	if game_state == "config":
