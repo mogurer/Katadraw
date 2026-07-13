@@ -863,7 +863,7 @@ func _update_player_hover() -> void:
 					elif pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
 						menu_confirm_index = 1
 			else:
-				var menu_count: int = 3
+				var menu_count: int = _title_menu_count()
 				for i in range(menu_count):
 					var btn_cy: float = ui_renderer.get_menu_btn_cy(vp, i, menu_count)
 					if pos.y >= btn_cy - 35.0 and pos.y <= btn_cy + 35.0:
@@ -1402,6 +1402,10 @@ func _check_clear() -> void:
 			_new_record_moves = _rec.moves
 		_save_dwell_log()
 
+		if StageSelectManager.time_attack_active:
+			_ta_advance_after_clear()
+			return
+
 
 func _save_dwell_log() -> void:
 	DirAccess.make_dir_recursive_absolute("user://KATA-DRAW-log")
@@ -1671,7 +1675,7 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 			else:
 				var vy_m: int = _ui_menu_stick_vertical_step(delta, _ui_stick_ly)
 				if vy_m != 0:
-					var menu_count: int = 3
+					var menu_count: int = _title_menu_count()
 					menu_index = (menu_index + vy_m + menu_count) % menu_count
 					queue_redraw()
 		"config":
@@ -1750,6 +1754,19 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "menu":
 		_input_menu(event, is_confirm_key, is_confirm_pad, is_confirm_click)
+		return
+
+	if game_state == "ta_info":
+		if (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE) or \
+				(event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B):
+			game_state = "menu"
+			queue_redraw()
+			return
+		if is_confirm_key or is_confirm_pad or is_confirm_click:
+			ui_renderer.set_btn_press_with_callback(tr("TA_INFO_START_BUTTON"), func():
+				_ta_start_run()
+			)
+			queue_redraw()
 		return
 
 	if game_state == "config":
@@ -2012,7 +2029,7 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 	if menu_confirm_quit:
 		_input_menu_quit_confirm(event, is_confirm_key or is_confirm_pad, is_confirm_click)
 		return
-	var menu_count: int = 3
+	var menu_count: int = _title_menu_count()
 	var moved: bool = false
 	# Keyboard / Pad up/down
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -2044,22 +2061,28 @@ func _input_menu(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool, 
 			menu_index = clicked_item
 			do_confirm = true
 	if do_confirm:
-		var menu_labels: Array[String] = [tr("MENU_GAME_START"), tr("MENU_CONFIG"), tr("MENU_QUIT")]
+		var labels: Array[String] = _title_menu_labels()
+		var items: Array[String] = _title_menu_items()
 		var idx: int = menu_index
-		ui_renderer.set_btn_press_with_callback(menu_labels[idx], func():
-			if idx == 0:
-				_start_game()
-			elif idx == 1:
-				_sync_window_display_from_os()
-				TransitionManager.play_diagonal(func():
-					game_state = "config"
-					config_index = 0
-					_reset_ui_menu_stick_navigation()
+		var item_id: String = items[idx]
+		ui_renderer.set_btn_press_with_callback(labels[idx], func():
+			match item_id:
+				"game_start":
+					_start_game()
+				"time_attack":
+					game_state = "ta_info"
 					queue_redraw()
-				)
-			elif idx == 2:
-				menu_confirm_quit = true
-				menu_confirm_index = 1  # デフォルト「いいえ」
+				"config":
+					_sync_window_display_from_os()
+					TransitionManager.play_diagonal(func():
+						game_state = "config"
+						config_index = 0
+						_reset_ui_menu_stick_navigation()
+						queue_redraw()
+					)
+				"quit":
+					menu_confirm_quit = true
+					menu_confirm_index = 1  # デフォルト「いいえ」
 			queue_redraw()
 		)
 		queue_redraw()
@@ -2838,7 +2861,7 @@ func _take_screenshot() -> void:
 
 func _hit_menu_item(pos: Vector2) -> int:
 	var vp: Vector2 = get_viewport_rect().size
-	var menu_count: int = 3
+	var menu_count: int = _title_menu_count()
 	for i in range(menu_count):
 		var btn_cy: float = ui_renderer.get_menu_btn_cy(vp, i, menu_count)
 		if pos.y >= btn_cy - 35.0 and pos.y <= btn_cy + 35.0:
@@ -3143,6 +3166,15 @@ func _start_game() -> void:
 
 
 func _start_game_from_stage_select() -> void:
+	if StageSelectManager.time_attack_pending:
+		StageSelectManager.time_attack_pending = false
+		StageSelectManager.pending_stage_id = -1
+		stage_session.clear_debug_test()
+		input_recorder = null
+		pause_retry_elapsed = -1.0
+		_ta_start_run()
+		return
+
 	var sid: int = StageSelectManager.pending_stage_id
 	StageSelectManager.last_played_stage_id = sid
 	StageSelectManager.pending_stage_id = -1
@@ -3151,6 +3183,90 @@ func _start_game_from_stage_select() -> void:
 	stage_session.clear_results()
 	pause_retry_elapsed = -1.0
 	_start_stage(sid)
+
+
+## タイムアタック開始: BGM無音待機→guide_countdown(3秒)へ入り、
+## 経過後は既存の guide_countdown 終了処理が resume_ingame() を呼んで 01-05 が再生される。
+func _ta_start_run() -> void:
+	StageSelectManager.time_attack_active = true
+	stage_session.clear_results()
+	BGMManager.reset_ingame_track_to_default()
+	BGMManager.start_first_stage()
+	var vp: Vector2 = get_viewport_rect().size
+	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(GameConfig.resolve_play_stage_to_master_index(0))
+	_begin_stage_with_config(0, cfg, _default_stage_shape_center(vp, 0), "guide_countdown")
+	guide_start_time = Time.get_ticks_msec() / 1000.0
+	guide_count_played = 0
+	queue_redraw()
+
+
+## タイムアタック: クリア済みステージから次ステージへ即座に進める（cleared/guide_countdown を経由しない）。
+## _check_clear() から、通常のクリア演出処理の直後に呼ばれる想定。
+func _ta_advance_after_clear() -> void:
+	var finished_idx: int = current_stage
+
+	# 10/20/30/40ステージ クリア → トランジション開始と同時にBGM切替
+	if (finished_idx + 1) % 10 == 0 and finished_idx + 1 < GameConfig.STAGE_COUNT_FOR_TA:
+		var zone_ids: Array[String] = ["", "01-06", "01-08", "02-03", "02-09"]
+		var zone: int = (finished_idx + 1) / 10
+		BGMManager.unlock_bgm(zone_ids[zone])
+
+	if finished_idx >= GameConfig.STAGE_COUNT_FOR_TA - 1:
+		# 全50ステージクリア → リザルトへ（Phase 5 で本実装。ここでは仮に results ステートへ遷移するのみ）
+		TransitionManager.play_polygon(func():
+			StageSelectManager.time_attack_active = false
+			game_state = "results"
+			queue_redraw()
+		, false)
+		return
+
+	var next_idx: int = finished_idx + 1
+	TransitionManager.play_polygon(func():
+		_ta_start_stage_immediate(next_idx)
+	, false)
+
+
+## タイムアタック: guide_info / guide_countdown を経由せず、即座に "playing" へ入る。
+## guide_countdown 終了時の初期化処理と同等の初期化をここで行う
+## （BGMは常時再生継続のため触らない）。
+func _ta_start_stage_immediate(idx: int) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	var master_idx: int = GameConfig.resolve_play_stage_to_master_index(idx)
+	var cfg: Dictionary = StageDebugOverrides.build_config_for_index(master_idx)
+	_begin_stage_with_config(idx, cfg, _default_stage_shape_center(vp, idx), "playing")
+	if input_handler.get_last_input_method() == "mouse":
+		playing_mouse_steers_player = true
+	_dwell_times  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	_dwell_counts = [0,   0,   0,   0,   0,   0,   0,   0,   0,   0  ]
+	_dwell_prev_bucket = clampi(int(current_circularity / 10.0), 0, 9)
+	_dwell_counts[_dwell_prev_bucket] = 1
+	start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
+	queue_redraw()
+
+
+## タイトルメニューの識別子配列を返す。zou_cleared のときのみ「タイムトライアル」を含む。
+func _title_menu_items() -> Array[String]:
+	var items: Array[String] = ["game_start"]
+	if StageSelectManager.zou_cleared:
+		items.append("time_attack")
+	items.append("config")
+	items.append("quit")
+	return items
+
+
+func _title_menu_count() -> int:
+	return _title_menu_items().size()
+
+
+func _title_menu_labels() -> Array[String]:
+	var result: Array[String] = []
+	for id in _title_menu_items():
+		match id:
+			"game_start":   result.append(tr("MENU_GAME_START"))
+			"time_attack":  result.append(tr("MENU_TIME_ATTACK"))
+			"config":       result.append(tr("MENU_CONFIG"))
+			"quit":         result.append(tr("MENU_QUIT"))
+	return result
 
 
 func _konami_event_to_token(event: InputEvent) -> String:
@@ -5255,7 +5371,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "config" or game_state == "credit" or game_state == "se_config":
+	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "ta_info" or game_state == "config" or game_state == "credit" or game_state == "se_config":
 		if game_state == "rules":
 			if _metrics_settle_timer > 0.0:
 				_metrics_settle_timer -= delta

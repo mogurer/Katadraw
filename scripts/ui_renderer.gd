@@ -498,6 +498,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_title(vp)
 		"menu":
 			_draw_menu(vp)
+		"ta_info":
+			_draw_ta_info(vp)
 		"config":
 			_draw_config(vp)
 		"se_config":
@@ -811,8 +813,8 @@ func _draw_menu(vp: Vector2) -> void:
 	else:
 		_game.draw_string(_game.font, Vector2(0, cy - 50), tr("TITLE_NAME"), HORIZONTAL_ALIGNMENT_CENTER, vp.x, 168, LINE_COLOR)
 
-	var menu_count: int = 3
-	var labels: Array[String] = [tr("MENU_GAME_START"), tr("MENU_CONFIG"), tr("MENU_QUIT")]
+	var menu_count: int = _game._title_menu_count()
+	var labels: Array[String] = _game._title_menu_labels()
 	for i in range(menu_count):
 		var btn_center_y: float = get_menu_btn_cy(vp, i, menu_count)
 		var is_sel: bool = (i == _game.menu_index)
@@ -857,6 +859,38 @@ func _draw_menu_quit_confirm(vp: Vector2) -> void:
 		var tail_d: float = head_d - QUIT_BORDER_LINE_LEN
 		_draw_border_line_topleft_ui(dlg_rect.position.x, dlg_rect.position.y, dlg_w, dlg_h,
 				tail_d, head_d, Color(0.95, 0.19, 0.32))
+
+
+func _draw_ta_info(vp: Vector2) -> void:
+	_draw_bg(vp)
+	var cx: float = vp.x / 2.0
+	var panel_w: float = minf(720.0, vp.x * 0.85)
+	var panel_x: float = cx - panel_w / 2.0
+	var top_y: float = vp.y * 0.18
+
+	# タイトル
+	_game.draw_string(_game.font_bold, Vector2(panel_x, top_y), tr("TA_INFO_TITLE"),
+			HORIZONTAL_ALIGNMENT_CENTER, panel_w, 52, LINE_COLOR)
+
+	# 説明文 3行
+	var body_keys: Array[String] = ["TA_INFO_BODY_1", "TA_INFO_BODY_2", "TA_INFO_BODY_3"]
+	var body_y: float = top_y + 80.0
+	var line_gap: float = 60.0
+	for i in range(body_keys.size()):
+		_game.draw_string(_game.font, Vector2(panel_x, body_y + float(i) * line_gap),
+				tr(body_keys[i]), HORIZONTAL_ALIGNMENT_LEFT, panel_w, 28, LINE_COLOR)
+
+	# 開始ボタン
+	var btn_cy: float = body_y + float(body_keys.size()) * line_gap + 60.0
+	_draw_auto_button_with_shadow(Vector2(cx, btn_cy), tr("TA_INFO_START_BUTTON"),
+			BTN_FONT_SIZE, 1.0, false, panel_w * 0.7)
+
+	# ESC/B で戻るヒント
+	_game.draw_string(_game.font, Vector2(0.0, vp.y - 62.0), tr("BACK_HINT_ESC"),
+			HORIZONTAL_ALIGNMENT_CENTER, vp.x, 26, Color(0.6, 0.55, 0.6))
+
+	_game.draw_string(_game.font, Vector2(0.0, vp.y - 30.0), tr("TITLE_COPYRIGHT"),
+			HORIZONTAL_ALIGNMENT_CENTER, vp.x, 32, Color(0.45, 0.38, 0.45))
 
 
 func _get_perimeter_pos_topleft_ui(d: float, bx: float, by: float, bw: float, bh: float) -> Vector2:
