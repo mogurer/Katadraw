@@ -123,6 +123,7 @@ var stage_move_count: int = 0
 # タイムアタックHUD関連（保存なし・セッションのみ）
 var _ta_hud_side: String = "left"
 var ta_run_new_record_flags: Array[bool] = []
+var _ta_results_start_time: float = 0.0
 const STAGE_MOVE_COUNT_PIXEL_THRESHOLD := 22.0
 var _move_grab_was_active: bool = false
 var _move_count_track_valid: bool = false
@@ -1773,6 +1774,36 @@ func _input(event: InputEvent) -> void:
 			queue_redraw()
 		return
 
+	if game_state == "ta_results":
+		var is_results_advance_key: bool = (
+			event is InputEventKey and event.pressed and not event.echo
+			and (
+				event.keycode == KEY_ENTER
+				or event.keycode == KEY_KP_ENTER
+				or event.keycode == KEY_ESCAPE
+			)
+		)
+		var is_results_advance_pad: bool = (
+			event is InputEventJoypadButton and event.pressed
+			and (
+				event.button_index == JOY_BUTTON_A
+				or event.button_index == JOY_BUTTON_X
+				or event.button_index == JOY_BUTTON_B
+				or event.button_index == JOY_BUTTON_START
+			)
+		)
+		var is_results_advance_click: bool = (
+			event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
+		)
+		if is_results_advance_key or is_results_advance_pad or is_results_advance_click:
+			BGMManager.stop()
+			TransitionManager.play_diagonal(func():
+				game_state = "title"
+				title_start_time = Time.get_ticks_msec() / 1000.0
+				queue_redraw()
+			)
+		return
+
 	if game_state == "config":
 		_input_config(event, is_confirm_key, is_confirm_pad, is_confirm_click)
 		return
@@ -3234,10 +3265,11 @@ func _ta_advance_after_clear() -> void:
 		BGMManager.unlock_bgm(zone_ids[zone])
 
 	if finished_idx >= GameConfig.STAGE_COUNT_FOR_TA - 1:
-		# 全50ステージクリア → リザルトへ（Phase 5 で本実装。ここでは仮に results ステートへ遷移するのみ）
+		# 全50ステージクリア → タイムアタック専用のリザルト画面へ
 		TransitionManager.play_polygon(func():
 			StageSelectManager.time_attack_active = false
-			game_state = "results"
+			game_state = "ta_results"
+			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
 			queue_redraw()
 		, false)
 		return
@@ -5437,7 +5469,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "ta_info" or game_state == "config" or game_state == "credit" or game_state == "se_config":
+	if game_state == "title" or game_state == "rules" or game_state == "menu" or game_state == "ta_info" or game_state == "ta_results" or game_state == "config" or game_state == "credit" or game_state == "se_config":
 		if game_state == "rules":
 			if _metrics_settle_timer > 0.0:
 				_metrics_settle_timer -= delta

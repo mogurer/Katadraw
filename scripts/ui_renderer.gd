@@ -500,6 +500,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_menu(vp)
 		"ta_info":
 			_draw_ta_info(vp)
+		"ta_results":
+			_draw_ta_results(vp)
 		"config":
 			_draw_config(vp)
 		"se_config":
@@ -891,6 +893,65 @@ func _draw_ta_info(vp: Vector2) -> void:
 
 	_game.draw_string(_game.font, Vector2(0.0, vp.y - 30.0), tr("TITLE_COPYRIGHT"),
 			HORIZONTAL_ALIGNMENT_CENTER, vp.x, 32, Color(0.45, 0.38, 0.45))
+
+
+## タイムアタック専用リザルト画面（仮実装）。既存の _draw_results()（体験版用）とは独立した専用実装。
+## 演出はすべて _game._ta_results_start_time からの経過時間だけで計算する。タイミング調整は下記定数のみで完結する。
+func _draw_ta_results(vp: Vector2) -> void:
+	_draw_bg(vp)
+	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _game._ta_results_start_time
+
+	const TITLE_SHOW_DUR: float = 0.6
+	const TITLE_SCROLL_DUR: float = 0.5
+	const ROW_INTERVAL: float = 0.35
+	const ROW_H: float = 75.0
+	const THANK_YOU_DELAY: float = 1.0
+
+	var times: Array[float] = _game.stage_session.stage_times
+	var stage_count: int = times.size()
+	var listing_start: float = TITLE_SHOW_DUR + TITLE_SCROLL_DUR
+	var listing_dur: float = float(stage_count) * ROW_INTERVAL
+	var listing_end: float = listing_start + listing_dur
+	var thank_you_time: float = listing_end + THANK_YOU_DELAY
+
+	# 1. 「Result」タイトル: 中央表示 → 上部へスクロールして停止
+	var title_top_y: float = vp.y * 0.08
+	var title_center_y: float = vp.y * 0.5
+	var scroll_t: float = clampf((elapsed - TITLE_SHOW_DUR) / TITLE_SCROLL_DUR, 0.0, 1.0)
+	var ease_t: float = scroll_t * scroll_t * (3.0 - 2.0 * scroll_t)
+	var title_y: float = lerp(title_center_y, title_top_y, ease_t)
+	var title_alpha: float = clampf(elapsed / 0.3, 0.0, 1.0)
+	_draw_ta_hud_text(Vector2(0, title_y), "Result", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 64, Color(1.0, 1.0, 1.0, title_alpha))
+
+	# 2. 横4分割: 2列目=ステージ別タイム、3列目=トータルタイム / 縦4分割の中央2つ分に表示を限定
+	var col_w: float = vp.x / 4.0
+	var col2_x: float = col_w * 1.0
+	var col3_x: float = col_w * 2.0
+	var band_top: float = vp.y * 0.25
+	var band_bottom: float = vp.y * 0.75
+
+	if elapsed >= listing_start and stage_count > 0:
+		var list_elapsed: float = elapsed - listing_start
+		var scroll_speed: float = ROW_H / ROW_INTERVAL
+		var scroll_y: float = list_elapsed * scroll_speed
+		var revealed: int = mini(stage_count, int(list_elapsed / ROW_INTERVAL) + 1)
+		var total_shown: float = 0.0
+		for i in range(revealed):
+			total_shown += times[i]
+			var row_y: float = band_bottom - float(i + 1) * ROW_H + scroll_y
+			if row_y < band_top - ROW_H or row_y > band_bottom + ROW_H:
+				continue
+			var stage_no: String = "%02d" % (i + 1)
+			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
+			_draw_ta_hud_text(Vector2(col2_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
+		# トータルタイム（帯の縦中央に固定表示、行が出現するたびに加算されていく）
+		var total_text: String = "%.2f" % total_shown
+		_draw_ta_hud_text(Vector2(col3_x, (band_top + band_bottom) * 0.5), total_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 32, Color(1.0, 1.0, 1.0))
+
+	# 3. THANK YOU FOR PLAYING !!
+	if elapsed >= thank_you_time:
+		var ty_alpha: float = clampf((elapsed - thank_you_time) / 0.5, 0.0, 1.0)
+		_draw_ta_hud_text(Vector2(0, vp.y * 0.9), "THANK YOU FOR PLAYING !!", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 36, Color(1.0, 1.0, 1.0, ty_alpha))
 
 
 func _get_perimeter_pos_topleft_ui(d: float, bx: float, by: float, bw: float, bh: float) -> Vector2:
