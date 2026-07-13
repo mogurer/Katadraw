@@ -1660,10 +1660,10 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 		else:
 			var nav_p: Vector2i = _ui_menu_stick_nav_vertical_or_horizontal(delta)
 			if nav_p.x < 0 or nav_p.y < 0:
-				pause_index = (pause_index - 1 + 3) % 3
+				pause_index = (pause_index - 1 + _pause_menu_count()) % _pause_menu_count()
 				queue_redraw()
 			elif nav_p.x > 0 or nav_p.y > 0:
-				pause_index = (pause_index + 1) % 3
+				pause_index = (pause_index + 1) % _pause_menu_count()
 				queue_redraw()
 		return
 	match game_state:
@@ -2981,28 +2981,35 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 		_resume_from_pause()
 		return
 
-	# Up/Down / Left/Right navigation for 3 buttons
+	# Up/Down / Left/Right navigation
 	var moved: bool = false
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_UP or event.keycode == KEY_LEFT:
-			pause_index = (pause_index - 1 + 3) % 3
+			pause_index = (pause_index - 1 + _pause_menu_count()) % _pause_menu_count()
 			moved = true
 		elif event.keycode == KEY_DOWN or event.keycode == KEY_RIGHT:
-			pause_index = (pause_index + 1) % 3
+			pause_index = (pause_index + 1) % _pause_menu_count()
 			moved = true
 	# 十字の上下左右は _process_ui_menu_stick_navigation（左スティック＋D-pad をアナログ合成と同一経路）。ここで JoypadButton を重ねると _input→_process の順で二重に進む／左右が逆に感じる原因になる。
 
 	# Confirm
 	if is_confirm:
-		var pause_labels: Array[String] = [tr("PAUSE_CLOSE"), tr("PAUSE_RETRY"), tr("PAUSE_TITLE")]
+		var labels: Array[String] = _pause_menu_labels()
+		var items: Array[String] = _pause_menu_items()
 		var pidx: int = pause_index
-		ui_renderer.set_btn_press_with_callback(pause_labels[pidx], func():
-			match pidx:
-				0:  # 閉じる
+		var item_id: String = items[pidx]
+		ui_renderer.set_btn_press_with_callback(labels[pidx], func():
+			match item_id:
+				"close":
 					_resume_from_pause()
-				1:  # やりなおし
+				"retry":
 					_do_pause_retry()
-				2:  # ステージをやめる
+				"title":
+					if StageSelectManager.time_attack_active:
+						# TAモードは確認ダイアログを経由する
+						pause_confirm_title = true
+						queue_redraw()
+						return
 					pause_active = false
 					pause_confirm_title = false
 					pause_retry_elapsed = -1.0
@@ -3045,9 +3052,10 @@ func _hit_pause_button(pos: Vector2, vp: Vector2) -> int:
 	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
 	if pos.y < base_cy - btn_h / 2.0 or pos.y > base_cy + btn_h / 2.0:
 		return -1
-	var total_w: float = btn_w * 3.0 + btn_gap * 2.0
+	var n: int = _pause_menu_count()
+	var total_w: float = btn_w * float(n) + btn_gap * float(n - 1)
 	var btn_start_x: float = play_cx - total_w / 2.0 + btn_w / 2.0
-	for i in range(3):
+	for i in range(n):
 		var bcx: float = btn_start_x + i * (btn_w + btn_gap)
 		if pos.x >= bcx - btn_w / 2.0 and pos.x <= bcx + btn_w / 2.0:
 			return i
@@ -3107,11 +3115,19 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 				pause_active = false
 				pause_confirm_title = false
 				pause_retry_elapsed = -1.0
-				# play_balance_debug のテスト開始経由のみデバッグ用戻り先へ。通常はステージセレクトへ。
+				# play_balance_debug のテスト開始経由のみデバッグ用戻り先へ。
 				if _pbd_return_after_test:
 					BGMManager.stop()
 					_play_sfx(sfx_window_close)
 					_return_to_title_or_stage_debug_from_test()
+				elif StageSelectManager.time_attack_active:
+					# TAを中断してタイトルへ
+					StageSelectManager.time_attack_active = false
+					BGMManager.stop()
+					_play_sfx(sfx_window_close)
+					debug_mode = false
+					game_state = "title"
+					title_start_time = Time.get_ticks_msec() / 1000.0
 				elif not GameConfig.IS_TRIAL:
 					_return_to_stage_select_preserve_bgm()
 				else:
@@ -3292,6 +3308,31 @@ func _title_menu_labels() -> Array[String]:
 			"config":       result.append(tr("MENU_CONFIG"))
 			"quit":         result.append(tr("MENU_QUIT"))
 	return result
+
+
+## ポーズメニューの項目一覧（識別子）。タイムアタック中は "close"/"title" の2項目のみ。
+func _pause_menu_items() -> Array[String]:
+	if StageSelectManager.time_attack_active:
+		return ["close", "title"]
+	return ["close", "retry", "title"]
+
+
+func _pause_menu_count() -> int:
+	return _pause_menu_items().size()
+
+
+func _pause_menu_labels() -> Array[String]:
+	var out: Array[String] = []
+	var is_ta: bool = StageSelectManager.time_attack_active
+	for item_id in _pause_menu_items():
+		match item_id:
+			"close":
+				out.append(tr("TA_PAUSE_CLOSE") if is_ta else tr("PAUSE_CLOSE"))
+			"retry":
+				out.append(tr("PAUSE_RETRY"))
+			"title":
+				out.append(tr("TA_PAUSE_TITLE") if is_ta else tr("PAUSE_TITLE"))
+	return out
 
 
 func _konami_event_to_token(event: InputEvent) -> String:

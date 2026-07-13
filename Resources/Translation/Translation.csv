@@ -149,3 +149,6 @@ TA_HUD_BEST,ベスト,Best,最佳,最佳
 TA_HUD_RECENT,直前のタイム,Recent Times,近期用时,近期用時
 TA_HUD_CURRENT,現在,Current,当前,當前
 TA_HUD_NEW,NEW,NEW,NEW,NEW
+TA_PAUSE_CLOSE,続ける,Resume,继续,繼續
+TA_PAUSE_TITLE,タイトルへ,To Title,返回标题,返回標題
+TA_PAUSE_CONFIRM_MSG,タイムトライアルモードを終了しますか？,Quit Time Attack mode?,是否退出限时挑战模式？,是否退出限時挑戰模式？

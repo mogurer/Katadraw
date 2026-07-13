@@ -4459,7 +4459,8 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 		_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
 		_draw_rect_border_with_corners(dlg_rect, LINE_COLOR, 5.75)
 		# テキスト（Bold、大きめ）
-		_game.draw_string(_game.font_bold, Vector2(play_cx - dlg_w / 2.0, play_cy - 45.0), tr("PAUSE_CONFIRM_MSG"), HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 42, Color(0.95, 0.19, 0.32))
+		var confirm_msg: String = tr("TA_PAUSE_CONFIRM_MSG") if StageSelectManager.time_attack_active else tr("PAUSE_CONFIRM_MSG")
+		_game.draw_string(_game.font_bold, Vector2(play_cx - dlg_w / 2.0, play_cy - 45.0), confirm_msg, HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 42, Color(0.95, 0.19, 0.32))
 		# ボタン（幅広、間隔広め）
 		var cbtn_w: float = 220.0
 		var cbtn_gap: float = cbtn_w / 2.0 + 30.0
@@ -4492,10 +4493,11 @@ func _draw_pause_overlay(vp: Vector2) -> void:
 		var btn_w: float = panel_w * 0.27
 		var btn_gap: float = panel_w * 0.03
 		var base_cy: float = panel_rect.end.y - 56.0 * ps - 50.0 * ps
-		var labels: Array[String] = [tr("PAUSE_CLOSE"), tr("PAUSE_RETRY"), tr("PAUSE_TITLE")]
-		var total_w: float = btn_w * 3.0 + btn_gap * 2.0
+		var labels: Array[String] = _game._pause_menu_labels()
+		var n: int = labels.size()
+		var total_w: float = btn_w * float(n) + btn_gap * float(n - 1)
 		var btn_start_x: float = play_cx - total_w / 2.0 + btn_w / 2.0
-		for i in range(3):
+		for i in range(n):
 			var bcx: float = btn_start_x + i * (btn_w + btn_gap)
 			var sel: bool = (i == _game.pause_index)
 			var is_off: bool = not sel
