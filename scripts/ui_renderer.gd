@@ -933,12 +933,12 @@ func _draw_ta_results(vp: Vector2) -> void:
 	if elapsed >= listing_start and stage_count > 0:
 		var list_elapsed: float = elapsed - listing_start
 		var scroll_speed: float = ROW_H / ROW_INTERVAL
-		var scroll_y: float = list_elapsed * scroll_speed
 		var revealed: int = mini(stage_count, int(list_elapsed / ROW_INTERVAL) + 1)
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]
-			var row_y: float = band_bottom - float(i + 1) * ROW_H + scroll_y
+			var row_appear_time: float = float(i) * ROW_INTERVAL
+			var row_y: float = band_bottom - ROW_H - (list_elapsed - row_appear_time) * scroll_speed
 			if row_y < band_top - ROW_H or row_y > band_bottom + ROW_H:
 				continue
 			var stage_no: String = "%02d" % (i + 1)
