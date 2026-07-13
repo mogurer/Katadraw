@@ -38,6 +38,13 @@ var _zou_stage_idx: int = -1
 # チュートリアルの戻り先（保存なし・セッションのみ）
 var tutorial_return_to: String = ""
 
+# タイムアタック関連（保存なし・セッションのみ）
+# time_attack_pending: stage_select.tscn → game.tscn 遷移時、タイムアタックとして開始するかどうかのフラグ。
+#                      game.gd の _start_game_from_stage_select() が読み取り次第 false に戻す。
+# time_attack_active : game.tscn 内で現在タイムアタックを実行中かどうか。
+var time_attack_pending: bool = false
+var time_attack_active: bool = false
+
 # manifest から読み込むデータ
 var _connections: Dictionary = {}   # { id: [隣接id, ...] }
 var _grid_pos: Dictionary = {}      # { id: Vector2i(col, row) }

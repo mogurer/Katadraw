@@ -576,6 +576,18 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventJoypadButton and event.pressed:
 		_set_input_mode(1)
 
+	# --- Phase 1 動作確認用の一時デバッグキー（Phase 2でタイトルUI実装後に削除） ---
+	# [T] キー: タイムアタックをステージ1から即開始する
+	if (
+		event is InputEventKey and event.pressed and not event.echo
+		and event.keycode == KEY_T
+		and (OS.has_feature("editor") or Engine.is_editor_hint())
+	):
+		StageSelectManager.time_attack_pending = true
+		StageSelectManager.pending_stage_id = 0
+		get_tree().change_scene_to_file("res://scenes/game.tscn")
+		return
+
 	# 最終ステージ演出中: Phase3入力のみ受け付け、他は全てブロック
 	if _final_directing:
 		if _final_phase3 == 1:

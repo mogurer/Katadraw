@@ -414,6 +414,13 @@ func get_ingame_track_idx() -> int:
 	return _ingame_track_idx
 
 
+## タイムアタック用: インゲームBGMを 01-05（index 0）へ強制的にリセットする。
+## start_first_stage() は現在選択中の _ingame_track_idx を引き継ぐ仕様のため、
+## タイムアタック開始前に必ずこれを呼び、01-05 から確実に開始できるようにする。
+func reset_ingame_track_to_default() -> void:
+	_ingame_track_idx = 0
+
+
 ## 解放済みBGM IDリストをセット（ステージセレクト起動時に呼ぶ）。
 func set_unlocked_bgm_ids(ids: Array) -> void:
 	_unlocked_track_indices = PackedInt32Array([0])
