@@ -1972,6 +1972,19 @@ func _draw_hexagon_stage_attract_demo(vp: Vector2) -> void:
 	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
 
 
+## タイムアタックHUD用: 背景パネルなしでも視認できるよう、暗い縁取り＋明るい文字色で描画する。
+func _draw_ta_hud_text(pos: Vector2, text: String, align: HorizontalAlignment, width: float, fs: int, main_color: Color, font: Font = null) -> void:
+	var f: Font = font if font != null else _game.font
+	var shadow_c := Color(0.12, 0.08, 0.10, 0.85)
+	var offsets: Array[Vector2] = [
+		Vector2(-1.5, -1.5), Vector2(1.5, -1.5), Vector2(-1.5, 1.5), Vector2(1.5, 1.5),
+		Vector2(0, -2), Vector2(0, 2), Vector2(-2, 0), Vector2(2, 0),
+	]
+	for o in offsets:
+		_game.draw_string(f, pos + o, text, align, width, fs, shadow_c)
+	_game.draw_string(f, pos, text, align, width, fs, main_color)
+
+
 ## タイムアタックHUD: 画面を4×4（16分割）した際の1列×2行分の領域に収める。
 ## 自キャラの位置により _game._ta_hud_side（"left"/"right"）で表示側が切り替わる。
 func _draw_ta_hud(vp: Vector2) -> void:
@@ -1988,11 +2001,10 @@ func _draw_ta_hud(vp: Vector2) -> void:
 	var inner_w: float = panel_w - pad * 2.0
 	var cx: float = panel_x + panel_w * 0.5
 
-	# 背景パネル
-	_game.draw_rect(Rect2(panel_x, panel_y, panel_w, panel_h), Color(1.0, 1.0, 1.0, 0.55))
-	_draw_rect_border_with_corners(Rect2(panel_x, panel_y, panel_w, panel_h), LINE_COLOR, 3.0)
-
+	# 背景パネルなし: 透過のまま文字・数字・図形のみを配置する
 	var y: float = panel_y + pad
+	var label_color := Color(0.95, 0.94, 0.92)
+	var value_color := Color(1.0, 1.0, 1.0)
 
 	# 1. 目標図形アイコン
 	var icon_r: float = inner_w * 0.32
@@ -2002,12 +2014,12 @@ func _draw_ta_hud(vp: Vector2) -> void:
 	# 2. このステージのベストタイム
 	var best: float = StageSelectManager.get_best_time(_game.current_stage)
 	var best_str: String = ("%.2f" % best) if best >= 0.0 else "--.--"
-	_game.draw_string(_game.font, Vector2(panel_x + pad, y + 16.0), tr("TA_HUD_BEST"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 16, Color(0.35, 0.3, 0.35))
-	_game.draw_string(_game.font, Vector2(panel_x + pad, y + 42.0), best_str, HORIZONTAL_ALIGNMENT_LEFT, inner_w, 26, LINE_COLOR)
+	_draw_ta_hud_text(Vector2(panel_x + pad, y + 16.0), tr("TA_HUD_BEST"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 16, label_color)
+	_draw_ta_hud_text(Vector2(panel_x + pad, y + 42.0), best_str, HORIZONTAL_ALIGNMENT_LEFT, inner_w, 26, value_color, _font_din_num)
 	y += 50.0
 
 	# 3. 直前2ステージのクリアタイム（新記録だった回には赤ラベル）
-	_game.draw_string(_game.font, Vector2(panel_x + pad, y + 14.0), tr("TA_HUD_RECENT"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 14, Color(0.35, 0.3, 0.35))
+	_draw_ta_hud_text(Vector2(panel_x + pad, y + 14.0), tr("TA_HUD_RECENT"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 14, label_color)
 	y += 20.0
 	var times: Array[float] = _game.stage_session.stage_times
 	var flags: Array[bool] = _game.ta_run_new_record_flags
@@ -2015,73 +2027,31 @@ func _draw_ta_hud(vp: Vector2) -> void:
 	for i in range(recent_count):
 		var idx: int = times.size() - recent_count + i
 		var row_y: float = y + float(i) * 24.0
-		_game.draw_string(_game.font, Vector2(panel_x + pad, row_y + 18.0), "%.2f" % times[idx], HORIZONTAL_ALIGNMENT_LEFT, inner_w * 0.62, 20, LINE_COLOR)
+		_draw_ta_hud_text(Vector2(panel_x + pad, row_y + 18.0), "%.2f" % times[idx], HORIZONTAL_ALIGNMENT_LEFT, inner_w * 0.62, 20, value_color, _font_din_num)
 		if idx < flags.size() and flags[idx]:
-			_game.draw_string(_game.font_bold, Vector2(panel_x + pad + inner_w * 0.62, row_y + 16.0), tr("TA_HUD_NEW"), HORIZONTAL_ALIGNMENT_LEFT, inner_w * 0.38, 14, Color(0.95, 0.19, 0.32))
+			_draw_ta_hud_text(Vector2(panel_x + pad + inner_w * 0.62, row_y + 16.0), tr("TA_HUD_NEW"), HORIZONTAL_ALIGNMENT_LEFT, inner_w * 0.38, 14, Color(0.98, 0.35, 0.42))
 	y += float(recent_count) * 24.0 + 10.0
 
 	# 4. 現在タイム
 	var live_time: float = maxf(0.0, Time.get_ticks_msec() / 1000.0 - _game.start_time)
-	_game.draw_string(_game.font, Vector2(panel_x + pad, y + 14.0), tr("TA_HUD_CURRENT"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 14, Color(0.35, 0.3, 0.35))
-	_game.draw_string(_game.font, Vector2(panel_x + pad, y + 44.0), "%.2f" % live_time, HORIZONTAL_ALIGNMENT_LEFT, inner_w, 30, LINE_COLOR)
+	_draw_ta_hud_text(Vector2(panel_x + pad, y + 14.0), tr("TA_HUD_CURRENT"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 14, label_color)
+	_draw_ta_hud_text(Vector2(panel_x + pad, y + 44.0), "%.2f" % live_time, HORIZONTAL_ALIGNMENT_LEFT, inner_w, 30, value_color, _font_din_num)
 
 
-## タイムアタックHUD用: 現在プレイ中ステージの目標図形を簡易アイコンとして描画する。
-## scenes/stage_select.gd の _draw_mini_shape() と同等のロジックを、
-## 現在プレイ中ステージの設定（_game.stage_effective_cfg）を使う形に移植したもの。
+## タイムアタックHUD用: 現在プレイ中ステージの目標図形を、実際の理想形状（曲線サンプル済み）で描画する。
+## _game.ideal_outline_points は重心中心・最大半径1.0に正規化済みのため、center + p * r でそのままスケールできる。
+## 三角形・四角形・ひし形・六角形・円・カスタム形状のすべてでこの点列が生成されるため、形状ごとの分岐は不要。
 func _draw_ta_target_shape_icon(center: Vector2, r: float) -> void:
-	var cfg: Dictionary = _game.stage_effective_cfg
-	var stype: String = str(cfg.get("shape_type", cfg.get("type", "circle")))
-	var fill_c := Color(0.95, 0.19, 0.32, 0.22)
-	var line_c := LINE_COLOR
-	var pts := PackedVector2Array()
-
-	if cfg.has("shape_polygon_vertices"):
-		var raw: Array = cfg["shape_polygon_vertices"] as Array
-		if not raw.is_empty():
-			var raw_pts := PackedVector2Array()
-			var max_dist: float = 0.01
-			for v in raw:
-				var arr: Array = v as Array
-				var p := Vector2(float(arr[0]), float(arr[1]))
-				raw_pts.append(p)
-				max_dist = maxf(max_dist, p.length())
-			var sc: float = r / max_dist
-			for p in raw_pts:
-				pts.append(center + p * sc)
-	else:
-		match stype:
-			"triangle":
-				for i in range(3):
-					var a: float = -PI * 0.5 + float(i) * TAU / 3.0
-					pts.append(center + Vector2(cos(a), sin(a)) * r)
-			"square":
-				var h: float = r * 0.707
-				pts = PackedVector2Array([
-					center + Vector2(-h, -h), center + Vector2(h, -h),
-					center + Vector2(h,  h),  center + Vector2(-h, h),
-				])
-			"rhombus":
-				pts = PackedVector2Array([
-					center + Vector2(0, -r),       center + Vector2(r * 0.72, 0),
-					center + Vector2(0,  r),       center + Vector2(-r * 0.72, 0),
-				])
-			"hexagon":
-				for i in range(6):
-					var a: float = float(i) * TAU / 6.0 - PI / 6.0
-					pts.append(center + Vector2(cos(a), sin(a)) * r)
-			_:
-				_game.draw_circle(center, r, fill_c)
-				var cp := PackedVector2Array()
-				for i in range(32):
-					cp.append(center + Vector2(cos(float(i) * TAU / 32.0), sin(float(i) * TAU / 32.0)) * r)
-				_game.draw_polyline(cp + PackedVector2Array([cp[0]]), line_c, 2.25)
-				return
-
-	if pts.is_empty():
+	var outline: Array = _game.ideal_outline_points
+	if outline.is_empty():
 		return
-	_game.draw_colored_polygon(pts, fill_c)
-	_game.draw_polyline(pts + PackedVector2Array([pts[0]]), line_c, 2.25)
+	var pts := PackedVector2Array()
+	for p in outline:
+		pts.append(center + (p as Vector2) * r)
+	if pts.size() < 2:
+		return
+	_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.28))
+	_game.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1.0, 1.0, 1.0), 2.5)
 
 
 # --- 操作説明の共通定義（rules / ポーズの操作説明で共有） ---
