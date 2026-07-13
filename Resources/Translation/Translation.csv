@@ -145,3 +145,7 @@ TA_INFO_BODY_2,開始後、いつでもメニューから中断できますが�
 TA_INFO_BODY_3,途中からの再開はできません。,You cannot resume a run partway through.,无法从中途继续挑战。,無法從中途繼續挑戰。
 TA_INFO_START_BUTTON,タイムアタックを開始する,Start Time Attack,开始限时挑战,開始限時挑戰
 BACK_HINT_ESC,ESC / B: 戻る,ESC / B: Back,ESC / B: 返回,ESC / B: 返回
+TA_HUD_BEST,ベスト,Best,最佳,最佳
+TA_HUD_RECENT,直前のタイム,Recent Times,近期用时,近期用時
+TA_HUD_CURRENT,現在,Current,当前,當前
+TA_HUD_NEW,NEW,NEW,NEW,NEW

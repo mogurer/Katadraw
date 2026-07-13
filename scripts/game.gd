@@ -120,6 +120,9 @@ var stage_session: StageSession = StageSession.new()
 ## 各ステージクリア時のガイド／プレイヤー輪郭（リザルト一覧サムネイル用）。要素は capture_result_loops() と同形の Dictionary
 ## 現在ステージ中の「つかんだあと動かした」回数（閾値距離ごとに加算）
 var stage_move_count: int = 0
+# タイムアタックHUD関連（保存なし・セッションのみ）
+var _ta_hud_side: String = "left"
+var ta_run_new_record_flags: Array[bool] = []
 const STAGE_MOVE_COUNT_PIXEL_THRESHOLD := 22.0
 var _move_grab_was_active: bool = false
 var _move_count_track_valid: bool = false
@@ -1403,6 +1406,7 @@ func _check_clear() -> void:
 		_save_dwell_log()
 
 		if StageSelectManager.time_attack_active:
+			ta_run_new_record_flags.append(_rec.time)
 			_ta_advance_after_clear()
 			return
 
@@ -3190,6 +3194,8 @@ func _start_game_from_stage_select() -> void:
 func _ta_start_run() -> void:
 	StageSelectManager.time_attack_active = true
 	stage_session.clear_results()
+	ta_run_new_record_flags.clear()
+	_ta_hud_side = "left"
 	BGMManager.reset_ingame_track_to_default()
 	BGMManager.start_first_stage()
 	var vp: Vector2 = get_viewport_rect().size
@@ -3242,6 +3248,25 @@ func _ta_start_stage_immediate(idx: int) -> void:
 	_dwell_counts[_dwell_prev_bucket] = 1
 	start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
 	queue_redraw()
+
+
+## タイムアタックHUD: 自キャラが「左上2マス」「右上2マス」（4×4分割の左端/右端列・上2行）に
+## 入ったら、HUDパネルをその逆側へ退避させる。どちらにも該当しない場合は直前の表示側を維持する。
+func _ta_update_hud_side() -> void:
+	if not StageSelectManager.time_attack_active:
+		return
+	if not input_handler.has_player_avatar():
+		return
+	var vp: Vector2 = get_viewport_rect().size
+	var pos: Vector2 = input_handler.get_player_position()
+	var cell_w: float = vp.x / 4.0
+	var cell_h: float = vp.y / 4.0
+	var in_left_top2: bool = pos.x < cell_w and pos.y < cell_h * 2.0
+	var in_right_top2: bool = pos.x >= cell_w * 3.0 and pos.y < cell_h * 2.0
+	if in_left_top2:
+		_ta_hud_side = "right"
+	elif in_right_top2:
+		_ta_hud_side = "left"
 
 
 ## タイトルメニューの識別子配列を返す。zou_cleared のときのみ「タイムトライアル」を含む。
@@ -5420,6 +5445,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 	elif game_state == "playing":
+		_ta_update_hud_side()
 		# メトリクス遅延計算: 静止タイマーをカウントダウンし、0 以下になったら計算を実行
 		if _metrics_settle_timer > 0.0:
 			_metrics_settle_timer -= delta
