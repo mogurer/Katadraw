@@ -1985,6 +1985,22 @@ func _draw_ta_hud_text(pos: Vector2, text: String, align: HorizontalAlignment, w
 	_game.draw_string(f, pos, text, align, width, fs, main_color)
 
 
+## タイムアタックHUD用: 現在プレイ中ステージの目標図形を、実際の理想形状（曲線サンプル済み）で描画する。
+## _game.ideal_outline_points は重心中心・最大半径1.0に正規化済みのため、center + p * r でそのままスケールできる。
+## 三角形・四角形・ひし形・六角形・円・カスタム形状のすべてでこの点列が生成されるため、形状ごとの分岐は不要。
+func _draw_ta_target_shape_icon(center: Vector2, r: float) -> void:
+	var outline: Array = _game.ideal_outline_points
+	if outline.is_empty():
+		return
+	var pts := PackedVector2Array()
+	for p in outline:
+		pts.append(center + (p as Vector2) * r)
+	if pts.size() < 2:
+		return
+	_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.28))
+	_game.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1.0, 1.0, 1.0), 2.5)
+
+
 ## タイムアタックHUD: 画面を4×4（16分割）した際の1列×2行分の領域に収める。
 ## 自キャラの位置により _game._ta_hud_side（"left"/"right"）で表示側が切り替わる。
 func _draw_ta_hud(vp: Vector2) -> void:
@@ -2002,11 +2018,17 @@ func _draw_ta_hud(vp: Vector2) -> void:
 	var value_color := Color(1.0, 1.0, 1.0)
 	var badge_color := Color(0.98, 0.35, 0.42)
 
+	# 0. 目標図形アイコン
+	var icon_r: float = 46.0
+	var icon_cx: float = (vp.x - margin - icon_r) if is_right else (margin + icon_r)
+	var icon_cy: float = 24.0 + icon_r
+	_draw_ta_target_shape_icon(Vector2(icon_cx, icon_cy), icon_r)
+
 	var times: Array[float] = _game.stage_session.stage_times
 	var flags: Array[bool] = _game.ta_run_new_record_flags
 	var recent_count: int = mini(2, times.size())
 
-	var y: float = 24.0
+	var y: float = icon_cy + icon_r + 16.0
 	for i in range(recent_count):
 		var idx: int = times.size() - recent_count + i
 		var stage_no: String = "%02d" % (idx + 1)
@@ -2556,7 +2578,7 @@ func _draw_game(vp: Vector2) -> void:
 		if flash_a > 0.001:
 			_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(1.0, 1.0, 1.0, flash_a))
 
-	if _game.game_state != "cleared":
+	if _game.game_state != "cleared" and not StageSelectManager.time_attack_active:
 		_draw_hud(vp)
 
 	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
