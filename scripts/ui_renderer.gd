@@ -1991,67 +1991,37 @@ func _draw_ta_hud(vp: Vector2) -> void:
 	if not StageSelectManager.time_attack_active or _game.game_state != "playing":
 		return
 
-	var cell_w: float = vp.x / 4.0
-	var cell_h: float = vp.y / 4.0
-	var panel_w: float = cell_w
-	var panel_h: float = cell_h * 2.0
-	var panel_x: float = 0.0 if _game._ta_hud_side == "left" else vp.x - panel_w
-	var panel_y: float = 0.0
-	var pad: float = 14.0
-	var inner_w: float = panel_w - pad * 2.0
-	var cx: float = panel_x + panel_w * 0.5
-
-	# 背景パネルなし: 透過のまま文字・数字・図形のみを配置する
-	var y: float = panel_y + pad
-	var label_color := Color(0.95, 0.94, 0.92)
+	var is_right: bool = _game._ta_hud_side == "right"
+	var align: HorizontalAlignment = HORIZONTAL_ALIGNMENT_RIGHT if is_right else HORIZONTAL_ALIGNMENT_LEFT
+	var margin: float = 24.0
+	var text_w: float = 300.0
+	var text_x: float = (vp.x - margin - text_w) if is_right else margin
+	var row_h: float = 44.0
+	var fs_value: int = 28
+	var fs_badge: int = 14
 	var value_color := Color(1.0, 1.0, 1.0)
+	var badge_color := Color(0.98, 0.35, 0.42)
 
-	# 1. 目標図形アイコン
-	var icon_r: float = inner_w * 0.32
-	_draw_ta_target_shape_icon(Vector2(cx, y + icon_r), icon_r)
-	y += icon_r * 2.0 + 10.0
-
-	# 2. このステージのベストタイム
-	var best: float = StageSelectManager.get_best_time(_game.current_stage)
-	var best_str: String = ("%.2f" % best) if best >= 0.0 else "--.--"
-	_draw_ta_hud_text(Vector2(panel_x + pad, y + 16.0), tr("TA_HUD_BEST"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 16, label_color)
-	_draw_ta_hud_text(Vector2(panel_x + pad, y + 42.0), best_str, HORIZONTAL_ALIGNMENT_LEFT, inner_w, 26, value_color, _font_din_num)
-	y += 50.0
-
-	# 3. 直前2ステージのクリアタイム（新記録だった回には赤ラベル）
-	_draw_ta_hud_text(Vector2(panel_x + pad, y + 14.0), tr("TA_HUD_RECENT"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 14, label_color)
-	y += 20.0
 	var times: Array[float] = _game.stage_session.stage_times
 	var flags: Array[bool] = _game.ta_run_new_record_flags
 	var recent_count: int = mini(2, times.size())
+
+	var y: float = 24.0
 	for i in range(recent_count):
 		var idx: int = times.size() - recent_count + i
-		var row_y: float = y + float(i) * 24.0
-		_draw_ta_hud_text(Vector2(panel_x + pad, row_y + 18.0), "%.2f" % times[idx], HORIZONTAL_ALIGNMENT_LEFT, inner_w * 0.62, 20, value_color, _font_din_num)
+		var stage_no: String = "%02d" % (idx + 1)
+		var row_text: String = "%s: %.2f" % [stage_no, times[idx]]
 		if idx < flags.size() and flags[idx]:
-			_draw_ta_hud_text(Vector2(panel_x + pad + inner_w * 0.62, row_y + 16.0), tr("TA_HUD_NEW"), HORIZONTAL_ALIGNMENT_LEFT, inner_w * 0.38, 14, Color(0.98, 0.35, 0.42))
-	y += float(recent_count) * 24.0 + 10.0
+			_draw_ta_hud_text(Vector2(text_x, y), tr("TA_HUD_NEW"), align, text_w, fs_badge, badge_color)
+			y += fs_badge + 4.0
+		_draw_ta_hud_text(Vector2(text_x, y + fs_value), row_text, align, text_w, fs_value, value_color, _font_din_num)
+		y += row_h
 
-	# 4. 現在タイム
+	# 現在プレイ中ステージ（カウントアップ中）
 	var live_time: float = maxf(0.0, Time.get_ticks_msec() / 1000.0 - _game.start_time)
-	_draw_ta_hud_text(Vector2(panel_x + pad, y + 14.0), tr("TA_HUD_CURRENT"), HORIZONTAL_ALIGNMENT_LEFT, inner_w, 14, label_color)
-	_draw_ta_hud_text(Vector2(panel_x + pad, y + 44.0), "%.2f" % live_time, HORIZONTAL_ALIGNMENT_LEFT, inner_w, 30, value_color, _font_din_num)
-
-
-## タイムアタックHUD用: 現在プレイ中ステージの目標図形を、実際の理想形状（曲線サンプル済み）で描画する。
-## _game.ideal_outline_points は重心中心・最大半径1.0に正規化済みのため、center + p * r でそのままスケールできる。
-## 三角形・四角形・ひし形・六角形・円・カスタム形状のすべてでこの点列が生成されるため、形状ごとの分岐は不要。
-func _draw_ta_target_shape_icon(center: Vector2, r: float) -> void:
-	var outline: Array = _game.ideal_outline_points
-	if outline.is_empty():
-		return
-	var pts := PackedVector2Array()
-	for p in outline:
-		pts.append(center + (p as Vector2) * r)
-	if pts.size() < 2:
-		return
-	_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.28))
-	_game.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1.0, 1.0, 1.0), 2.5)
+	var cur_no: String = "%02d" % (_game.current_stage + 1)
+	var cur_text: String = "%s: %.2f" % [cur_no, live_time]
+	_draw_ta_hud_text(Vector2(text_x, y + fs_value), cur_text, align, text_w, fs_value, value_color, _font_din_num)
 
 
 # --- 操作説明の共通定義（rules / ポーズの操作説明で共有） ---
