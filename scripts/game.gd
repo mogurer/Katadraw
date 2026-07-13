@@ -1406,7 +1406,7 @@ func _check_clear() -> void:
 		_save_dwell_log()
 
 		if StageSelectManager.time_attack_active:
-			ta_run_new_record_flags.append(_rec.time)
+			ta_run_new_record_flags.append(_new_record_time)
 			_ta_advance_after_clear()
 			return
 
