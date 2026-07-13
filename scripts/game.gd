@@ -536,6 +536,9 @@ var sfx_motion: AudioStreamPlayer
 var sfx_stagestart: AudioStreamPlayer
 var sfx_cat: AudioStreamPlayer
 var sfx_spot: AudioStreamPlayer
+var sfx_ui_count: AudioStreamPlayer      # 体験版リザルト: 数値スロット演出中に鳴らし続ける
+var sfx_telop_complete: AudioStreamPlayer  # 体験版リザルト: 数値スロット演出が確定した瞬間に鳴らす
+var _results_all_slots_telop_played: bool = false  # sfx_telop_complete を全スロット確定後に1回だけ鳴らすためのフラグ
 var _sfx_move_playing: bool = false  # ui_move ループ管理用
 var _sfx_ui_in: AudioStreamPlayer = null    # [DEBUG] 引力SE
 var _sfx_ui_out: AudioStreamPlayer = null   # [DEBUG] 斥力SE
@@ -1043,6 +1046,16 @@ func _setup_audio() -> void:
 	sfx_stageclear02.stream = _load_audio("res://assets/sounds/SE/se_stageclear02.wav")
 	sfx_stageclear02.volume_db = -14.5
 	add_child(sfx_stageclear02)
+
+	sfx_ui_count = AudioStreamPlayer.new()
+	sfx_ui_count.stream = _load_audio("res://assets/sounds/SE/ui_count.wav")
+	sfx_ui_count.volume_db = -14.5
+	add_child(sfx_ui_count)
+
+	sfx_telop_complete = AudioStreamPlayer.new()
+	sfx_telop_complete.stream = _load_audio("res://assets/sounds/SE/Telop_22.wav")
+	sfx_telop_complete.volume_db = -14.5
+	add_child(sfx_telop_complete)
 
 	_apply_bgm_volume()
 	_apply_se_volume()
@@ -1816,6 +1829,14 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "results":
 		var vp_res: Vector2 = get_viewport_rect().size
+		var is_start_pad: bool = (
+			event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START
+		)
+		# 演出（①〜⑤フェーズ）再生中はボタン入力で現在のフェーズをスキップする（初回表示時から機能）
+		if not ui_renderer.is_results_reveal_done() and (is_confirm_key or is_confirm_pad or is_confirm_click or is_start_pad):
+			ui_renderer.skip_results_phase()
+			queue_redraw()
+			return
 		if event is InputEventKey and event.pressed and not event.echo:
 			if event.keycode == KEY_LEFT:
 				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index - 1 + 3) % 3
@@ -1825,9 +1846,6 @@ func _input(event: InputEvent) -> void:
 				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + 1) % 3
 				queue_redraw()
 				return
-		var is_start_pad: bool = (
-			event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START
-		)
 		# マウスで明示クリックしたボタンを優先
 		if is_confirm_click:
 			var pp: Vector2 = input_handler.player_position
@@ -2617,6 +2635,8 @@ func _apply_se_volume() -> void:
 	sfx_stagestart.volume_db = base_db
 	sfx_cat.volume_db = base_db
 	sfx_spot.volume_db = base_db
+	sfx_ui_count.volume_db = base_db
+	sfx_telop_complete.volume_db = base_db
 	TransitionManager.set_se_volume_db(base_db)
 	var ui_move_db: float = -10.0 + _volume_offset_db(se_volume)
 	if _sfx_ui_in:
@@ -3202,9 +3222,12 @@ func _advance_stage() -> void:
 		if _trial_idx < _trial_stage_ids.size():
 			_start_stage(_trial_stage_ids[_trial_idx])
 		else:
-			# 10ステージ完走 → 全ステージ結果画面（Twitter共有を兼ねた体験版完了画面）
-			game_state = "results"
-			queue_redraw()
+			# 10ステージ完走 → ページめくり遷移で全ステージ結果画面（Twitter共有を兼ねた体験版完了画面）へ
+			TransitionManager.play_diagonal(func():
+				_results_all_slots_telop_played = false
+				game_state = "results"
+				queue_redraw()
+			)
 		return
 
 	# 製品版
@@ -3257,6 +3280,7 @@ func _enter_results_screen_debug() -> void:
 	const SLOT_COUNT: int = 10
 	stage_session.fill_dummy_results(SLOT_COUNT)
 	BGMManager.stop()  # BGMManager に移行
+	_results_all_slots_telop_played = false
 	game_state = "results"
 	queue_redraw()
 
@@ -3266,9 +3290,15 @@ func _return_to_title_or_stage_debug_from_test() -> void:
 	if GameConfig.IS_TRIAL:
 		BGMManager.stop()
 		debug_mode = false
-		game_state = "title"
-		title_start_time = Time.get_ticks_msec() / 1000.0
-		_apply_title_bgm_for_debug_mode()
+		if sfx_ui_count and sfx_ui_count.playing:
+			sfx_ui_count.stop()
+		# 体験版リザルト → タイトルへページめくり遷移
+		TransitionManager.play_diagonal(func():
+			game_state = "title"
+			title_start_time = Time.get_ticks_msec() / 1000.0
+			_apply_title_bgm_for_debug_mode()
+			queue_redraw()
+		)
 		return
 	if _pbd_return_after_test and _debug_tools_enabled():
 		_pbd_return_after_test = false
@@ -5354,6 +5384,16 @@ func _process(delta: float) -> void:
 			_clear_card_canvas.queue_redraw()
 
 	elif game_state == "results":
+		if ui_renderer.is_results_any_slot_active():
+			if sfx_ui_count and sfx_ui_count.stream and not sfx_ui_count.playing:
+				sfx_ui_count.play()
+		else:
+			if sfx_ui_count and sfx_ui_count.playing:
+				sfx_ui_count.stop()
+		# 全スロットが確定した瞬間の1回だけ Telop_22.wav を鳴らす（数値1つ確定ごとではない）
+		if not _results_all_slots_telop_played and ui_renderer.is_results_all_slots_done():
+			_results_all_slots_telop_played = true
+			_play_sfx(sfx_telop_complete)
 		queue_redraw()
 
 	elif game_state == "zou_ending":

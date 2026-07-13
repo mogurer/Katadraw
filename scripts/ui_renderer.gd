@@ -197,7 +197,8 @@ const STAGE_INTRO_DURATION := 0.7     # 演出の長さ（秒）
 # HUD 秒表示: 一度左上に逃げたら、自キャラが左上エリアに入るまで左上のまま
 var _hud_time_dock_left: bool = false
 var _results_anim_time: float = -1.0  # リザルト画面の開始時刻
-const RESULTS_SLIDE_DURATION := 0.7   # スライドイン所要時間（秒）
+const RESULTS_SLIDE_DURATION := 0.7   # スライドイン所要時間（秒。現在は個別フェーズ演出に置き換え済み・未使用）
+var _results_skip_offset: float = 0.0  # フェーズスキップで加算した時間（体験版リザルト演出用）
 # Result 画面の見出し・TOTAL ラベル（基準からの倍率）
 const RESULT_SCREEN_TITLE_FS := 120  # 48 * 2.5
 const RESULT_TOTAL_LABEL_FS := 84  # 28 * 3
@@ -219,6 +220,9 @@ var _font_din_tight: FontVariation = null        # font_din の字間詰めバ�
 var _font_din_num: FontVariation = null          # 数値表示専用（spacing_glyph = -1、net +4px）
 var _font_din_result: FontVariation = null       # #N/RESULT 専用（spacing_glyph = -2、net +3px）
 var _font_din_config_logo: FontVariation = null  # CONFIG ロゴ専用（spacing_glyph = -10、net -5px）
+var _font_din_stat_val_cache: Dictionary = {}    # リザルト CLEAR TIME/TRY COUNT・TOTAL値専用（spacing_glyphごとにFontVariationをキャッシュ。カードは-1、TOTALは-2がデフォルト）
+var _font_din_stat_label: FontVariation = null   # リザルト CLEAR/TIME/TRY/COUNT/TOTAL等の項目文字列専用（spacing_glyph = 0、net +5px）
+var _font_din_card_num: FontVariation = null     # リザルト ステージカードの#N番号ヘッダ専用（spacing_glyph = 0、net +5px）
 var _credit_kata_lbl: Label = null   # クレジット用 KATA-DRAW ラベル
 var _credit_staff_lbl: Label = null  # クレジット用 STAFF ラベル
 var _font_stage: FontVariation = null      # STAGE 専用: CLEAR 幅に合わせて字間を自動調整
@@ -454,6 +458,7 @@ func on_state_changed(new_state: String) -> void:
 		_hud_time_dock_left = false
 	if new_state == "results":
 		_results_anim_time = Time.get_ticks_msec() / 1000.0
+		_results_skip_offset = 0.0
 		results_action_focus_index = 2
 		if _game.has_method("_reset_ui_menu_stick_navigation"):
 			_game._reset_ui_menu_stick_navigation()
@@ -3593,6 +3598,166 @@ func _draw_card_content_to(canvas: Node2D, vp: Vector2, clear_elapsed: float) ->
 	_draw_rect_border_with_corners(Rect2(Vector2(card_x, card_y), Vector2(card_w, card_h)), c_dark, 5.75, canvas)
 
 
+func _draw_results_stat_row(rect: Rect2, label_lines: Array, label_w: float, value_num: float, value_format: String, value_is_int: bool, a: float, label_x_offset: float = 0.0, value_fs_scale: float = 1.0, value_fs_override: int = 0, value_y_offset: float = 0.0, value_spacing_glyph: int = -2, slot_elapsed: float = -1.0, slot_phase_mult: float = 1.0) -> void:
+	"""ダークラベルボックス＋グレー値エリアの統計行。ステージ結果カードの CLEAR TIME/TRY COUNT(2行)と
+	   TOTAL バーの TOTAL CLEAR TIME/TOTAL TRY COUNT(3行)で共通利用する。
+	   slot_elapsed >= 0 の間は、ステージクリアカード(_draw_card_content_to)と同じスロット演出技法で数値を仮表示する"""
+	var c_white: Color = Color(1.0, 1.0, 1.0, a)
+	var c_dark:  Color = Color(LINE_COLOR, a)
+	var c_val_bg: Color = Color(0.87, 0.87, 0.87, a)
+
+	if _font_din_stat_label == null:
+		_font_din_stat_label = FontVariation.new()
+		_font_din_stat_label.base_font = _game.font_din
+		_font_din_stat_label.spacing_glyph = 0
+	var lbl_rect := Rect2(rect.position, Vector2(label_w, rect.size.y))
+	_game.draw_rect(lbl_rect, c_dark)
+	var n: int = label_lines.size()
+	var lfs: int = maxi(8, int(rect.size.y / maxf(float(n), 1.0) * 0.42 * 1.5))
+	var lasc: float = _font_din_stat_label.get_ascent(lfs)
+	var ldsc: float = _font_din_stat_label.get_descent(lfs)
+	var lh: float = (lasc + ldsc) * 0.72
+	var block_h: float = lh * float(n - 1) + lasc + ldsc
+	var ty: float = lbl_rect.position.y + (rect.size.y - block_h) * 0.5 + lasc
+	var tx: float = lbl_rect.position.x + label_w * 0.12 + label_x_offset
+	var tw: float = label_w - label_w * 0.12 - 4.0
+	for i in range(n):
+		_game.draw_string(_font_din_stat_label, Vector2(tx, ty + lh * float(i)), str(label_lines[i]), HORIZONTAL_ALIGNMENT_LEFT, tw, lfs, c_white)
+
+	if not _font_din_stat_val_cache.has(value_spacing_glyph):
+		var fv := FontVariation.new()
+		fv.base_font = _game.font_din
+		fv.spacing_glyph = value_spacing_glyph
+		_font_din_stat_val_cache[value_spacing_glyph] = fv
+	var font_val: FontVariation = _font_din_stat_val_cache[value_spacing_glyph]
+	var val_rect := Rect2(rect.position.x + label_w, rect.position.y, rect.size.x - label_w, rect.size.y)
+	_game.draw_rect(val_rect, c_val_bg)
+
+	# ─── 数値スロット演出（製品版ステージクリアカード _draw_card_content_to と同じ技法を引用） ───
+	var value_str: String
+	if slot_elapsed >= 0.0 and slot_elapsed < RESULTS_SLOT_DUR:
+		var slot_t: float = slot_elapsed / RESULTS_SLOT_DUR
+		var freq: float = lerp(30.0, 3.0, slot_t * slot_t)
+		var wave: float = absf(sin(slot_elapsed * freq * TAU * slot_phase_mult))
+		if value_is_int:
+			var range_i: float = float(maxi(int(round(absf(value_num))) * 2, 9))
+			value_str = value_format % int(wave * range_i)
+		else:
+			var range_f: float = maxf(absf(value_num) * 1.5, 15.0)
+			value_str = value_format % (wave * range_f)
+	else:
+		value_str = (value_format % int(value_num)) if value_is_int else (value_format % value_num)
+
+	var vfs: int = value_fs_override if value_fs_override > 0 else int(rect.size.y * 0.56 * 1.5 * value_fs_scale)
+	var vasc: float = font_val.get_ascent(vfs)
+	var vdsc: float = font_val.get_descent(vfs)
+	var vy: float = val_rect.position.y + (rect.size.y + vasc - vdsc) * 0.5 + value_y_offset
+	_game.draw_string(font_val, Vector2(val_rect.position.x, vy), value_str, HORIZONTAL_ALIGNMENT_RIGHT, val_rect.size.x - rect.size.y * 0.18, vfs, c_dark)
+
+
+func _draw_results_stage_card(rect: Rect2, idx: int, a: float, slot_elapsed: float = -1.0) -> void:
+	"""phase02〜03: 1ステージ分の結果ミニカード。ステージセレクトの吹き出し(_draw_bubble)の
+	   外観(左ストライプ+三角装飾・#N+ステージ名ヘッダ・図形エリア)を踏襲しつつ、
+	   CLEAR TIME/TRY COUNTのラベルはステージクリアカード(_draw_card_content_to)と同じ2行表記にする"""
+	var c_white: Color = Color(1.0, 1.0, 1.0, a)
+	var c_red:   Color = Color(0.9490, 0.1882, 0.3216, a)
+	var c_dark:  Color = Color(LINE_COLOR, a)
+
+	var bx: float = rect.position.x
+	var by: float = rect.position.y
+	var bw: float = rect.size.x
+	var bh: float = rect.size.y
+	var str_w: float = bw * 0.10
+
+	# 外枠・右側コンテンツ背景
+	_game.draw_rect(rect, c_dark)
+	var cx: float = bx + str_w
+	var cw: float = bw - str_w
+	_game.draw_rect(Rect2(cx, by, cw, bh), c_white)
+
+	# ─── 左ストライプ内の三角装飾（▷◁ 下から濃く） ───
+	var tri_count: int = 8
+	var tri_mid_x: float = bx + str_w * 0.5
+	var shape_h: float = str_w * 1.155
+	var half_h: float = shape_h * 0.5
+	var notch_h: float = shape_h * 0.25
+	var spacing_v: float = str_w * 0.712
+	var last_cy: float = by + bh - half_h - 6.0
+	var first_cy: float = last_cy - float(tri_count - 1) * spacing_v
+	for tri_i in range(tri_count):
+		var tcy: float = first_cy + float(tri_i) * spacing_v
+		var tri_a: float = float(tri_i + 1) * 0.10
+		var tri_color: Color = Color(c_red.r, c_red.g, c_red.b, c_red.a * tri_a)
+		var pts: PackedVector2Array
+		if tri_i % 2 == 0:
+			pts = PackedVector2Array([
+				Vector2(bx,          tcy - half_h),
+				Vector2(tri_mid_x,   tcy - notch_h),
+				Vector2(bx + str_w,  tcy),
+				Vector2(tri_mid_x,   tcy + notch_h),
+				Vector2(bx,          tcy + half_h),
+			])
+		else:
+			pts = PackedVector2Array([
+				Vector2(bx + str_w, tcy - half_h),
+				Vector2(bx + str_w, tcy + half_h),
+				Vector2(tri_mid_x,  tcy + notch_h),
+				Vector2(bx,         tcy),
+				Vector2(tri_mid_x,  tcy - notch_h),
+			])
+		_game.draw_colored_polygon(pts, tri_color)
+
+	# ─── ヘッダ: #N + ステージ名 ───
+	if _font_din_card_num == null:
+		_font_din_card_num = FontVariation.new()
+		_font_din_card_num.base_font = _game.font_din
+		_font_din_card_num.spacing_glyph = 0
+	var pad: float = cw * 0.07
+	var num_fs: int = maxi(10, int(bh * 0.13))
+	var num_str: String = "#%d" % (idx + 1)
+	var num_y: float = by + pad * 0.6 + _font_din_card_num.get_ascent(num_fs)
+	_game.draw_string(_font_din_card_num, Vector2(cx + pad, num_y), num_str, HORIZONTAL_ALIGNMENT_LEFT, cw - pad * 2.0, num_fs, c_dark)
+
+	var name_fs: int = maxi(8, int(bh * 0.07))
+	var name_str: String = ""
+	var stage_ids: Array = _game._trial_stage_ids
+	if idx < stage_ids.size():
+		name_str = StageSelectManager.get_stage_name(stage_ids[idx])
+	var hdr_h: float = bh * 0.28
+	if not name_str.is_empty():
+		var name_y: float = num_y + _font_din_card_num.get_descent(num_fs) + _game.font.get_ascent(name_fs) + 4.0 - 5.0
+		_game.draw_string(_game.font, Vector2(cx + pad, name_y), name_str, HORIZONTAL_ALIGNMENT_LEFT, cw - pad * 2.0, name_fs, c_dark)
+
+	# ─── 図形エリア（実際のプレイヤー描画結果 + 理想形を重ねたサムネイル） ───
+	var rows_h: float = bh * 0.30
+	var fig_top: float = by + hdr_h
+	var fig_h: float = bh - hdr_h - rows_h - pad
+	var side: float = minf(cw - pad * 2.0, fig_h)
+	var thumb_rect := Rect2(cx + (cw - side) * 0.5, fig_top + maxf(0.0, (fig_h - side) * 0.5), side, side)
+	var shape_dat: Dictionary = {}
+	if idx < _game.stage_session.stage_result_shapes.size():
+		shape_dat = _game.stage_session.stage_result_shapes[idx] as Dictionary
+	var ideal_l: Array = shape_dat.get("ideal", [])
+	var player_l: Array = shape_dat.get("player", [])
+	if not ideal_l.is_empty() or not player_l.is_empty():
+		_stage_renderer.draw_result_thumbnail(thumb_rect, ideal_l, player_l)
+	else:
+		_game.draw_rect(thumb_rect, Color(1.0, 1.0, 1.0, 0.1 * a))
+
+	# ─── CLEAR TIME / TRY COUNT（ステージクリアカードと同じ2行ラベル） ───
+	var t_s: float = _game.stage_session.stage_times[idx] if idx < _game.stage_session.stage_times.size() else 0.0
+	var mv: int = _game.stage_session.stage_move_counts[idx] if idx < _game.stage_session.stage_move_counts.size() else 0
+	var row_gap: float = pad * 0.5
+	var row_top: float = by + bh - rows_h + row_gap
+	var row_h: float = (rows_h - row_gap * 2.0 - row_gap) * 0.5
+	var stat_label_w: float = cw * 0.40
+	_draw_results_stat_row(Rect2(cx + row_gap, row_top, cw - row_gap * 2.0, row_h), ["CLEAR", "TIME"], stat_label_w, t_s, "%.2f", false, a, 0.0, 1.0, 0, 0.0, -1, slot_elapsed, 1.0)
+	_draw_results_stat_row(Rect2(cx + row_gap, row_top + row_h + row_gap, cw - row_gap * 2.0, row_h), ["TRY", "COUNT"], stat_label_w, float(mv), "%d", true, a, 0.0, 1.0, 0, 0.0, -1, slot_elapsed, 1.37)
+
+	# ─── 外枠 ───
+	_draw_rect_border_with_corners(rect, c_dark, 4.0)
+
+
 func _draw_results_sidebar_title_fallback(vp: Vector2, bar_w: float, a: float) -> void:
 	var kata: String = "KATA"
 	var draw_word: String = "DRAW"
@@ -3669,43 +3834,44 @@ func _draw_results_sidebar_logo(vp: Vector2, bar_w: float, a: float) -> void:
 
 func _compute_results_layout(vp: Vector2) -> Dictionary:
 	"""Result 画面のブロック位置・NEXT 座標（描画とヒット判定で共通）"""
-	# ─── 左ダークカード（固定サイズ）───
-	var lp_x: float = 90.0
-	var lp_y: float = 100.0
+	# ─── タイトル（画面最上部・全幅、DIN BOLD）───
+	var title_fs: int = int(RESULT_SCREEN_TITLE_FS * 1.25)
+	var title_top: float = 40.0
+	var title_h: float = 150.0
+	# ─── 左ダークカード（固定サイズ。下端(970px)は変更前と揃える）───
+	var lp_x: float = 40.0
+	var lp_y: float = title_top + title_h + 30.0
 	var lp_w: float = 1040.0
-	var lp_h: float = 870.0
+	var lp_h: float = 970.0 - lp_y
 	const CARD_PAD: float = 16.0
-	const GRID_SCALE: float = 0.80
-	# タイトル
-	var title_fs: int = 87
-	# TOTALバー（カード下端から逆算）
-	var btn_res_h: float = 105.0
-	# TOTALバー: 元オフセット25 + 単独50px上 + グループ20px上 - 30px下 = 65px上
-	var total_bar_y: float = lp_y + lp_h - CARD_PAD - btn_res_h - 65.0
-	# グリッド（視覚座標）: カード縦の55%・グループ20px上に移動
-	var grid_vis_h: float = lp_h * 0.55
-	var grid_cy: float = lp_y + lp_h * 0.5 - 20.0
-	var grid_h: float = grid_vis_h / GRID_SCALE
-	var grid_top: float = grid_cy - grid_h * 0.5
+	# TOTALバー（CLEAR TIME / TRY COUNT の2段。カード下端から逆算）
+	var total_row_h: float = 90.0
+	var total_row_gap: float = 12.0
+	var total_block_h: float = total_row_h * 2.0 + total_row_gap
+	var total_bar_y: float = lp_y + lp_h - CARD_PAD - total_block_h
+	var total_bar_y2: float = total_bar_y + total_row_h + total_row_gap
+	# グリッド: TOTALブロックの上側に収まる範囲（実サイズそのまま使用。TOTALブロックとの間隔を15px追加）
+	var grid_top: float = lp_y + CARD_PAD
+	var grid_h: float = (total_bar_y - CARD_PAD - 15.0) - grid_top
 	# NEXTボタン（画面右下隅）
 	var next_s: float = 88.0
 	var next_cx: float = vp.x - 50.0 - next_s * 0.5
 	var next_cy: float = vp.y - 50.0 - next_s * 0.5
 	return {
+		"title_fs": title_fs, "title_top": title_top, "title_h": title_h,
 		"lp_x": lp_x, "lp_y": lp_y, "lp_w": lp_w, "lp_h": lp_h,
 		"card_pad": CARD_PAD,
-		"title_fs": title_fs,
-		"grid_top": grid_top, "grid_h": grid_h, "grid_cy": grid_cy,
-		"total_bar_y": total_bar_y, "btn_res_h": btn_res_h,
+		"grid_top": grid_top, "grid_h": grid_h,
+		"total_bar_y": total_bar_y, "total_bar_y2": total_bar_y2, "total_row_h": total_row_h,
 		"next_cx": next_cx, "next_cy": next_cy, "next_s": next_s,
 	}
 
 
 func get_results_next_button_rect(vp: Vector2) -> Rect2:
-	# 描画側と同じ計算: NEXTアイコン右下端を画面右下端から縦100px・横100px
+	# 描画側と同じ計算: NEXTアイコン右下端を画面右下端から縦100px・横100px（右パネル縮小に伴い30px上へ）
 	const NEXT_BTN_S: float = 128.0
-	var cx: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
-	var cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
+	var cx: float = vp.x - 100.0 - NEXT_BTN_S * 0.5 - 26.0
+	var cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5 - 30.0
 	return Rect2(cx - NEXT_BTN_S * 0.5, cy - NEXT_BTN_S * 0.5, NEXT_BTN_S, NEXT_BTN_S)
 
 
@@ -3714,8 +3880,8 @@ func get_results_camera_button_rect(vp: Vector2) -> Rect2:
 	const NEXT_BTN_S: float = 128.0
 	const IG_GAP: float = 120.0
 	var ig_size: float = 88.0  # next_s と同値
-	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
-	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
+	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5 - 26.0
+	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5 - 30.0
 	var tw_cx: float = next_cx_new - ig_size - IG_GAP
 	var cam_cx: float = tw_cx - ig_size - IG_GAP
 	var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
@@ -3727,8 +3893,8 @@ func get_results_twitter_button_rect(vp: Vector2) -> Rect2:
 	const NEXT_BTN_S: float = 128.0
 	const IG_GAP: float = 120.0
 	var ig_size: float = 88.0
-	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
-	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
+	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5 - 26.0
+	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5 - 30.0
 	var tw_cx: float = next_cx_new - ig_size - IG_GAP
 	var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
 	return Rect2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5, icon_draw_size, icon_draw_size)
@@ -3744,286 +3910,308 @@ func get_results_active_focus(vp: Vector2) -> int:
 	return results_action_focus_index
 
 
-func _draw_results_title_justified(block_x: float, top_y: float, span_w: float, fs: int, color: Color, spacing_ratio: float = 1.0) -> void:
-	"""メイングリッド左端〜右端に RESULT_TITLE を字間均等で収める（カーニング込みの累進幅で字送り）"""
+# =============================================================================
+# 体験版リザルト画面の演出フェーズ管理
+#   ① メインタイトル → ② ステージカード(#1〜#10、連鎖ポップイン) →
+#   ③ TOTALブロック(2段) → ④ 右パネル → ⑤ アイコングループ(カメラ/Twitter/NEXT)
+#   の順に登場させる。各フェーズは個別にボタン押下でスキップ可能（初見から機能）。
+# =============================================================================
+
+func _results_phase_schedule() -> Dictionary:
+	"""各フェーズの開始・所要時間・終了時刻（秒、リザルト画面表示からの経過時間基準）"""
+	var p0_start: float = 0.0                      # ① メインタイトル
+	var p0_dur: float = 0.30
+	var p0_end: float = p0_start + p0_dur
+
+	var p1_start: float = p0_end + 0.05             # ② ステージカード（10枚、連鎖ポップイン）
+	var p1_stagger: float = 0.05
+	var p1_dur: float = 0.30
+	var p1_count: int = 10
+	var p1_end: float = p1_start + float(p1_count - 1) * p1_stagger + p1_dur
+
+	var p2_start: float = p1_end + 0.15             # ③ TOTALブロック（CLEAR TIME → TRY COUNT）
+	var p2_stagger: float = 0.10
+	var p2_dur: float = 0.30
+	var p2_count: int = 2
+	var p2_end: float = p2_start + float(p2_count - 1) * p2_stagger + p2_dur
+
+	var p3_start: float = p2_end + 0.10             # ④ 右パネル
+	var p3_dur: float = 0.30
+	var p3_end: float = p3_start + p3_dur
+
+	var p4_start: float = p3_end + 0.10             # ⑤ アイコングループ（カメラ→Twitter→NEXT）
+	var p4_stagger: float = 0.08
+	var p4_dur: float = 0.25
+	var p4_count: int = 3
+	var p4_end: float = p4_start + float(p4_count - 1) * p4_stagger + p4_dur
+
+	return {
+		"p0_start": p0_start, "p0_dur": p0_dur, "p0_end": p0_end,
+		"p1_start": p1_start, "p1_stagger": p1_stagger, "p1_dur": p1_dur, "p1_end": p1_end,
+		"p2_start": p2_start, "p2_stagger": p2_stagger, "p2_dur": p2_dur, "p2_end": p2_end,
+		"p3_start": p3_start, "p3_dur": p3_dur, "p3_end": p3_end,
+		"p4_start": p4_start, "p4_stagger": p4_stagger, "p4_dur": p4_dur, "p4_end": p4_end,
+	}
+
+
+func _results_effective_elapsed() -> float:
+	"""スキップ分を加算した、演出計算用の経過時間"""
+	if _results_anim_time < 0.0:
+		return 999.0
+	return maxf(0.0, Time.get_ticks_msec() / 1000.0 - _results_anim_time) + _results_skip_offset
+
+
+func _reveal_progress(elapsed: float, start: float, dur: float) -> float:
+	"""指定フェーズ内での進行度（0〜1の線形値。イージングは呼び出し側で適用）"""
+	if dur <= 0.0:
+		return 1.0 if elapsed >= start else 0.0
+	return clampf((elapsed - start) / dur, 0.0, 1.0)
+
+
+func is_results_reveal_done() -> bool:
+	"""全フェーズの演出が終わっているか（ボタンの当たり判定を有効にしてよいか）"""
+	var sched: Dictionary = _results_phase_schedule()
+	return _results_effective_elapsed() >= sched["p4_end"]
+
+
+const RESULTS_SLOT_DUR: float = 0.5  # _draw_results_stat_row() のスロット演出時間と揃える
+
+func _results_slot_windows() -> Array:
+	"""数値スロット演出の開始時刻一覧。ステージカード10件（CLEAR TIME/TRY COUNTは同時開始のため1件にまとめる）
+	   + TOTALの2件で計12件。SFX（ui_count.wav / Telop_22.wav）の発火判定に使う"""
+	var sched: Dictionary = _results_phase_schedule()
+	var starts: Array = []
+	for i in range(10):
+		starts.append(sched["p1_start"] + float(i) * sched["p1_stagger"])
+	starts.append(sched["p2_start"])
+	starts.append(sched["p2_start"] + sched["p2_stagger"])
+	return starts
+
+
+func is_results_any_slot_active() -> bool:
+	"""数値がスロット演出中（スクランブル表示中）かどうか。ui_count.wav のループ再生管理用"""
+	var elapsed: float = _results_effective_elapsed()
+	for s in _results_slot_windows():
+		if elapsed >= s and elapsed < s + RESULTS_SLOT_DUR:
+			return true
+	return false
+
+
+func get_results_slot_completed_count() -> int:
+	"""elapsed時点で確定表示に切り替わったスロットの累計件数"""
+	var elapsed: float = _results_effective_elapsed()
+	var n: int = 0
+	for s in _results_slot_windows():
+		if elapsed >= s + RESULTS_SLOT_DUR:
+			n += 1
+	return n
+
+
+func is_results_all_slots_done() -> bool:
+	"""全スロット（12件）が確定表示になったか。呼び出し側でこれが初めてtrueになった瞬間に
+	   Telop_22.wav をワンショット再生する（数値が1つ確定するごとではなく、全部止まった後の1回のみ）"""
+	return get_results_slot_completed_count() >= _results_slot_windows().size()
+
+
+func skip_results_phase() -> void:
+	"""現在再生中のフェーズを即座に完了させ、次のフェーズへ進める（ボタン押下で呼ぶ）"""
+	var sched: Dictionary = _results_phase_schedule()
+	var elapsed: float = _results_effective_elapsed()
+	var boundaries: Array = [sched["p0_end"], sched["p1_end"], sched["p2_end"], sched["p3_end"], sched["p4_end"]]
+	for b in boundaries:
+		if elapsed < b:
+			_results_skip_offset += (b - elapsed)
+			return
+
+
+func _draw_results_title_justified(block_x: float, top_y: float, span_w: float, fs: int, color: Color) -> void:
+	"""画面最上部の見出しを描画する。span_w に自然に収まらない場合のみ縮小し、
+	   幅いっぱいへの強制引き伸ばしは行わない（体験版専用画面のためロケール非依存の英語表記で固定）"""
 	var font: Font = _game.font_din
-	var text: String = tr("RESULT_TITLE")
-	var n: int = text.length()
-	if n == 0:
+	var text: String = "TRIAL MODE RESULT"
+	if text.is_empty():
 		return
-	var total_adv: float = 0.0
-	var advances: Array = []
-	for i in range(n):
-		var w0: float = font.get_string_size(text.substr(0, i), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var w1: float = font.get_string_size(text.substr(0, i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		advances.append(w1 - w0)
-		total_adv += advances[i]
-	var gap_extra: float = 0.0
-	if n > 1:
-		gap_extra = (span_w - total_adv) / float(n - 1) * spacing_ratio
-	var x: float = block_x
-	var baseline_y: float = top_y + font.get_ascent(fs)
-	for i in range(n):
-		var ch: String = text.substr(i, 1)
-		_game.draw_string(font, Vector2(x, baseline_y), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
-		x += advances[i]
-		if i < n - 1:
-			x += gap_extra
+	var use_fs: int = fs
+	while use_fs > 20 and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, use_fs).x > span_w:
+		use_fs -= 2
+	var baseline_y: float = top_y + font.get_ascent(use_fs)
+	_game.draw_string(font, Vector2(block_x, baseline_y), text, HORIZONTAL_ALIGNMENT_LEFT, span_w, use_fs, color)
 
 
 func _draw_results(vp: Vector2) -> void:
 	_draw_bg(vp)
 
-	var fade_t: float = 1.0
-	if _results_anim_time >= 0.0:
-		fade_t = clampf((Time.get_ticks_msec() / 1000.0 - _results_anim_time) / RESULTS_SLIDE_DURATION, 0.0, 1.0)
-	var a: float = _ease_out_cubic(fade_t)
+	var sched: Dictionary = _results_phase_schedule()
+	var elapsed: float = _results_effective_elapsed()
 
 	var lay: Dictionary = _compute_results_layout(vp)
 	var lp_x: float    = lay["lp_x"]
 	var lp_y: float    = lay["lp_y"]
 	var lp_w: float    = lay["lp_w"]
-	var lp_h: float    = lay["lp_h"]
-	var card_pad: float   = lay["card_pad"]
 	var title_fs: int     = lay["title_fs"]
+	var title_top: float  = lay["title_top"]
 	var grid_top: float   = lay["grid_top"]
 	var grid_h: float     = lay["grid_h"]
-	var grid_cy: float    = lay["grid_cy"]
-	var total_bar_y: float = lay["total_bar_y"]
-	var btn_res_h: float  = lay["btn_res_h"]
-	var next_cx: float    = lay["next_cx"]
-	var next_cy: float    = lay["next_cy"]
+	var total_bar_y: float  = lay["total_bar_y"]
+	var total_bar_y2: float = lay["total_bar_y2"]
+	var total_row_h: float  = lay["total_row_h"]
 	var next_s: float     = lay["next_s"]
-
-	var c_white: Color = Color(1.0, 1.0, 1.0, a)
-	var c_red:   Color = Color(0.9490, 0.1882, 0.3216, a)
-	var c_dark:  Color = Color(LINE_COLOR,a)
 
 	const CARD_BORDER_W: float  = 5.75
 	const SHADOW_OFFSET: float  = 12.5
 
-	# ─── 疑似3Dホログラム傾きアニメーション ───
-	var tilt_elapsed: float = maxf(Time.get_ticks_msec() / 1000.0 - _results_anim_time, 0.0)
-	var tilt_mat: Transform2D = _compute_results_tilt(vp, tilt_elapsed, a)
-	_game.draw_set_transform_matrix(tilt_mat)
+	_game.draw_set_transform_matrix(Transform2D.IDENTITY)
 
-	# ═══ 右パネル（先に描画 → 左カードより下レイヤー） ═══
+	# ═══ ① メインタイトル ═══
+	var p0_t: float = _reveal_progress(elapsed, sched["p0_start"], sched["p0_dur"])
+	var p0_a: float = _ease_out_cubic(p0_t)
+	if p0_a > 0.0:
+		var c_red_title: Color = Color(0.9490, 0.1882, 0.3216, p0_a)
+		var title_slide: float = lerp(24.0, 0.0, p0_a)
+		_draw_results_title_justified(lp_x + 3.0 + 55.0, title_top + title_slide - 20.0, vp.x - lp_x - 70.0, title_fs, c_red_title)
+
+	# ═══ ④ 右パネル（先に描画 → ②のステージカードより下レイヤー） ═══
 	const RP_W: float      = 740.0
-	const RP_H: float      = 610.0
-	const RP_MARGIN: float = 70.0
-	const RP_TOP: float    = 60.0
-	const ICON_BTN_SIZE: float = 88.0
-	const ICON_BTN_GAP:  float = 16.0
+	const RP_H: float      = 530.0
+	const RP_MARGIN: float = 120.0
 	const INNER_PAD:     float = 20.0
 	const HASH_BAR_H:    float = 60.0
+	var p3_t: float = _reveal_progress(elapsed, sched["p3_start"], sched["p3_dur"])
+	var p3_a: float = _ease_out_cubic(p3_t)
 	var rp_w: float = RP_W
 	var rp_h: float = RP_H
-	var rp_x: float = vp.x - RP_MARGIN - rp_w
-	var rp_y: float = RP_TOP
+	var rp_x_slide: float = lerp(50.0, 0.0, p3_a)
+	var rp_x: float = vp.x - RP_MARGIN - rp_w + rp_x_slide
+	var rp_y: float = lp_y + 18.0
 	var rp_rect := Rect2(rp_x, rp_y, rp_w, rp_h)
-	# 1. シャドウ
-	_game.draw_rect(Rect2(rp_rect.position + Vector2(SHADOW_OFFSET, SHADOW_OFFSET), rp_rect.size), Color(LINE_COLOR,0.30 * a))
-	# 2. 白塗り
-	_game.draw_rect(rp_rect, c_white)
-	# 3. ロゴ（上部60%）
-	var logo_area_h: float = rp_h * 0.60
-	var logo_tex: Texture2D = _game.result_logo_texture if _game.result_logo_texture else _game.title_logo_texture
-	if logo_tex:
-		var tex_size: Vector2 = logo_tex.get_size()
-		var max_w: float = (rp_w - INNER_PAD * 2.0) * 0.85
-		var max_h: float = (logo_area_h - INNER_PAD * 2.0) * 0.85
-		var sc_logo: float = minf(max_w / tex_size.x, max_h / tex_size.y)
-		var dw: float = tex_size.x * sc_logo
-		var dh: float = tex_size.y * sc_logo
-		_game.draw_texture_rect(logo_tex, Rect2(Vector2(rp_x + (rp_w - dw) * 0.5, rp_y + (logo_area_h - dh) * 0.5), Vector2(dw, dh)), false, Color(1, 1, 1, a))
-	# COMING SOON テキスト
-	var coming_fs: int = 48
-	var coming_mid_y: float = rp_y + logo_area_h + (rp_h * 0.18) * 0.5
-	var coming_y: float = coming_mid_y + _game.font_din.get_ascent(coming_fs) * 0.5 - _game.font_din.get_descent(coming_fs) * 0.5
-	_game.draw_string(_game.font_din, Vector2(rp_x, coming_y), "COMING SOON", HORIZONTAL_ALIGNMENT_CENTER, rp_w, coming_fs, c_dark)
-	# 4. 赤バナー（枠線より下レイヤー・60px上に移動）
-	var hash_bar_rect := Rect2(rp_x, rp_y + rp_h - HASH_BAR_H - 60.0, rp_w, HASH_BAR_H)
-	_game.draw_rect(hash_bar_rect, c_red)
-	var hash_fs: int = 40
-	var hash_y: float = hash_bar_rect.position.y + (HASH_BAR_H + _game.font_din.get_ascent(hash_fs) - _game.font_din.get_descent(hash_fs)) * 0.5
-	_game.draw_string(_game.font_din, Vector2(rp_x, hash_y), "#KATADRAW", HORIZONTAL_ALIGNMENT_CENTER, rp_w, hash_fs, c_white)
-	# 5. 枠線（赤バナーより上レイヤー）
-	_game.draw_rect(rp_rect, c_dark, false, CARD_BORDER_W)
-	# ─── アイコングループ（カメラ・Twitter・NEXT を画面右下に横並び） ───
-	# NEXTアイコン右下端を画面右下端から縦100px・横100pxの位置に配置
+	if p3_a > 0.0:
+		var c_white_p3: Color = Color(1.0, 1.0, 1.0, p3_a)
+		var c_red_p3:   Color = Color(0.9490, 0.1882, 0.3216, p3_a)
+		var c_dark_p3:  Color = Color(LINE_COLOR, p3_a)
+		# 1. シャドウ
+		_game.draw_rect(Rect2(rp_rect.position + Vector2(SHADOW_OFFSET, SHADOW_OFFSET), rp_rect.size), Color(LINE_COLOR, 0.30 * p3_a))
+		# 2. 白塗り
+		_game.draw_rect(rp_rect, c_white_p3)
+		# 3. ロゴ（上部60%）
+		var logo_area_h: float = rp_h * 0.60
+		var logo_tex: Texture2D = _game.result_logo_texture if _game.result_logo_texture else _game.title_logo_texture
+		if logo_tex:
+			var tex_size: Vector2 = logo_tex.get_size()
+			var max_w: float = (rp_w - INNER_PAD * 2.0) * 0.85
+			var max_h: float = (logo_area_h - INNER_PAD * 2.0) * 0.85
+			var sc_logo: float = minf(max_w / tex_size.x, max_h / tex_size.y)
+			var dw: float = tex_size.x * sc_logo
+			var dh: float = tex_size.y * sc_logo
+			_game.draw_texture_rect(logo_tex, Rect2(Vector2(rp_x + (rp_w - dw) * 0.5, rp_y + (logo_area_h - dh) * 0.5), Vector2(dw, dh)), false, Color(1, 1, 1, p3_a))
+		# COMING SOON テキスト
+		var coming_fs: int = 48
+		var coming_mid_y: float = rp_y + logo_area_h + (rp_h * 0.18) * 0.5
+		var coming_y: float = coming_mid_y + _game.font_din.get_ascent(coming_fs) * 0.5 - _game.font_din.get_descent(coming_fs) * 0.5
+		_game.draw_string(_game.font_din, Vector2(rp_x, coming_y), "COMING SOON", HORIZONTAL_ALIGNMENT_CENTER, rp_w, coming_fs, c_dark_p3)
+		# 4. 赤バナー（枠線より下レイヤー・60px上に移動）
+		var hash_bar_rect := Rect2(rp_x, rp_y + rp_h - HASH_BAR_H - 60.0, rp_w, HASH_BAR_H)
+		_game.draw_rect(hash_bar_rect, c_red_p3)
+		var hash_fs: int = 40
+		var hash_y: float = hash_bar_rect.position.y + (HASH_BAR_H + _game.font_din.get_ascent(hash_fs) - _game.font_din.get_descent(hash_fs)) * 0.5
+		_game.draw_string(_game.font_din, Vector2(rp_x, hash_y), "#KATADRAW", HORIZONTAL_ALIGNMENT_CENTER, rp_w, hash_fs, c_white_p3)
+		# 5. 枠線（赤バナーより上レイヤー・製品版ボタンと同じKATA意匠: 四隅に●）
+		_draw_rect_border_with_corners(rp_rect, c_dark_p3, CARD_BORDER_W)
+
+	# ═══ ⑤ アイコングループ（カメラ→Twitter→NEXT の順にポップイン、画面右下に横並び） ═══
 	var ig_size: float = next_s         # 88px (間隔計算基準)
 	const IG_GAP: float = 120.0
 	const NEXT_BTN_S: float = 128.0
-	# NEXTの中心 = 右端から(100 + 128/2)、下端から(100 + 128/2)
-	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
-	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
-	# 右から: NEXT → Twitter → Camera
+	var next_cx_new: float = vp.x - 100.0 - NEXT_BTN_S * 0.5 - 26.0
+	var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5 - 30.0
 	var tw_cx: float = next_cx_new - ig_size - IG_GAP
 	var cam_cx: float = tw_cx - ig_size - IG_GAP
 	var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
 	var res_act: int = get_results_active_focus(vp)
-	_draw_result_camera_btn(Vector2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, a, res_act == 0)
-	_draw_result_twitter_btn(Vector2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, a, res_act == 1)
 
-	# ═══ 左ダークカード（後に描画 → 右パネルより上レイヤー） ═══
-	var lp_rect := Rect2(lp_x, lp_y, lp_w, lp_h)
-	# シャドウ（アルファ0.45で乗算近似）
-	_game.draw_rect(Rect2(lp_rect.position + Vector2(SHADOW_OFFSET, SHADOW_OFFSET), lp_rect.size), Color(LINE_COLOR,0.45 * a))
-	# 本体塗り
-	_game.draw_rect(lp_rect, c_dark)
+	var p4_cam_t: float = _reveal_progress(elapsed, sched["p4_start"], sched["p4_dur"])
+	var p4_tw_t: float = _reveal_progress(elapsed, sched["p4_start"] + sched["p4_stagger"], sched["p4_dur"])
+	var p4_next_t: float = _reveal_progress(elapsed, sched["p4_start"] + sched["p4_stagger"] * 2.0, sched["p4_dur"])
 
-	# ─── タイトル ───
-	const GRID_SCALE:    float = 0.80
-	const GRID_FRAME_SX: float = 0.80 * 1.10  # = 0.88
-	var grid_frame_visual_w: float = lp_w * GRID_FRAME_SX
-	var title_x: float = lp_x + (lp_w - grid_frame_visual_w) * 0.5
-	var title_top: float = lp_y + card_pad + 5.0
-	_draw_results_title_justified(title_x + 3.0, title_top, grid_frame_visual_w, title_fs, c_red, 0.85)
+	if p4_cam_t > 0.0:
+		var cam_a: float = _ease_out_cubic(p4_cam_t)
+		var cam_sz: float = icon_draw_size * _ease_out_back(p4_cam_t)
+		var cam_center := Vector2(cam_cx, ig_cy)
+		_draw_result_camera_btn(cam_center - Vector2(cam_sz, cam_sz) * 0.5, cam_sz, cam_a, res_act == 0)
+	if p4_tw_t > 0.0:
+		var tw_a: float = _ease_out_cubic(p4_tw_t)
+		var tw_sz: float = icon_draw_size * _ease_out_back(p4_tw_t)
+		var tw_center := Vector2(tw_cx, ig_cy)
+		_draw_result_twitter_btn(tw_center - Vector2(tw_sz, tw_sz) * 0.5, tw_sz, tw_a, res_act == 1)
 
-	# ─── グリッド（内容80%・白枠110%横） ───
-	var grid_cx: float = lp_x + lp_w * 0.5
-	var n_stages: int = _game.stage_session.stage_times.size()
-	var grid_vis_h: float = grid_h * GRID_SCALE
-	var row_h: float = grid_h / 5.0
-	var col_gap: float = 14.0
-	var col_w: float = (lp_w - col_gap) * 0.5
-	var grid_w: float = lp_w
-	const GRID_BORDER_W: float = 5.75
-	const CELL_BORDER_W: float = 1.25 * 3.0
-	var stat_fs: int = mini(76, maxi(24, int(row_h * 0.42 * GRID_SCALE)))
-	stat_fs = maxi(1, int(round(float(stat_fs) * 0.9 * 0.82)))
-	# 白枠（横110%）
-	var frame_sx: float = GRID_FRAME_SX
-	var frame_sy: float = GRID_SCALE
-	var grid_frame_rect := Rect2(grid_cx - lp_w * 0.5, grid_top, lp_w, grid_h)
-	var _frame_sub := Transform2D(Vector2(frame_sx, 0.0), Vector2(0.0, frame_sy), Vector2(grid_cx * (1.0 - frame_sx), grid_cy * (1.0 - frame_sy)))
-	_game.draw_set_transform_matrix(tilt_mat * _frame_sub)
-	_game.draw_rect(grid_frame_rect, Color(1.0, 1.0, 1.0, 0.97 * a))
-	_game.draw_rect(grid_frame_rect, Color(1.0, 1.0, 1.0, 0.4 * a), false, 3.0)
-	# グリッド内容（80%）
-	var _grid_sub := Transform2D(Vector2(GRID_SCALE, 0.0), Vector2(0.0, GRID_SCALE), Vector2(grid_cx * (1.0 - GRID_SCALE), grid_cy * (1.0 - GRID_SCALE)))
-	_game.draw_set_transform_matrix(tilt_mat * _grid_sub)
-	for row in range(5):
-		for col in range(2):
-			var idx: int = row + col * 5
-			var cell_x: float = grid_cx - lp_w * 0.5 + float(col) * (col_w + col_gap)
-			var cell_y: float = grid_top + float(row) * row_h
-			var cell_rect := Rect2(cell_x, cell_y, col_w, row_h - 6.0)
-			if idx >= n_stages:
-				_game.draw_rect(cell_rect, Color(1.0, 1.0, 1.0, 0.05 * a))
-				_game.draw_rect(cell_rect, Color(1.0, 1.0, 1.0, 0.15 * a), false, CELL_BORDER_W)
-				continue
-			var cw: float = cell_rect.size.x
-			var ch: float = cell_rect.size.y
-			var pad: float = 4.0
-			var thumb_col_w: float = cw * 0.36
-			var mid_col_w: float   = cw * 0.32
-			var right_col_w: float = cw - thumb_col_w - mid_col_w - pad * 2.0
-			var side: float = minf(thumb_col_w - pad * 2.0, ch - pad * 2.0)
-			var thumb_rect := Rect2(cell_rect.position.x + (thumb_col_w - side) * 0.5, cell_rect.position.y + (ch - side) * 0.5, side, side)
-			var shape_dat: Dictionary = {}
-			if idx < _game.stage_session.stage_result_shapes.size():
-				shape_dat = _game.stage_session.stage_result_shapes[idx] as Dictionary
-			var ideal_l: Array = shape_dat.get("ideal", [])
-			var player_l: Array = shape_dat.get("player", [])
-			if not ideal_l.is_empty() or not player_l.is_empty():
-				_stage_renderer.draw_result_thumbnail(thumb_rect, ideal_l, player_l)
-			else:
-				_game.draw_rect(thumb_rect, Color(1.0, 1.0, 1.0, 0.1 * a))
-			var t_s: float = _game.stage_session.stage_times[idx]
-			var mv: int = _game.stage_session.stage_move_counts[idx] if idx < _game.stage_session.stage_move_counts.size() else 0
-			var time_str: String = tr("RESULT_TIME_UNIT") % t_s
-			var move_str: String = tr("RESULT_MOVE_UNIT") % mv
-			var mid_x: float   = cell_rect.position.x + thumb_col_w + pad
-			var right_x: float = mid_x + mid_col_w + pad
-			var fs_t: int = _result_grid_fit_font_size(_game.font, time_str, mid_col_w * 0.97, stat_fs, 8)
-			var fs_m: int = _result_grid_fit_font_size(_game.font, move_str, right_col_w * 0.97, stat_fs, 8)
-			var fs_cell: int = mini(fs_t, fs_m)
-			var row_baseline: float = cell_rect.position.y + (ch + _game.font.get_ascent(fs_cell) - _game.font.get_descent(fs_cell)) * 0.5
-			_game.draw_string(_game.font, Vector2(mid_x, row_baseline), time_str, HORIZONTAL_ALIGNMENT_CENTER, mid_col_w, fs_cell, c_dark)
-			_game.draw_string(_game.font, Vector2(right_x, row_baseline), move_str, HORIZONTAL_ALIGNMENT_CENTER, right_col_w, fs_cell, c_dark)
-	_game.draw_set_transform_matrix(tilt_mat)  # グリッド内部スケール終了、ホログラム傾きに戻す
-
-	# ─── TOTALバー ───
-	const TOTAL_BORDER_W: float = 3.0
-	var total_bar_w: float = lp_w * GRID_FRAME_SX
+	# ─── ③で使うTOTALブロックの横幅・位置を先に決め、②のグリッドの横幅をこれに合わせる ───
+	var total_bar_w: float = lp_w * 0.88
 	var total_bar_x: float = lp_x + (lp_w - total_bar_w) * 0.5
-	var total_bar_rect := Rect2(total_bar_x, total_bar_y, total_bar_w, btn_res_h)
-	_game.draw_rect(total_bar_rect, Color(1.0, 1.0, 1.0, 0.96 * a))
-	_game.draw_rect(total_bar_rect, Color(1.0, 1.0, 1.0, 0.4 * a), false, TOTAL_BORDER_W)
-	var total_label_w: float = minf(320.0, total_bar_w * 0.32) * 0.90
-	var tl_rect := Rect2(total_bar_rect.position, Vector2(total_label_w, btn_res_h))
-	_game.draw_rect(tl_rect, c_red)
-	var total_lbl_fs: int = int(RESULT_TOTAL_LABEL_FS * 0.75 * 0.80)
-	var total_lbl_y: float = tl_rect.position.y + (btn_res_h + _game.font_din.get_ascent(total_lbl_fs) - _game.font_din.get_descent(total_lbl_fs)) * 0.5 - 5.0
-	# "TOTAL" を1文字ずつ描画して字間を+20%広げる
-	var _total_str: String = tr("RESULT_TOTAL")
-	var _total_chars: PackedStringArray = PackedStringArray()
-	for _ci in range(_total_str.length()):
-		_total_chars.append(_total_str.substr(_ci, 1))
-	var _char_advs: Array[float] = []
-	var _total_adv: float = 0.0
-	for _ch in _total_chars:
-		var _adv: float = _game.font_din.get_string_size(_ch, HORIZONTAL_ALIGNMENT_LEFT, -1, total_lbl_fs).x
-		_char_advs.append(_adv)
-		_total_adv += _adv
-	var _gap_extra: float = 0.0
-	if _total_chars.size() > 1:
-		_gap_extra = (_total_adv / float(_total_chars.size() - 1)) * 0.20
-	var _total_render_w: float = _total_adv + _gap_extra * float(_total_chars.size() - 1)
-	var _char_x: float = tl_rect.position.x + (total_label_w - _total_render_w) * 0.5
-	for _ci2 in range(_total_chars.size()):
-		_game.draw_string(_game.font_din, Vector2(_char_x, total_lbl_y), _total_chars[_ci2], HORIZONTAL_ALIGNMENT_LEFT, -1, total_lbl_fs, c_white)
-		_char_x += _char_advs[_ci2] + _gap_extra
+	var total_label_w: float = minf(220.0, total_bar_w * 0.24)
 
+	# ═══ ② ステージ結果カード（背景は透明。5列×2行、#1から順に連鎖ポップイン。TOTALブロックと同幅で配置） ═══
+	var n_stages: int = _game.stage_session.stage_times.size()
+	const GRID_COLS: int = 5
+	const GRID_ROWS: int = 2
+	var col_gap: float = 14.0
+	var row_gap: float = 20.0
+	var col_w: float = (total_bar_w - col_gap * float(GRID_COLS - 1)) / float(GRID_COLS)
+	var row_h: float = (grid_h - row_gap * float(GRID_ROWS - 1)) / float(GRID_ROWS)
+	const CELL_BORDER_W: float = 1.25 * 3.0
+	for row in range(GRID_ROWS):
+		for col in range(GRID_COLS):
+			var idx: int = row * GRID_COLS + col
+			var cell_x: float = total_bar_x + float(col) * (col_w + col_gap)
+			var cell_y: float = grid_top + float(row) * (row_h + row_gap)
+			var cell_rect := Rect2(cell_x, cell_y, col_w, row_h)
+			if idx >= n_stages:
+				_game.draw_rect(cell_rect, Color(1.0, 1.0, 1.0, 0.05))
+				_game.draw_rect(cell_rect, Color(1.0, 1.0, 1.0, 0.15), false, CELL_BORDER_W)
+				continue
+			var card_start: float = sched["p1_start"] + float(idx) * sched["p1_stagger"]
+			var card_t: float = _reveal_progress(elapsed, card_start, sched["p1_dur"])
+			if card_t <= 0.0:
+				continue
+			var card_a: float = _ease_out_cubic(card_t)
+			var card_scale: float = _ease_out_back(card_t)
+			var card_slot_elapsed: float = maxf(0.0, elapsed - card_start)
+			var ccx: float = cell_rect.position.x + cell_rect.size.x * 0.5
+			var ccy: float = cell_rect.position.y + cell_rect.size.y * 0.5
+			var pop_xf := Transform2D(Vector2(card_scale, 0.0), Vector2(0.0, card_scale), Vector2(ccx * (1.0 - card_scale), ccy * (1.0 - card_scale)))
+			_game.draw_set_transform_matrix(pop_xf)
+			_draw_results_stage_card(cell_rect, idx, card_a, card_slot_elapsed)
+			_game.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+	# ═══ ③ TOTAL CLEAR TIME → TOTAL TRY COUNT（ステージクリアカードと同じラベル+値の演出を2段で流用） ═══
 	var total_time: float = 0.0
 	for t in _game.stage_session.stage_times:
 		total_time += t
 	var total_moves: int = 0
 	for m in _game.stage_session.stage_move_counts:
 		total_moves += m
-	var tot_area_x: float = total_bar_rect.position.x + total_label_w + 12.0
-	var tot_area_w: float = total_bar_rect.position.x + total_bar_rect.size.x - tot_area_x - 12.0
-	var tot_time_str: String = tr("RESULT_TIME_UNIT") % total_time
-	var tot_move_str: String = tr("RESULT_MOVE_UNIT") % total_moves
-	var fs_tim: int = 28 * 2
-	var fs_mov: int = 28 * 2
-	fs_tim = mini(fs_tim, int(btn_res_h * 0.55))
-	fs_mov = fs_tim
-	fs_tim = int(float(fs_tim) * 0.85 * 0.80)
-	fs_mov = fs_tim
-	var half_val: float = tot_area_w * 0.5
-	var bl_tot: float = total_bar_rect.position.y + (btn_res_h + _game.font_bold.get_ascent(fs_tim) - _game.font_bold.get_descent(fs_tim)) * 0.5
-	_game.draw_string(_game.font_bold, Vector2(tot_area_x, bl_tot), tot_time_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_tim, c_red)
-	_game.draw_string(_game.font_bold, Vector2(tot_area_x + half_val, bl_tot), tot_move_str, HORIZONTAL_ALIGNMENT_CENTER, half_val - 4.0, fs_mov, c_red)
 
-	# 枠線（コンテンツより上レイヤー・白5px）
-	_draw_rect_border_with_corners(lp_rect, Color(1.0, 1.0, 1.0, a), 5.0)
+	var p2_time_start: float = sched["p2_start"]
+	var p2_moves_start: float = sched["p2_start"] + sched["p2_stagger"]
+	var p2_time_t: float = _reveal_progress(elapsed, p2_time_start, sched["p2_dur"])
+	var p2_moves_t: float = _reveal_progress(elapsed, p2_moves_start, sched["p2_dur"])
 
-	# ─── NEXTボタン（アイコングループ右端） ───
-	_draw_results_next_button(Vector2(next_cx_new, ig_cy), tr("RESULT_BTN_NEXT"), 35, a, NEXT_BTN_S, res_act == 2)
+	if p2_time_t > 0.0:
+		var p2_time_a: float = _ease_out_cubic(p2_time_t)
+		var p2_time_slide: float = lerp(20.0, 0.0, p2_time_a)
+		var total_time_rect := Rect2(total_bar_x, total_bar_y + p2_time_slide, total_bar_w, total_row_h)
+		_draw_results_stat_row(total_time_rect, ["TOTAL", "CLEAR", "TIME"], total_label_w, total_time, "%.2f", false, p2_time_a, -10.0, 1.1, 97, -5.0, -2, maxf(0.0, elapsed - p2_time_start), 1.0)
+	if p2_moves_t > 0.0:
+		var p2_moves_a: float = _ease_out_cubic(p2_moves_t)
+		var p2_moves_slide: float = lerp(20.0, 0.0, p2_moves_a)
+		var total_moves_rect := Rect2(total_bar_x, total_bar_y2 + p2_moves_slide, total_bar_w, total_row_h)
+		_draw_results_stat_row(total_moves_rect, ["TOTAL", "TRY", "COUNT"], total_label_w, float(total_moves), "%d", true, p2_moves_a, -10.0, 1.1, 97, -5.0, -2, maxf(0.0, elapsed - p2_moves_start), 1.37)
+
+	# ─── NEXTボタン（アイコングループ右端。⑤の最後にポップイン） ───
+	if p4_next_t > 0.0:
+		var next_a: float = _ease_out_cubic(p4_next_t)
+		var next_side: float = NEXT_BTN_S * _ease_out_back(p4_next_t)
+		_draw_results_next_button(Vector2(next_cx_new, ig_cy), tr("RESULT_BTN_NEXT"), 35, next_a, next_side, res_act == 2)
 
 	_game.draw_set_transform_matrix(Transform2D.IDENTITY)
-
-
-func _compute_results_tilt(vp: Vector2, elapsed: float, alpha: float) -> Transform2D:
-	# Y軸まわり（左右の傾き）とX軸まわり（前後の傾き）を独立したサイン波で合成し、
-	# 疑似3Dの浮遊感を演出する。±5°程度の微細な動きをホログラムパネルのように見せる。
-	const TILT_Y_MAX: float = 5.0   # Y軸最大傾き（度）
-	const TILT_X_MAX: float = 3.0   # X軸最大傾き（度）
-	const PERIOD_Y: float = 3.7     # Y軸周期（秒）
-	const PERIOD_X: float = 4.3     # X軸周期（秒）
-	const DEPTH: float = 0.20       # 疑似遠近シア量（大きいほど立体感が増す）
-	var ty: float = sin(elapsed * TAU / PERIOD_Y) * deg_to_rad(TILT_Y_MAX) * alpha
-	var tx: float = sin(elapsed * TAU / PERIOD_X + 1.3) * deg_to_rad(TILT_X_MAX) * alpha
-	# GDScriptでは Transform2D(Vector2,Vector2,Vector2) コンストラクタは使用不可のため
-	# プロパティ代入で列ベクトルを直接設定する
-	var mat := Transform2D.IDENTITY
-	mat.x = Vector2(cos(ty), sin(ty) * DEPTH)
-	mat.y = Vector2(sin(tx) * DEPTH, cos(tx))
-	var pivot := vp * 0.5
-	mat.origin = pivot - (mat.x * pivot.x + mat.y * pivot.y)
-	return mat
 
 
 func _draw_result_camera_btn(pos: Vector2, size: float, alpha: float, pad_focused: bool = false) -> void:
