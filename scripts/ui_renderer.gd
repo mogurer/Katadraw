@@ -896,28 +896,18 @@ func _draw_ta_info(vp: Vector2) -> void:
 
 
 ## タイムアタック専用リザルト画面（仮実装）。既存の _draw_results()（体験版用）とは独立した専用実装。
-## 演出はすべて _game._ta_results_start_time からの経過時間だけで計算する。タイミング調整は下記定数のみで完結する。
+## 演出タイムラインは _game._ta_results_timeline() を単一の情報源として参照する。
 func _draw_ta_results(vp: Vector2) -> void:
 	_draw_bg(vp)
-	var elapsed: float = Time.get_ticks_msec() / 1000.0 - _game._ta_results_start_time
-
-	const TITLE_SHOW_DUR: float = 0.6
-	const TITLE_SCROLL_DUR: float = 0.5
-	const ROW_INTERVAL: float = 0.35
-	const ROW_H: float = 75.0
-	const THANK_YOU_DELAY: float = 1.0
-
+	var tl: Dictionary = _game._ta_results_timeline()
+	var elapsed: float = tl.elapsed
 	var times: Array[float] = _game.stage_session.stage_times
 	var stage_count: int = times.size()
-	var listing_start: float = TITLE_SHOW_DUR + TITLE_SCROLL_DUR
-	var listing_dur: float = float(stage_count) * ROW_INTERVAL
-	var listing_end: float = listing_start + listing_dur
-	var thank_you_time: float = listing_end + THANK_YOU_DELAY
 
 	# 1. 「Result」タイトル: 中央表示 → 上部へスクロールして停止
 	var title_top_y: float = vp.y * 0.08
 	var title_center_y: float = vp.y * 0.5
-	var scroll_t: float = clampf((elapsed - TITLE_SHOW_DUR) / TITLE_SCROLL_DUR, 0.0, 1.0)
+	var scroll_t: float = clampf((elapsed - tl.title_show_dur) / tl.title_scroll_dur, 0.0, 1.0)
 	var ease_t: float = scroll_t * scroll_t * (3.0 - 2.0 * scroll_t)
 	var title_y: float = lerp(title_center_y, title_top_y, ease_t)
 	var title_alpha: float = clampf(elapsed / 0.3, 0.0, 1.0)
@@ -930,28 +920,43 @@ func _draw_ta_results(vp: Vector2) -> void:
 	var band_top: float = vp.y * 0.25
 	var band_bottom: float = vp.y * 0.75
 
-	if elapsed >= listing_start and stage_count > 0:
-		var list_elapsed: float = elapsed - listing_start
-		var scroll_speed: float = ROW_H / ROW_INTERVAL
-		var revealed: int = mini(stage_count, int(list_elapsed / ROW_INTERVAL) + 1)
+	if elapsed >= tl.listing_start and stage_count > 0:
+		var list_elapsed: float = elapsed - tl.listing_start
+		var scroll_speed: float = tl.row_h / tl.row_interval
+		var revealed: int = mini(stage_count, int(list_elapsed / tl.row_interval) + 1)
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]
-			var row_appear_time: float = float(i) * ROW_INTERVAL
-			var row_y: float = band_bottom - ROW_H - (list_elapsed - row_appear_time) * scroll_speed
-			if row_y < band_top - ROW_H or row_y > band_bottom + ROW_H:
+			var row_appear_time: float = float(i) * tl.row_interval
+			var row_y: float = band_bottom - tl.row_h - (list_elapsed - row_appear_time) * scroll_speed
+			if row_y < band_top - tl.row_h or row_y > band_bottom + tl.row_h:
 				continue
 			var stage_no: String = "%02d" % (i + 1)
 			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
 			_draw_ta_hud_text(Vector2(col2_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
-		# トータルタイム（帯の縦中央に固定表示、行が出現するたびに加算されていく）
 		var total_text: String = "%.2f" % total_shown
 		_draw_ta_hud_text(Vector2(col3_x, (band_top + band_bottom) * 0.5), total_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 32, Color(1.0, 1.0, 1.0))
 
 	# 3. THANK YOU FOR PLAYING !!
-	if elapsed >= thank_you_time:
-		var ty_alpha: float = clampf((elapsed - thank_you_time) / 0.5, 0.0, 1.0)
+	if elapsed >= tl.thank_you_time:
+		var ty_alpha: float = clampf((elapsed - tl.thank_you_time) / 0.5, 0.0, 1.0)
 		_draw_ta_hud_text(Vector2(0, vp.y * 0.9), "THANK YOU FOR PLAYING !!", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 36, Color(1.0, 1.0, 1.0, ty_alpha))
+
+	# 4. 操作ボタン（体験版のResult画面と同一のアイコン・配置・遷移関数を再利用）: THANK YOU 表示の3秒後から表示
+	if elapsed >= tl.buttons_time:
+		var btn_alpha: float = clampf((elapsed - tl.buttons_time) / 0.3, 0.0, 1.0)
+		const NEXT_BTN_S: float = 128.0
+		const IG_GAP: float = 120.0
+		var ig_size: float = 88.0
+		var next_cx: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
+		var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
+		var tw_cx: float = next_cx - ig_size - IG_GAP
+		var cam_cx: float = tw_cx - ig_size - IG_GAP
+		var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
+		var res_act: int = get_results_active_focus(vp)
+		_draw_result_camera_btn(Vector2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, btn_alpha, res_act == 0)
+		_draw_result_twitter_btn(Vector2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, btn_alpha, res_act == 1)
+		_draw_results_next_button(Vector2(next_cx, ig_cy), tr("TA_RESULT_BTN_TITLE"), 35, btn_alpha, NEXT_BTN_S, res_act == 2)
 
 
 func _get_perimeter_pos_topleft_ui(d: float, bx: float, by: float, bw: float, bh: float) -> Vector2:
