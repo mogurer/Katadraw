@@ -11,7 +11,16 @@ const INK_COLOR := Color("#433647")
 
 # --- 体験版 ---
 # true: 体験版（manifest_ex.json の10ステージをループなしで固定順プレイ）
-const IS_TRIAL := false
+const IS_TRIAL := true
+
+## 体験版の実績API名（体験版内のプレイ順=何番目にクリアしたかに対応。要Steamworks側に事前登録）
+## 添字は game.gd の _trial_idx（0始まり）にそのまま対応する。
+const TRIAL_STAGE_ACHIEVEMENTS: Array[String] = [
+	"ACVT_STGCLR_01", "ACVT_STGCLR_02", "ACVT_STGCLR_03", "ACVT_STGCLR_04", "ACVT_STGCLR_05",
+	"ACVT_STGCLR_06", "ACVT_STGCLR_07", "ACVT_STGCLR_08", "ACVT_STGCLR_09", "ACVT_STGCLR_10",
+]
+## 体験版限定の隠し実績（A+X同時押し / マウス左右同時押しでのネコアニメーション発火）
+const TRIAL_SECRET_CAT_ACHIEVEMENT := "ACVT_MESEEDCAT"
 
 ## 本編を「1 面だけ」繰り返しプレイするときのマスタ行インデックス（manifest / StageData.get_stages() の 0 始まり）。
 ## -1 で無効（通常は全ステージを順にプレイ）。例: 星 10 点のみ試すなら 3（star_10.json の並び）

@@ -20,16 +20,16 @@ CTRL_PAD_A_KEY,A ボタン,A Button,A 按钮,A 按鈕
 CTRL_PAD_A_REPEL_DESC,斥力（はじく）,Repel,斥力,斥力
 CTRL_PAD_X_KEY,X ボタン,X Button,X 按钮,X 按鈕
 CTRL_PAD_X_ATTRACT_DESC,引力（引き寄せる）,Attract,引力,引力
+CTRL_PAD_A_CHARGE_KEY,A 長押し,Hold A,长按 A,長按 A
+CTRL_PAD_A_CHARGE_DESC,斥力の範囲が拡大,Expand repel range,扩大斥力范围,擴大斥力範圍
+CTRL_PAD_X_CHARGE_KEY,X 長押し,Hold X,长按 X,長按 X
+CTRL_PAD_X_CHARGE_DESC,引力の範囲が拡大,Expand attract range,扩大引力范围,擴大引力範圍
 CTRL_PAD_B_KEY,B ボタン,B Button,B 按钮,B 按鈕
 CTRL_PAD_B_CANCEL_DESC,キャンセル（力を解除）,Cancel (release forces),取消（解除施力）,取消（解除施力）
 CTRL_PAD_LBRB_KEY,LB / RB,LB / RB,LB / RB,LB / RB
 CTRL_PAD_LBRB_DESC,前 / 次のポイントへジャンプ,Jump to prev / next point,跳转到上一个/下一个点,跳轉到上一個/下一個點
 CTRL_PAD_DPAD_KEY,十字キー,D-Pad,十字键,十字鍵
 CTRL_PAD_DPAD_DESC,隣接ポイントへ移動 / つかみ中はポイント移動,Switch adjacent point / Move when grabbing,切换相邻点 / 抓取时移动点,切換相鄰點 / 抓取時移動點
-CTRL_PAD_A_CHARGE_KEY,A 長押し,Hold A,长按 A,長按 A
-CTRL_PAD_A_CHARGE_DESC,斥力の範囲が拡大,Expand repel range,扩大斥力范围,擴大斥力範圍
-CTRL_PAD_X_CHARGE_KEY,X 長押し,Hold X,长按 X,長按 X
-CTRL_PAD_X_CHARGE_DESC,引力の範囲が拡大,Expand attract range,扩大引力范围,擴大引力範圍
 GUIDE_CLICK_START,クリックでスタート,Click to Start,点击开始,點擊開始
 HUD_TIME,Time: %.1fs,Time: %.1fs,Time: %.1fs,Time: %.1fs
 HUD_SMOOTHNESS,滑らかさ: %.1f%%,Smoothness: %.1f%%,平滑度: %.1f%%,平滑度: %.1f%%
@@ -114,7 +114,7 @@ STAGE_KING,統べる存在,King,国王,國王
 STAGE_MILK_CARTON,椅子になる,Milk Carton,牛奶盒,牛奶盒
 STAGE_MOUNT_FUJI,迷子はやばい,Mount Fuji,富士山,富士山
 STAGE_MUSHROOMS,旨い菌,Mushrooms,蘑菇,蘑菇
-STAGE_ONE_QUARTER,25%,Quarter,四分之一,四分之一
+STAGE_ONE_QUARTER,25％,Quarter,四分之一,四分之一
 STAGE_ONION,目に染みる,Onion,洋葱,洋蔥
 STAGE_PARAMECIUM,直径0.1ミリ,Paramecium,草履虫,草履蟲
 STAGE_PEN,剣より強い,Pen,笔,筆

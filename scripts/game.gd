@@ -1458,6 +1458,8 @@ func _check_clear() -> void:
 			var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
 			_new_record_time = _rec.time
 			_new_record_moves = _rec.moves
+		elif _trial_idx >= 0 and _trial_idx < GameConfig.TRIAL_STAGE_ACHIEVEMENTS.size():
+			SteamManager.unlock_achievement(GameConfig.TRIAL_STAGE_ACHIEVEMENTS[_trial_idx])
 		_save_dwell_log()
 
 		if StageSelectManager.time_attack_active:
@@ -1866,6 +1868,7 @@ func _input(event: InputEvent) -> void:
 					TransitionManager.play_diagonal(func():
 						game_state = "title"
 						title_start_time = Time.get_ticks_msec() / 1000.0
+						_apply_title_bgm_for_debug_mode()
 						queue_redraw()
 					)
 				)
@@ -1883,6 +1886,7 @@ func _input(event: InputEvent) -> void:
 					TransitionManager.play_diagonal(func():
 						game_state = "title"
 						title_start_time = Time.get_ticks_msec() / 1000.0
+						_apply_title_bgm_for_debug_mode()
 						queue_redraw()
 					)
 				)
@@ -3144,6 +3148,7 @@ func _input_pause(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> vo
 						debug_mode = false
 						game_state = "title"
 						title_start_time = Time.get_ticks_msec() / 1000.0
+						_apply_title_bgm_for_debug_mode()
 			queue_redraw()
 		)
 		queue_redraw()
@@ -3255,6 +3260,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 					debug_mode = false
 					game_state = "title"
 					title_start_time = Time.get_ticks_msec() / 1000.0
+					_apply_title_bgm_for_debug_mode()
 			else:  # いいえ
 				pause_confirm_title = false
 				_play_sfx(sfx_window_close)
@@ -5657,6 +5663,8 @@ func _process(delta: float) -> void:
 			input_handler.cat_anim_triggered = false
 			_play_sfx(sfx_cat)
 			ui_renderer.start_cat_anim()
+			if GameConfig.IS_TRIAL:
+				SteamManager.unlock_achievement(GameConfig.TRIAL_SECRET_CAT_ACHIEVEMENT)
 		# ZOU スタッフロール: 初回クリア前（zou_cleared=false）のみ表示
 		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:
 			var now_roll: float = Time.get_ticks_msec() / 1000.0
