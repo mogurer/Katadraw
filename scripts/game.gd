@@ -3577,6 +3577,11 @@ func _return_to_stage_select_preserve_bgm() -> void:
 
 
 func _advance_stage() -> void:
+	if StageSelectManager.time_attack_active:
+		# タイムアタック中の進行は _ta_advance_after_clear() が単独で担う。
+		# ステージクリア演出中（game_state が "cleared" のまま残っている間）にボタン連打で
+		# この関数が誤って呼ばれても、ステージセレクトへ戻ってしまわないようここで無視する。
+		return
 	if GameConfig.IS_TRIAL:
 		_trial_idx += 1
 		if _trial_idx < _trial_stage_ids.size():

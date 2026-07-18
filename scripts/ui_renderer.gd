@@ -2088,45 +2088,53 @@ func _draw_ta_target_shape_icon(center: Vector2, r: float) -> void:
 	_game.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1.0, 1.0, 1.0), 2.5)
 
 
-## タイムアタックHUD: 画面を4×4（16分割）した際の1列×2行分の領域に収める。
+## タイムアタックHUD＝「ラップタイムパネル」。
 ## 自キャラの位置により _game._ta_hud_side（"left"/"right"）で表示側が切り替わる。
+## 構成: 0.ガイドアイコン（目標図形） 1.ラップ履歴（直近クリアした最大2ステージ分） 2.カレントラップ（現在プレイ中ステージのライブタイマー）
 func _draw_ta_hud(vp: Vector2) -> void:
 	if not StageSelectManager.time_attack_active or _game.game_state != "playing":
 		return
 
 	var is_right: bool = _game._ta_hud_side == "right"
 	var align: HorizontalAlignment = HORIZONTAL_ALIGNMENT_RIGHT if is_right else HORIZONTAL_ALIGNMENT_LEFT
-	var margin: float = 24.0
-	var text_w: float = 300.0
+	var margin: float = 40.0        # 画面左右の端からの余白
+	var top_margin: float = 40.0    # 画面上端からの余白
+	var text_w: float = 600.0
 	var text_x: float = (vp.x - margin - text_w) if is_right else margin
-	var row_h: float = 44.0
-	var fs_value: int = 28
-	var fs_badge: int = 14
+	var row_h: float = 88.0
+	var fs_value: int = 56
+	var fs_badge: int = 28
 	var value_color := Color(1.0, 1.0, 1.0)
 	var badge_color := Color(0.98, 0.35, 0.42)
+	var current_lap_gap: float = 32.0   # ラップ履歴とカレントラップの間の追加スペース（別グループであることを示す）
 
-	# 0. 目標図形アイコン
-	var icon_r: float = 46.0
+	# 0. ガイドアイコン（目標図形）
+	var icon_r: float = 92.0
 	var icon_cx: float = (vp.x - margin - icon_r) if is_right else (margin + icon_r)
-	var icon_cy: float = 24.0 + icon_r
+	var icon_cy: float = top_margin + icon_r
 	_draw_ta_target_shape_icon(Vector2(icon_cx, icon_cy), icon_r)
 
+	# 1. ラップ履歴（直近クリアした最大2ステージ分のタイム。新記録は NEWバッジ付き）
 	var times: Array[float] = _game.stage_session.stage_times
 	var flags: Array[bool] = _game.ta_run_new_record_flags
 	var recent_count: int = mini(2, times.size())
 
-	var y: float = icon_cy + icon_r + 16.0
+	var y: float = icon_cy + icon_r + 32.0
 	for i in range(recent_count):
 		var idx: int = times.size() - recent_count + i
 		var stage_no: String = "%02d" % (idx + 1)
 		var row_text: String = "%s: %.2f" % [stage_no, times[idx]]
 		if idx < flags.size() and flags[idx]:
 			_draw_ta_hud_text(Vector2(text_x, y), tr("TA_HUD_NEW"), align, text_w, fs_badge, badge_color)
-			y += fs_badge + 4.0
+			y += fs_badge + 8.0
 		_draw_ta_hud_text(Vector2(text_x, y + fs_value), row_text, align, text_w, fs_value, value_color, _font_din_num)
 		y += row_h
 
-	# 現在プレイ中ステージ（カウントアップ中）
+	# ラップ履歴が1件以上あるときだけ、カレントラップとの間に追加の余白を入れる
+	if recent_count > 0:
+		y += current_lap_gap
+
+	# 2. カレントラップ（現在プレイ中ステージのライブタイマー）
 	var live_time: float = maxf(0.0, Time.get_ticks_msec() / 1000.0 - _game.start_time)
 	var cur_no: String = "%02d" % (_game.current_stage + 1)
 	var cur_text: String = "%s: %.2f" % [cur_no, live_time]
