@@ -1433,43 +1433,57 @@ func _draw_mini_shape(stage_id: int, center: Vector2, r: float) -> void:
 	var stype: String = str(cfg.get("shape_type", cfg.get("type", "circle")))
 	var fill_c := Color(_BUBBLE_RED.r, _BUBBLE_RED.g, _BUBBLE_RED.b, 0.22)
 	var line_c := _BUBBLE_DARK
-	var pts := PackedVector2Array()
+	var pts := PackedVector2Array()           # 塗り＋輪郭線用（曲線は弧サンプル込み）
+	var corner_pts := PackedVector2Array()    # 角の丸マーカー用（元の頂点のみ）
 
 	# カスタム形状: shape_polygon_vertices が存在する場合はそちらを優先
+	# shape_arc_controls がある辺は、インゲームの目標図形と同じロジック（StageManager._build_cat_face_outline）
+	# で弧をサンプリングしてから描画する（曲線ステージの見た目乖離を防ぐ）。
 	if cfg.has("shape_polygon_vertices"):
 		var raw: Array = cfg["shape_polygon_vertices"] as Array
 		if not raw.is_empty():
-			var raw_pts := PackedVector2Array()
-			var max_dist: float = 0.01
+			var verts_local: Array = []
 			for v in raw:
 				var arr: Array = v as Array
-				var p := Vector2(float(arr[0]), float(arr[1]))
-				raw_pts.append(p)
-				max_dist = maxf(max_dist, p.length())
+				verts_local.append(Vector2(float(arr[0]), float(arr[1])))
+			var arc_ctrls: Dictionary = StageManager._parse_arc_controls_from_cfg_static(cfg.get("shape_arc_controls", {}))
+			var sm := StageManager.new()
+			var outline: Array = sm._build_cat_face_outline(verts_local, arc_ctrls)
+			if outline.is_empty():
+				outline = verts_local
+			var max_dist: float = 0.01
+			for p in outline:
+				max_dist = maxf(max_dist, (p as Vector2).length())
 			var sc: float = r / max_dist
-			for p in raw_pts:
-				pts.append(center + p * sc)
+			for p in outline:
+				pts.append(center + (p as Vector2) * sc)
+			for v in verts_local:
+				corner_pts.append(center + (v as Vector2) * sc)
 	else:
 		match stype:
 			"triangle":
 				for i in range(3):
 					var a: float = -PI * 0.5 + float(i) * TAU / 3.0
 					pts.append(center + Vector2(cos(a), sin(a)) * r)
+				corner_pts = pts
 			"square":
 				var h: float = r * 0.707
 				pts = PackedVector2Array([
 					center + Vector2(-h, -h), center + Vector2(h, -h),
 					center + Vector2(h,  h),  center + Vector2(-h, h),
 				])
+				corner_pts = pts
 			"rhombus":
 				pts = PackedVector2Array([
 					center + Vector2(0, -r),        center + Vector2(r * 0.72, 0),
 					center + Vector2(0,  r),        center + Vector2(-r * 0.72, 0),
 				])
+				corner_pts = pts
 			"hexagon":
 				for i in range(6):
 					var a: float = float(i) * TAU / 6.0 - PI / 6.0
 					pts.append(center + Vector2(cos(a), sin(a)) * r)
+				corner_pts = pts
 			_:  # circle やその他
 				draw_circle(center, r, fill_c)
 				var cp := PackedVector2Array()
@@ -1482,7 +1496,7 @@ func _draw_mini_shape(stage_id: int, center: Vector2, r: float) -> void:
 		return
 	draw_colored_polygon(pts, fill_c)
 	draw_polyline(pts + PackedVector2Array([pts[0]]), line_c, 2.25)
-	for p in pts:
+	for p in corner_pts:
 		draw_circle(p, 3.0, line_c)
 
 
