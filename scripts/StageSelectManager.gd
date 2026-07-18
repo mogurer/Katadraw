@@ -31,6 +31,8 @@ var all_cleared: bool = false
 
 # ZOU クリア済みフラグ（保存あり）
 var zou_cleared: bool = false
+# タイムトライアル解放メッセージ通知済みフラグ（保存あり。一度表示したら二度と出さない）
+var ta_unlock_announced: bool = false
 
 # zou.json のステージインデックス（stage_select.gd が ready で設定する）
 var _zou_stage_idx: int = -1
@@ -155,6 +157,11 @@ func mark_zou_cleared() -> void:
 	_save_states()
 
 
+func mark_ta_unlock_announced() -> void:
+	ta_unlock_announced = true
+	_save_states()
+
+
 func reset_zou_cleared() -> void:
 	zou_cleared = false
 	_save_states()
@@ -240,6 +247,7 @@ func reset_all() -> void:
 	tutorial_shown = false
 	all_cleared = false
 	zou_cleared = false
+	ta_unlock_announced = false
 	pending_stage_id = -1
 	_best_times.clear()
 	_best_move_counts.clear()
@@ -255,6 +263,7 @@ func _save_states() -> void:
 	data["tutorial_shown"] = tutorial_shown
 	data["all_cleared"] = all_cleared
 	data["zou_cleared"] = zou_cleared
+	data["ta_unlock_announced"] = ta_unlock_announced
 	var best_t: Dictionary = {}
 	for k in _best_times:
 		best_t[str(k)] = _best_times[k]
@@ -288,6 +297,7 @@ func _load_states() -> void:
 		tutorial_shown = bool(d["tutorial_shown"])
 	all_cleared = bool(d.get("all_cleared", false))
 	zou_cleared = bool(d.get("zou_cleared", false))
+	ta_unlock_announced = bool(d.get("ta_unlock_announced", false))
 	if d.has("best_times"):
 		var bt: Dictionary = d["best_times"] as Dictionary
 		for k in bt:

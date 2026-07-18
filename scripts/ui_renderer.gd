@@ -526,6 +526,8 @@ func draw(state: String, vp: Vector2) -> void:
 			_draw_particles()
 		"zou_ending":
 			_draw_zou_ending(vp)
+		"zou_ta_unlock":
+			_draw_zou_ta_unlock(vp)
 		"results":
 			_draw_results(vp)
 		"stage_debug":
@@ -543,11 +545,13 @@ func draw(state: String, vp: Vector2) -> void:
 	#if _game.stage_session.debug_test_mode and state == "playing":
 		#_draw_debug_log_button(vp)
 
-	if not _game.pause_active and state != "logo" and state != "title_intro" and state != "zou_ending":
+	if not _game.pause_active and state != "logo" and state != "title_intro" and state != "zou_ending" and state != "zou_ta_unlock":
 		var _show_avatar: bool = true
 		if state == "title":
 			var _t: float = Time.get_ticks_msec() / 1000.0 - _game.title_start_time
-			_show_avatar = (_t - GameConfig.TITLE_FADE_IN - 0.3) > 0.0
+			_show_avatar = (_t - GameConfig.TITLE_FADE_IN - 0.3) > 0.0 and not _game._cursor_pad_override_hidden
+		elif state == "menu":
+			_show_avatar = not _game._cursor_pad_override_hidden
 		if _show_avatar:
 			_draw_player_avatar()
 
@@ -786,6 +790,7 @@ func _draw_title(vp: Vector2) -> void:
 	_game.draw_string(_game.font, Vector2(16, vp.y - 14), APP_VERSION, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.45, 0.38, 0.45, bottom_alpha))
 
 
+
 func get_menu_btn_cy(vp: Vector2, index: int, count: int) -> float:
 	# ゲームスタートボタンを基準に、ボタン間20px間隔で固定配置
 	var first_btn_cy: float = vp.y * 0.57 - 5.0
@@ -828,6 +833,22 @@ func _draw_menu(vp: Vector2) -> void:
 	# 終了確認ダイアログ
 	if _game.menu_confirm_quit:
 		_draw_menu_quit_confirm(vp)
+
+
+func _draw_ta_unlock_dialog_box(vp: Vector2) -> void:
+	var cx: float = vp.x / 2.0
+	var dlg_cy: float = vp.y / 2.0
+	var dlg_w: float = 836.0
+	var dlg_h: float = 260.0
+	var dlg_rect := Rect2(Vector2(cx - dlg_w / 2.0, dlg_cy - dlg_h / 2.0), Vector2(dlg_w, dlg_h))
+	var dlg_shadow := Vector2(15.0, 15.0)
+	_game.draw_rect(Rect2(dlg_rect.position + dlg_shadow, dlg_rect.size), Color(LINE_COLOR, 0.25))
+	_game.draw_rect(dlg_rect, Color(1.0, 1.0, 1.0))
+	_draw_rect_border_with_corners(dlg_rect, LINE_COLOR, 5.75)
+	_game.draw_string(_game.font_bold, Vector2(cx - dlg_w / 2.0 + 30.0, dlg_cy - 40.0),
+		tr("TA_UNLOCK_MESSAGE"), HORIZONTAL_ALIGNMENT_CENTER, dlg_w - 60.0, 38, Color(0.95, 0.19, 0.32))
+	_game.draw_string(_game.font, Vector2(cx - dlg_w / 2.0 + 30.0, dlg_cy + 50.0),
+		tr("TA_UNLOCK_HINT"), HORIZONTAL_ALIGNMENT_CENTER, dlg_w - 60.0, 24, Color(0.45, 0.38, 0.45))
 
 
 func _draw_menu_quit_confirm(vp: Vector2) -> void:
@@ -2344,6 +2365,13 @@ func _draw_zou_ending(vp: Vector2) -> void:
 		_game.draw_string(fnt, Vector2(0.0, y),
 			"production work : 2026 Meseed Software",
 			HORIZONTAL_ALIGNMENT_CENTER, vp.x, FS, Color(0.0, 0.0, 0.0, alpha))
+
+
+func _draw_zou_ta_unlock(vp: Vector2) -> void:
+	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color.WHITE)
+	_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0.0, 0.0, 0.0, _game._zou_ta_unlock_overlay_alpha))
+	if _game._zou_ta_unlock_msg_visible:
+		_draw_ta_unlock_dialog_box(vp)
 
 
 func _draw_rules(vp: Vector2) -> void:

@@ -47,6 +47,7 @@ var hovered_index: int = -1
 var game_state: String = "title"
 var start_time: float = 0.0
 var clear_time: float = 0.0
+var _cleared_screen_start_time: float = 0.0   # "cleared" 状態に入った時刻（Zouクリア画面の入力ガード用）
 var _new_record_time: bool = false
 var _new_record_moves: bool = false
 var min_radius: float = 0.0
@@ -64,6 +65,12 @@ var _zou_roll_started: bool = false
 var _zou_roll_index: int = 0
 var _zou_roll_last_time: float = 0.0
 var _zou_ending_start: float = 0.0
+
+# --- Zouクリア後・タイムトライアル解放メッセージ（zou_ta_unlock状態） ---
+var _zou_ta_unlock_elapsed: float = 0.0
+var _zou_ta_unlock_overlay_alpha: float = 0.0
+var _zou_ta_unlock_msg_visible: bool = false
+const ZOU_TA_UNLOCK_FADE_DUR: float = 1.0
 
 # --- Circle Metrics (primary / group 1) ---
 var current_centroid: Vector2 = Vector2.ZERO
@@ -849,6 +856,8 @@ func _cursor_register_pad_activity() -> void:
 	if game_state == "playing":
 		playing_mouse_steers_player = false
 		input_handler.notify_pad_steering_active()
+	elif game_state == "title" or game_state == "menu":
+		input_handler.notify_pad_steering_active()
 
 
 ## マウス移動を input_handler へ渡すか（誤反応対策 B + C）。
@@ -910,7 +919,9 @@ func _update_player_hover() -> void:
 
 	if game_state == "menu":
 		if _menu_hover_holdoff_frames <= 0:
-			if menu_confirm_quit:
+			if _cursor_pad_override_hidden:
+				pass  # パッド操作中はマウスホバーによる選択行の上書きをスキップ
+			elif menu_confirm_quit:
 				var cx: float = vp.x / 2.0
 				var cbtn_w: float = 220.0
 				var cbtn_gap: float = cbtn_w / 2.0 + 30.0
@@ -1440,6 +1451,7 @@ func _check_clear() -> void:
 	if _snap_ok:
 		is_dragging = false
 		game_state = "cleared"
+		_cleared_screen_start_time = Time.get_ticks_msec() / 1000.0
 		input_handler.release_mouse_grab()
 		_stop_sfx_move()
 		clear_time = Time.get_ticks_msec() / 1000.0 - start_time
@@ -1803,9 +1815,10 @@ func _input(event: InputEvent) -> void:
 
 	if game_state == "title":
 		_konami_process_input(event)
-		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
-			_enter_stage_debug_screen()
-		elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
+		# 2026-07-18 無効化: F2キーでのステージデバッグ画面呼び出しは使用しないため停止
+		# if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2 and _debug_tools_enabled():
+		# 	_enter_stage_debug_screen()
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_S and _debug_tools_enabled():
 			_enter_results_screen_debug()
 		elif is_confirm:
 			ui_renderer.set_btn_press_with_callback(tr("TITLE_START"), func():
@@ -2034,7 +2047,42 @@ func _input(event: InputEvent) -> void:
 			_trigger_zou_ending_return()
 		return
 
+	if game_state == "zou_ta_unlock":
+		var is_dismiss_key: bool = (
+			event is InputEventKey and event.pressed and not event.echo
+			and (
+				event.keycode == KEY_ESCAPE
+				or event.keycode == KEY_ENTER
+				or event.keycode == KEY_KP_ENTER
+				or event.keycode == KEY_SPACE
+			)
+		)
+		var is_dismiss_pad: bool = (
+			event is InputEventJoypadButton and event.pressed
+			and (
+				event.button_index == JOY_BUTTON_A
+				or event.button_index == JOY_BUTTON_B
+				or event.button_index == JOY_BUTTON_X
+				or event.button_index == JOY_BUTTON_START
+			)
+		)
+		var is_dismiss_click: bool = (
+			event is InputEventMouseButton and event.pressed
+			and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT)
+		)
+		if (is_dismiss_key or is_dismiss_pad or is_dismiss_click) and _zou_ta_unlock_msg_visible:
+			StageSelectManager.mark_ta_unlock_announced()
+			_play_sfx(sfx_window_close)
+			game_state = "logo"
+			logo_start_time = Time.get_ticks_msec() / 1000.0
+			queue_redraw()
+		return
+
 	if game_state == "cleared":
+		# Zouステージのクリア画面（かかった秒数・回数表示）は表示直後1秒間、入力を無視する
+		if current_stage == StageSelectManager._zou_stage_idx \
+				and (Time.get_ticks_msec() / 1000.0 - _cleared_screen_start_time) < 1.0:
+			return
 		# デバッグ用: [S] でバランス調整画面を開く
 		if (
 			_debug_tools_enabled()
@@ -2090,16 +2138,17 @@ func _input(event: InputEvent) -> void:
 		return
 
 	# デバッグ用: [S] でバランス調整画面を開く（エディタからの実行時のみ。エクスポート版では無効）
-	if (
-		game_state == "playing"
-		and _debug_tools_enabled()
-		and event is InputEventKey
-		and event.pressed
-		and not event.echo
-		and event.keycode == KEY_S
-	):
-		_enter_play_balance_debug()
-		return
+	# 2026-07-18 無効化: プレイ中Sキーでのバランス調整画面呼び出しは使用しないため停止
+	# if (
+	# 	game_state == "playing"
+	# 	and _debug_tools_enabled()
+	# 	and event is InputEventKey
+	# 	and event.pressed
+	# 	and not event.echo
+	# 	and event.keycode == KEY_S
+	# ):
+	# 	_enter_play_balance_debug()
+	# 	return
 
 	# デバッグ用: [F1] で現在ステージを強制クリア（エディタからの実行時のみ。エクスポート版では無効）
 	if (
@@ -3519,7 +3568,10 @@ func _return_to_stage_select_preserve_bgm() -> void:
 	pause_active = false
 	pause_confirm_title = false
 	pause_retry_elapsed = -1.0
-	BGMManager.resume_stage_select()
+	if current_stage == StageSelectManager._zou_stage_idx:
+		BGMManager.play_ingame()
+	else:
+		BGMManager.resume_stage_select()
 	_play_sfx(sfx_window_close)
 	TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"))
 
@@ -3548,7 +3600,7 @@ func _advance_stage() -> void:
 			queue_redraw()
 		else:
 			# リプレイ: ステージセレクトへ
-			BGMManager.resume_stage_select()
+			BGMManager.play_ingame()
 			TransitionManager.play_triangle(func(): get_tree().change_scene_to_file("res://scenes/stage_select.tscn"), false)
 		return
 	# ステージセレクトへ戻る（クリア済み通知は _check_clear() で完了済み）
@@ -3559,16 +3611,11 @@ func _advance_stage() -> void:
 func _trigger_zou_ending_return() -> void:
 	if game_state != "zou_ending":
 		return
-	game_state = "zou_transition"
-	TransitionManager.play_triangle(func():
-		BGMManager.play_ingame()
-		get_tree().change_scene_to_file("res://scenes/stage_select.tscn")
-	)
-	if current_stage < GameConfig.get_max_stage_index():
-		_start_stage(current_stage + 1)
-	else:
-		game_state = "results"
-		queue_redraw()
+	game_state = "zou_ta_unlock"
+	_zou_ta_unlock_elapsed = 0.0
+	_zou_ta_unlock_overlay_alpha = 0.0
+	_zou_ta_unlock_msg_visible = false
+	queue_redraw()
 
 
 # =============================================================================
@@ -5710,6 +5757,14 @@ func _process(delta: float) -> void:
 	elif game_state == "zou_ending":
 		if Time.get_ticks_msec() / 1000.0 - _zou_ending_start >= 20.0:
 			_trigger_zou_ending_return()
+		queue_redraw()
+
+	elif game_state == "zou_ta_unlock":
+		if not _zou_ta_unlock_msg_visible:
+			_zou_ta_unlock_elapsed += delta
+			_zou_ta_unlock_overlay_alpha = clampf(_zou_ta_unlock_elapsed / ZOU_TA_UNLOCK_FADE_DUR, 0.0, 1.0)
+			if _zou_ta_unlock_elapsed >= ZOU_TA_UNLOCK_FADE_DUR:
+				_zou_ta_unlock_msg_visible = true
 		queue_redraw()
 
 

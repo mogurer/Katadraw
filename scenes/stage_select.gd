@@ -584,17 +584,18 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventJoypadButton and event.pressed:
 		_set_input_mode(1)
 
-	# --- Phase 1 動作確認用の一時デバッグキー（Phase 2でタイトルUI実装後に削除） ---
+	# --- Phase 1 動作確認用の一時デバッグキー ---
+	# 2026-07-18 無効化: Tキーでのタイムアタック即開始機能は使用しないため停止
 	# [T] キー: タイムアタックをステージ1から即開始する
-	if (
-		event is InputEventKey and event.pressed and not event.echo
-		and event.keycode == KEY_T
-		and (OS.has_feature("editor") or Engine.is_editor_hint())
-	):
-		StageSelectManager.time_attack_pending = true
-		StageSelectManager.pending_stage_id = 0
-		get_tree().change_scene_to_file("res://scenes/game.tscn")
-		return
+	# if (
+	# 	event is InputEventKey and event.pressed and not event.echo
+	# 	and event.keycode == KEY_T
+	# 	and (OS.has_feature("editor") or Engine.is_editor_hint())
+	# ):
+	# 	StageSelectManager.time_attack_pending = true
+	# 	StageSelectManager.pending_stage_id = 0
+	# 	get_tree().change_scene_to_file("res://scenes/game.tscn")
+	# 	return
 
 	# 最終ステージ演出中: Phase3入力のみ受け付け、他は全てブロック
 	if _final_directing:
@@ -645,16 +646,18 @@ func _input(event: InputEvent) -> void:
 			_update_popup_hover(event.position)
 
 	# [DEBUG] BGM演出プレビュー（B キー: ゾーンを順番にプレビュー）
-	if _is_debug() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_B:
-		_dbg_trigger_bgm_preview()
-		get_viewport().set_input_as_handled()
-		return
+	# 2026-07-18 無効化: Bキーでのプレビュー機能は使用しないため停止
+	# if _is_debug() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_B:
+	# 	_dbg_trigger_bgm_preview()
+	# 	get_viewport().set_input_as_handled()
+	# 	return
 
 	# [DEBUG] デバッグクリック処理（他のUIより先に処理）
-	if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		# SE選択パネルはCtrl押下中のみ受け付ける
-		if _ctrl_held and _handle_dbg_sfx_click(event.position):
-			return
+	# 2026-07-18 無効化: Ctrl+クリックでのSE設定変更機能は使用しないため停止
+	# if _is_debug() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	# 	# SE選択パネルはCtrl押下中のみ受け付ける
+	# 	if _ctrl_held and _handle_dbg_sfx_click(event.position):
+	# 		return
 
 	# タイトル戻り確認ポップアップ
 	if _esc_popup:
@@ -1182,8 +1185,9 @@ func _draw() -> void:
 		_draw_esc_popup(vp)
 
 	# [DEBUG] SE選択パネル（Ctrl押下中のみ画面中央に表示）
-	if _is_debug() and _ctrl_held and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
-		_draw_dbg_sfx_panel()
+	# 2026-07-18 無効化: Ctrl+クリックでのSE設定変更機能は使用しないため停止
+	# if _is_debug() and _ctrl_held and (DebugSFXConfig.in_count > 0 or DebugSFXConfig.out_count > 0):
+	# 	_draw_dbg_sfx_panel()
 
 	# 自キャラ（ポップアップ・SEパネル表示中のみ・最前面）
 	# ポップアップおよびSEパネルより後に描画することで最前面に表示する

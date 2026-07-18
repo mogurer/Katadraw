@@ -1,6 +1,8 @@
 ﻿keys,ja,en,zh_CN,zh_TW
 TITLE_NAME,KATA-DRAW,KATA-DRAW,KATA-DRAW,KATA-DRAW
 TITLE_START,ボタンを押すとスタート,Press a button to start,按下按钮开始,按下按鈕開始
+TA_UNLOCK_MESSAGE,タイムトライアルモードが解放されました,Time Trial mode has been unlocked!,计时挑战模式已解锁,計時挑戰模式已解鎖
+TA_UNLOCK_HINT,ボタンを押すと閉じます,Press a button to close,按下按钮关闭,按下按鈕關閉
 TITLE_COPYRIGHT,©2026 meseed-software,©2026 meseed-software,©2026 meseed-software,©2026 meseed-software
 RULES_MAIN,点を操作して、お手本に重ねましょう,Move the points to overlap the template,移动点，与示范图形重叠,移動點，與示範圖形重疊
 BTN_NEXT,つぎへ,Next,下一步,下一步
