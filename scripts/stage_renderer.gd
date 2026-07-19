@@ -35,20 +35,39 @@ func _init(game: Node2D, renderer: UIRenderer) -> void:
 
 func draw_stage_lines() -> void:
 	var n: int = _game.point_positions.size()
+	var n_corners: int = _game.stage_manager.get_corner_positions_world().size()
 	if _game.is_polygon_walk_order_active():
 		var ord: PackedInt32Array = _game.polygon_walk_order
 		for k in range(n):
 			var a: int = ord[k]
 			var b: int = ord[(k + 1) % n]
-			_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
+			var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(a, b, n_corners) else _renderer.LINE_WIDTH / 3.0
+			_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, w, true)
 		return
 	match _game.stage_type:
 		"triangle", "square", "rhombus", "hexagon", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			for i in range(n):
-				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
+				var b: int = (i + 1) % n
+				var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(i, b, n_corners) else _renderer.LINE_WIDTH / 3.0
+				_game.draw_line(_game.point_positions[i], _game.point_positions[b], _renderer.LINE_COLOR, w, true)
 		_:
 			for i in range(n):
-				_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], _renderer.LINE_COLOR, _renderer.LINE_WIDTH, true)
+				var b: int = (i + 1) % n
+				var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(i, b, n_corners) else _renderer.LINE_WIDTH / 3.0
+				_game.draw_line(_game.point_positions[i], _game.point_positions[b], _renderer.LINE_COLOR, w, true)
+
+
+func _is_kata_edge_correct(a: int, b: int, n_corners: int) -> bool:
+	if n_corners <= 0:
+		return false
+	var ih: InputHandler = _game.input_handler
+	if not ih.is_point_corner_snapped(a) or not ih.is_point_corner_snapped(b):
+		return false
+	var ca: int = ih.get_point_snap_corner_index(a)
+	var cb: int = ih.get_point_snap_corner_index(b)
+	if ca < 0 or cb < 0:
+		return false
+	return cb == (ca + 1) % n_corners or ca == (cb + 1) % n_corners
 
 
 func get_point_base_color(_idx: int) -> Color:
@@ -211,10 +230,15 @@ func draw_guide_proximity_reveal() -> void:
 		if n_corners < 2:
 			continue
 		var cp: Vector2 = shape_corners[ci] as Vector2
-		var cp_prev: Vector2 = shape_corners[(ci - 1 + n_corners) % n_corners] as Vector2
-		var cp_next: Vector2 = shape_corners[(ci + 1) % n_corners] as Vector2
-		_draw_guide_seg_full(cp_prev, cp, col, width, true, false, 0.5, 1.0)
-		_draw_guide_seg_full(cp, cp_next, col, width, false, true, 0.0, 0.5)
+		var ci_prev: int = (ci - 1 + n_corners) % n_corners
+		var ci_next: int = (ci + 1) % n_corners
+		var cp_prev: Vector2 = shape_corners[ci_prev] as Vector2
+		var cp_next: Vector2 = shape_corners[ci_next] as Vector2
+		# 隣の角も吸着済みなら中間地点で合流するのでフェードさせない
+		var prev_also_snapped: bool = snapped_corner_indices.has(ci_prev)
+		var next_also_snapped: bool = snapped_corner_indices.has(ci_next)
+		_draw_guide_seg_full(cp_prev, cp, col, width, not prev_also_snapped, false, 0.5, 1.0)
+		_draw_guide_seg_full(cp, cp_next, col, width, false, not next_also_snapped, 0.0, 0.5)
 
 	for cp: Vector2 in corner_markers:
 		_draw_guide_corner_marker(cp, col)

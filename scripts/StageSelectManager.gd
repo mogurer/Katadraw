@@ -7,7 +7,11 @@ extends Node
 enum StageState { LOCKED, UNLOCKED, CLEARED }
 
 const STAGE_COUNT := 50
-const _SAVE_PATH    := "user://stage_select_state.json"
+const _SAVE_PATH        := "user://stage_select_state.json"
+const _SAVE_PATH_TRIAL  := "user://stage_select_state_trial.json"
+
+static func _save_path() -> String:
+	return _SAVE_PATH_TRIAL if GameConfig.IS_TRIAL else _SAVE_PATH
 const _MANIFEST_PATH := "res://data/stage_select_manifest.json"
 
 const X_PITCH: float = 200.0  # ワールド座標のグリッドピッチ（調整可能）
@@ -274,15 +278,15 @@ func _save_states() -> void:
 	data["best_moves"] = best_m
 	data["unlocked_bgms"] = _unlocked_bgms
 	data["last_played_stage_id"] = last_played_stage_id
-	var f: FileAccess = FileAccess.open(_SAVE_PATH, FileAccess.WRITE)
+	var f: FileAccess = FileAccess.open(_save_path(), FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
 
 
 func _load_states() -> void:
-	if not FileAccess.file_exists(_SAVE_PATH):
+	if not FileAccess.file_exists(_save_path()):
 		return
-	var f: FileAccess = FileAccess.open(_SAVE_PATH, FileAccess.READ)
+	var f: FileAccess = FileAccess.open(_save_path(), FileAccess.READ)
 	if f == null:
 		return
 	var parsed: Variant = JSON.parse_string(f.get_as_text())

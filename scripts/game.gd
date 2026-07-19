@@ -78,6 +78,13 @@ var current_avg_radius: float = 0.0
 var current_circularity_error: float = 100.0
 var current_circularity: float = 0.0
 var current_smoothness_error: float = 100.0
+
+var _ripple_effects: Array = []
+var _ripple_next_spawn_time: float = 0.0
+const RIPPLE_THRESHOLD_PCT: float = 80.0
+const RIPPLE_INTERVAL_SEC: float = 3.0
+const RIPPLE_DURATION_SEC: float = 1.0
+const RIPPLE_MAX_RADIUS: float = 40.0
 var current_smoothness: float = 0.0
 
 # --- Progress Dwell Sampling ---
@@ -281,9 +288,7 @@ var config_index: int = 0  # 0=全画面/ウィンドウ,1=ウィンドウ解像
 var config_reset_hovered: bool = false
 var config_reset_confirm: bool = false
 var config_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
-var config_zou_reset_hovered: bool = false
-var config_zou_reset_confirm: bool = false
-var config_zou_reset_confirm_index: int = 1  # 0=はい, 1=いいえ
+var config_row6_reset_selected: bool = false  # config_index==6の行で RESET 側が選ばれているか（製品版のみ使用）
 ## コンフィグ画面レイアウト（ui_renderer._draw_config とヒット判定で共通）
 const CONFIG_MENU_BASE_Y_RATIO := 0.28
 const CONFIG_MENU_SPACING := 103.5
@@ -299,8 +304,6 @@ const CONFIG_RESET_BTN_FS := 28
 const CONFIG_RESET_BTN_W  := 130.0
 const CONFIG_RESET_BTN_MARGIN := 36.0
 ## STAGE60 ZOU トグルボタンのフォントサイズと幅（左下に単独配置、全クリア後のみ表示）
-const CONFIG_ZOU_RESET_BTN_FS := 22
-const CONFIG_ZOU_RESET_BTN_W  := 260.0
 ## コンフィグ 0〜3 行のホバー拡大（set_btn_hover / get_btn_scale と同一 ID）
 const CONFIG_ROW_BTN_IDS: Array[String] = [
 	"cfg_row_display_mode",
@@ -944,12 +947,6 @@ func _update_player_hover() -> void:
 			if _cursor_pad_override_hidden:
 				# パッド/キーボード操作中はマウスホバーによる選択行の上書きをスキップ
 				config_reset_hovered = false
-				config_zou_reset_hovered = false
-			elif config_zou_reset_confirm:
-				if pos.x < vp.x / 2.0:
-					config_zou_reset_confirm_index = 0
-				else:
-					config_zou_reset_confirm_index = 1
 			elif config_reset_confirm:
 				if pos.x < vp.x / 2.0:
 					config_reset_confirm_index = 0
@@ -971,11 +968,9 @@ func _update_player_hover() -> void:
 					var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)
 					if pos.y >= btn_cy - btn_h_act * 0.5 - 5.0 and pos.y <= btn_cy + btn_h_act * 0.5 + 5.0:
 						config_index = act_i
-				config_reset_hovered = get_config_reset_button_rect(vp).has_point(pos)
-				if StageSelectManager.all_cleared:
-					config_zou_reset_hovered = get_config_zou_reset_button_rect(vp).has_point(pos)
-				else:
-					config_zou_reset_hovered = false
+				config_reset_hovered = false
+				if config_index == 6 and not GameConfig.IS_TRIAL:
+					config_row6_reset_selected = get_config_reset_button_rect(vp).has_point(pos)
 		return
 
 	if game_state == "playing" and pause_active:
@@ -1431,6 +1426,78 @@ func _point_accuracy_alpha(idx: int) -> float:
 func _is_locked(idx: int) -> bool:
 	return stage_manager.is_locked(idx)
 
+## ステージ1〜3 の特殊仕様（自キャラ固定・正方形表示）の対象かどうか
+func _is_frozen_avatar_stage() -> bool:
+	return current_stage in [0, 1, 2]
+
+func _is_x_button_disabled_stage() -> bool:
+	return current_stage in [0, 1]
+
+func _is_a_button_disabled_stage() -> bool:
+	return current_stage == 2
+
+# --- ブロックされた操作を試みた時の自キャラ演出 ---
+var _frozen_avatar_blocked_active: bool = false
+var _frozen_avatar_return_start: float = -1.0
+const FROZEN_AVATAR_RETURN_DUR: float = 0.5
+const FROZEN_AVATAR_SHRINK_SCALE: float = 0.55
+
+## ステージ1〜3で、ブロックされた操作（固定中の移動・無効化ボタン）を試みているかを毎フレーム判定する。
+func _update_frozen_avatar_reject_state() -> void:
+	if not (game_state == "playing" and _is_frozen_avatar_stage()):
+		_frozen_avatar_blocked_active = false
+		_frozen_avatar_return_start = -1.0
+		return
+
+	var attempted: bool = false
+
+	# 移動試行の検知: マウス目標と自キャラ位置が離れていれば「動かそうとしている」
+	if input_handler.get_last_input_method() == "mouse":
+		if input_handler._mouse_target.distance_to(input_handler.get_player_position()) > 4.0:
+			attempted = true
+	# パッドスティックの入力
+	if absf(_ui_stick_lx) > 0.15 or absf(_ui_stick_ly) > 0.15:
+		attempted = true
+
+	# 無効化されているボタンの押下試行
+	if _is_x_button_disabled_stage():
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_joy_button_pressed(0, JOY_BUTTON_X):
+			attempted = true
+	if _is_a_button_disabled_stage():
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_joy_button_pressed(0, JOY_BUTTON_A):
+			attempted = true
+
+	if not attempted and _frozen_avatar_blocked_active:
+		_frozen_avatar_return_start = Time.get_ticks_msec() / 1000.0
+	_frozen_avatar_blocked_active = attempted
+
+
+func _update_ripple_effects() -> void:
+	if game_state != "playing" or current_circularity < RIPPLE_THRESHOLD_PCT:
+		_ripple_effects.clear()
+		_ripple_next_spawn_time = 0.0
+		return
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var alive: Array = []
+	for r in _ripple_effects:
+		if now - float(r.start_time) < RIPPLE_DURATION_SEC:
+			alive.append(r)
+	_ripple_effects = alive
+	if now >= _ripple_next_spawn_time:
+		_spawn_ripple_effects(now)
+		_ripple_next_spawn_time = now + RIPPLE_INTERVAL_SEC
+
+
+func _spawn_ripple_effects(now: float) -> void:
+	var ih: InputHandler = input_handler
+	var corners: Array = stage_manager.get_corner_positions_world()
+	for i in range(point_positions.size()):
+		if not ih.is_point_corner_snapped(i):
+			_ripple_effects.append({pos = point_positions[i], start_time = now})
+	for ci in range(corners.size()):
+		if not ih._snap_corner_occupant.has(ci):
+			_ripple_effects.append({pos = corners[ci] as Vector2, start_time = now})
+
 
 func _is_selected(idx: int) -> bool:
 	return idx in selected_indices
@@ -1689,9 +1756,14 @@ func _process_config_stick_navigation(delta: float) -> void:
 		queue_redraw()
 		return
 	var hx: int = _ui_menu_stick_horizontal_step(delta, lx)
-	if hx != 0 and config_index < 5:
-		_config_apply_main_horizontal(hx)
-		queue_redraw()
+	if hx != 0:
+		if config_index < 5:
+			_config_apply_main_horizontal(hx)
+			queue_redraw()
+		elif config_index == 6 and not GameConfig.IS_TRIAL:
+			config_row6_reset_selected = (hx > 0)
+			_play_sfx(sfx_click)
+			queue_redraw()
 
 
 func _debug_ui_stick_nav_poll_config(delta: float) -> void:
@@ -2320,44 +2392,6 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	var items_count: int = 8
 	var moved: bool = false
 
-	# ---------- STAGE60 RESET 確認ダイアログ ----------
-	if config_zou_reset_confirm:
-		var vp2: Vector2 = get_viewport_rect().size
-		var cbtn_gap: float = vp2.x * 0.10
-		var cbtn_cy: float = vp2.y * 0.60
-		var cbtn_w: float = vp2.x * 0.16
-
-		var is_back2: bool = (
-			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
-			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
-		)
-		if is_back2:
-			config_zou_reset_confirm = false
-			queue_redraw()
-			return
-
-		var do_confirm2: bool = is_confirm_key or is_confirm_pad
-		if is_confirm_click:
-			var cx: float = vp2.x / 2.0
-			var bh: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
-			var click_pos: Vector2 = input_handler.player_position
-			if click_pos.y >= cbtn_cy - bh / 2.0 and click_pos.y <= cbtn_cy + bh / 2.0:
-				if click_pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
-					config_zou_reset_confirm_index = 0
-					do_confirm2 = true
-				elif click_pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
-					config_zou_reset_confirm_index = 1
-					do_confirm2 = true
-		if do_confirm2:
-			if config_zou_reset_confirm_index == 0:
-				StageSelectManager.reset_zou_cleared()
-				_play_sfx(sfx_window_close)
-			else:
-				_play_sfx(sfx_window_close)
-			config_zou_reset_confirm = false
-			queue_redraw()
-		return
-
 	# ---------- RESET 確認ダイアログ ----------
 	if config_reset_confirm:
 		var vp2: Vector2 = get_viewport_rect().size
@@ -2406,8 +2440,6 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 	if is_back:
 		config_reset_hovered = false
 		config_reset_confirm = false
-		config_zou_reset_hovered = false
-		config_zou_reset_confirm = false
 		game_state = "menu"
 		_reset_ui_menu_stick_navigation()
 		queue_redraw()
@@ -2427,30 +2459,26 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 				_cursor_register_pad_activity()
 				_config_apply_main_horizontal(-1)
 				moved = true
+			elif config_index == 6 and not GameConfig.IS_TRIAL:
+				_cursor_register_pad_activity()
+				config_row6_reset_selected = false
+				_play_sfx(sfx_click)
+				moved = true
 		elif event.keycode == KEY_RIGHT:
 			if config_index < 5:
 				_cursor_register_pad_activity()
 				_config_apply_main_horizontal(1)
+				moved = true
+			elif config_index == 6 and not GameConfig.IS_TRIAL:
+				_cursor_register_pad_activity()
+				config_row6_reset_selected = true
+				_play_sfx(sfx_click)
 				moved = true
 
 	if is_confirm_click:
 		# RESET / STAGE60 RESET ボタンクリック（メインリストより先に判定）
 		var vp_r: Vector2 = get_viewport_rect().size
 		var click_pos: Vector2 = input_handler.player_position
-		if get_config_reset_button_rect(vp_r).has_point(click_pos):
-			config_reset_confirm = true
-			config_reset_confirm_index = 1
-			_play_sfx(sfx_window_open)
-			queue_redraw()
-			return
-		if StageSelectManager.all_cleared and get_config_zou_reset_button_rect(vp_r).has_point(click_pos):
-			if StageSelectManager.zou_cleared:
-				StageSelectManager.reset_zou_cleared()
-			else:
-				StageSelectManager.mark_zou_cleared()
-			_play_sfx(sfx_window_close)
-			queue_redraw()
-			return
 		var adj: Dictionary = _hit_config_value_arrows(click_pos)
 		if adj.get("ok", false):
 			config_index = int(adj["item"])
@@ -2465,6 +2493,8 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		var hit: Dictionary = _hit_config_item(input_handler.player_position)
 		if hit.get("ok", false):
 			config_index = int(hit["main"])
+			if hit.has("reset_side"):
+				config_row6_reset_selected = bool(hit["reset_side"])
 			do_confirm = true
 	if do_confirm and config_index == 5:
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_SE_SETTING"), func():
@@ -2475,19 +2505,23 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 		)
 		queue_redraw()
 	if do_confirm and config_index == 6:
-		ui_renderer.set_btn_press_with_callback(tr("CONFIG_CREDIT"), func():
-			TransitionManager.play_diagonal(func():
-				game_state = "credit"
-				queue_redraw()
+		if not GameConfig.IS_TRIAL and config_row6_reset_selected:
+			config_reset_confirm = true
+			config_reset_confirm_index = 1
+			_play_sfx(sfx_window_open)
+			queue_redraw()
+		else:
+			ui_renderer.set_btn_press_with_callback(tr("CONFIG_CREDIT"), func():
+				TransitionManager.play_diagonal(func():
+					game_state = "credit"
+					queue_redraw()
+				)
 			)
-		)
-		queue_redraw()
+			queue_redraw()
 	if do_confirm and config_index == 7:
 		ui_renderer.set_btn_press_with_callback(tr("CONFIG_BACK"), func():
 			config_reset_hovered = false
 			config_reset_confirm = false
-			config_zou_reset_hovered = false
-			config_zou_reset_confirm = false
 			TransitionManager.play_diagonal(func():
 				game_state = "menu"
 				_reset_ui_menu_stick_navigation()
@@ -3058,29 +3092,29 @@ func _hit_config_item(pos: Vector2) -> Dictionary:
 		var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)
 		if pos.y >= btn_cy - btn_h_act * 0.5 - 20.0 and pos.y <= btn_cy + btn_h_act * 0.5 and pos.x >= btn_cx - btn_half_w and pos.x <= btn_cx + btn_half_w:
 			return { "ok": true, "main": act_i }
+	# スタッフクレジットの右に添えた RESET ボタン（製品版のみ）
+	if not GameConfig.IS_TRIAL and get_config_reset_button_rect(vp).has_point(pos):
+		return { "ok": true, "main": 6, "reset_side": true }
 	return {}
 
 
-## コンフィグ右下の RESET ボタン領域を返す（描画・ヒット判定で共通）。
+## コンフィグ「スタッフクレジット」ボタン（config_index==6）の右に間隔を空けて添える
+## RESET ボタン領域を返す（描画・ヒット判定で共通。製品版のみ使用）。
 func get_config_reset_button_rect(vp: Vector2) -> Rect2:
 	var btn_h: float = (font.get_ascent(CONFIG_RESET_BTN_FS) + font.get_descent(CONFIG_RESET_BTN_FS)) * 1.5
+	var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
+	var btn_h_act: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+	var btn_base_cy: float = base_y + 5.0 * CONFIG_MENU_SPACING + btn_h_act * 0.5 - 16.0 + vp.y * 0.07 - 230.0
+	var credit_btn_cy: float = btn_base_cy + 1.0 * (btn_h_act + 25.0)  # btn_i=1 → act_i=6（スタッフクレジット行）
+	var credit_right_edge: float = vp.x / 2.0 + 350.0  # スタッフクレジットボタン（幅700、中央基準）の右端
 	return Rect2(
-		vp.x - CONFIG_RESET_BTN_W - CONFIG_RESET_BTN_MARGIN,
-		vp.y - btn_h - CONFIG_RESET_BTN_MARGIN,
+		credit_right_edge + CONFIG_RESET_BTN_MARGIN,
+		credit_btn_cy - btn_h * 0.5,
 		CONFIG_RESET_BTN_W,
 		btn_h
 	)
 
 
-## コンフィグ左下の STAGE60 RESET ボタン領域を返す（全クリア後のみ使用）。
-func get_config_zou_reset_button_rect(vp: Vector2) -> Rect2:
-	var btn_h: float = (font.get_ascent(CONFIG_ZOU_RESET_BTN_FS) + font.get_descent(CONFIG_ZOU_RESET_BTN_FS)) * 1.5
-	return Rect2(
-		CONFIG_RESET_BTN_MARGIN,
-		vp.y - btn_h - CONFIG_RESET_BTN_MARGIN,
-		CONFIG_ZOU_RESET_BTN_W,
-		btn_h
-	)
 
 
 ## 画面モード・カーソル制限・言語・BGM/SE の ◀▶ クリック。戻り値: ok, item(0〜4), delta(±1)
@@ -3460,10 +3494,10 @@ func _ta_update_hud_side() -> void:
 		_ta_hud_side = "left"
 
 
-## タイトルメニューの識別子配列を返す。zou_cleared のときのみ「タイムトライアル」を含む。
+## タイトルメニューの識別子配列を返す。zou_cleared のときのみ「タイムトライアル」を含む（体験版では常に非表示）。
 func _title_menu_items() -> Array[String]:
 	var items: Array[String] = ["game_start"]
-	if StageSelectManager.zou_cleared:
+	if StageSelectManager.zou_cleared and not GameConfig.IS_TRIAL:
 		items.append("time_attack")
 	items.append("config")
 	items.append("quit")
@@ -5574,7 +5608,9 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	_process_pad(delta)
+	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
+	_update_ripple_effects()
 	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":
 		var cur_move_grab: bool = _is_move_grab_active_for_count()
@@ -5733,7 +5769,7 @@ func _process(delta: float) -> void:
 		# moved=true のとき input_handler.update_drag_physics が既に発行済みのため重複しても問題ない。
 		var _has_particles: bool = not ui_renderer.spore_particles.is_empty()
 		_play_redraw_accum += delta
-		if _has_particles or hint_alpha > 0.001 or input_handler.grab_input_active:
+		if _has_particles or hint_alpha > 0.001 or input_handler.grab_input_active or not _ripple_effects.is_empty():
 			_play_redraw_accum = 0.0
 			queue_redraw()
 		elif _play_redraw_accum >= _PLAY_IDLE_REDRAW_INTERVAL:

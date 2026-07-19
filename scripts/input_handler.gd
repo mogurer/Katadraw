@@ -404,6 +404,11 @@ func reset_for_stage() -> void:
 
 func _reset_player_position() -> void:
 	player_position = _default_player_position()
+	if _game.current_stage == 0:
+		# ステージ1仮実装: 頂上とガイド中央の間（頂上寄り1/3）に配置
+		var apex_guide: Vector2 = _game.stage_manager.hud_guide_center + Vector2(0.0, -1.0) * _game.stage_manager.hud_guide_scale
+		var center_guide: Vector2 = _game.stage_manager.hud_guide_center
+		player_position = center_guide.lerp(apex_guide, 1.0 / 3.0)
 	_mouse_target = player_position
 	player_position_initialized = true
 
@@ -453,9 +458,13 @@ func handle_mouse_press(mouse: Vector2, button: int = MOUSE_BUTTON_LEFT) -> void
 		player_position_initialized = true
 	player_velocity = Vector2.ZERO
 	if button == MOUSE_BUTTON_LEFT:
+		if _game._is_a_button_disabled_stage():
+			return
 		player_force_repelling = true
 		player_force_attracting = false
 	elif button == MOUSE_BUTTON_RIGHT:
+		if _game._is_x_button_disabled_stage():
+			return
 		player_force_attracting = true
 		player_force_repelling = false
 	else:
@@ -670,8 +679,12 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 		return
 	_last_input_method = "pad"
 	if btn == JOY_BUTTON_A:
+		if pressed and _game._is_a_button_disabled_stage():
+			return
 		player_force_repelling = pressed
 	elif btn == JOY_BUTTON_X:
+		if pressed and _game._is_x_button_disabled_stage():
+			return
 		player_force_attracting = pressed
 	elif btn == JOY_BUTTON_B and pressed:
 		player_force_repelling = false
@@ -1031,6 +1044,8 @@ func process_mouse_lerp(delta: float) -> void:
 		return
 	if not player_position_initialized:
 		return
+	if (_game.game_state == "playing" or _game.game_state == "guide_countdown" or _game.game_state == "guide_info") and _game._is_frozen_avatar_stage():
+		return
 	player_position = player_position.lerp(_mouse_target, PLAYER_MOUSE_LERP * delta)
 	_clamp_player_to_viewport()
 	_refresh_hovered_point()
@@ -1206,7 +1221,10 @@ func process_pad(delta: float) -> void:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
 
-	player_position += player_velocity * delta
+	if _game.game_state == "playing" and _game._is_frozen_avatar_stage():
+		player_velocity = Vector2.ZERO
+	else:
+		player_position += player_velocity * delta
 	if wish.length_squared() > 0.0001 or player_velocity.length_squared() > 3600.0:
 		moved = true
 
@@ -1782,22 +1800,26 @@ func _polygon_edges_have_interior_intersection() -> bool:
 	var n_edges: int = edges.size()
 	if n_edges < 4:
 		return false
-	# 空間グリッド: 各辺を両端点の 3×3 近傍セルに登録し、同セル内ペアのみ判定する。
-	# O(N²=1770) → O(N×k)（k=セル内辺数）に削減。
+	# 空間グリッド: 各辺の「バウンディングボックスが重なる全セル」に登録し、同セル内ペアのみ判定する。
+	# （両端点近傍のみの登録だと、長い辺同士が両端から離れた場所で交差する場合に見落とすため、
+	#   辺全体を覆うセルに登録するよう変更した。O(N²=1770) → O(N×k)（k=セル内辺数）に削減。）
 	const CELL: float = 128.0
 	var inv: float = 1.0 / CELL
 	var grid: Dictionary = {}
 	for ei in range(n_edges):
 		var e: Vector2i = edges[ei]
-		for ep: Vector2 in [_game.point_positions[e.x], _game.point_positions[e.y]]:
-			var cx: int = int(floor(ep.x * inv))
-			var cy: int = int(floor(ep.y * inv))
-			for dy in range(-1, 2):
-				for dx in range(-1, 2):
-					var key: Vector2i = Vector2i(cx + dx, cy + dy)
-					if not grid.has(key):
-						grid[key] = []
-					(grid[key] as Array).append(ei)
+		var p1: Vector2 = _game.point_positions[e.x]
+		var p2: Vector2 = _game.point_positions[e.y]
+		var min_cx: int = int(floor(minf(p1.x, p2.x) * inv)) - 1
+		var max_cx: int = int(floor(maxf(p1.x, p2.x) * inv)) + 1
+		var min_cy: int = int(floor(minf(p1.y, p2.y) * inv)) - 1
+		var max_cy: int = int(floor(maxf(p1.y, p2.y) * inv)) + 1
+		for cy in range(min_cy, max_cy + 1):
+			for cx in range(min_cx, max_cx + 1):
+				var key: Vector2i = Vector2i(cx, cy)
+				if not grid.has(key):
+					grid[key] = []
+				(grid[key] as Array).append(ei)
 	# セル内ペアを確認（checked で重複ペアをスキップ）
 	var checked: Dictionary = {}
 	for cell_raw in grid.values():
@@ -3488,6 +3510,7 @@ func is_ax_combo_held() -> bool:
 	return ax_combo_held
 
 
+## ポイント point_idx をコーナー corner_idx に即座に強制スナップする（ステージ1仮実装用）
 ## コーナー吸着確定（_snap_point_state == 1）か
 func is_point_corner_snapped(idx: int) -> bool:
 	return idx < _snap_point_state.size() and _snap_point_state[idx] == 1

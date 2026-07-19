@@ -152,6 +152,9 @@ const _CAT_WIGGLE_DEG: float = 5.0
 const _CAT_WIGGLE_FREQ: float = 5.0
 var _cat_texture: Texture2D = null
 var _tri_deco_texture: Texture2D = null
+var _ig_esc_key_texture: Texture2D = null
+var _ig_start_pad_texture: Texture2D = null
+var _ig_hint_style: StyleBoxFlat = null
 
 # --- Animation state ---
 var _prev_state: String = ""          # 前フレームのゲームステート
@@ -235,6 +238,15 @@ func _init(game: Node2D) -> void:
 	_stage_renderer = StageRenderer.new(game, self)
 	_cat_texture = load("res://assets/UI/cat.png") as Texture2D
 	_tri_deco_texture = load("res://assets/UI/tri_deco.svg") as Texture2D
+	_ig_esc_key_texture   = load("res://assets/UI/esc_key.svg")   as Texture2D
+	_ig_start_pad_texture = load("res://assets/UI/start_pad.svg") as Texture2D
+	_ig_hint_style = StyleBoxFlat.new()
+	_ig_hint_style.bg_color = Color(0.263, 0.212, 0.278, 0.9)
+	_ig_hint_style.set_corner_radius_all(10)
+	_ig_hint_style.content_margin_left   = 10.0
+	_ig_hint_style.content_margin_right  = 10.0
+	_ig_hint_style.content_margin_top    = 6.0
+	_ig_hint_style.content_margin_bottom = 6.0
 
 
 func capture_stage_result_shapes() -> Dictionary:
@@ -1648,25 +1660,19 @@ func _draw_config(vp: Vector2) -> void:
 		var act_i: int = 5 + btn_i
 		var btn_cy: float = btn_base_cy + float(btn_i) * (btn_h_act + 25.0)  # 25px間隔
 		var is_sel_btn: bool = (act_i == _game.config_index)
-		_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, btn_cy), item_labels[act_i], BTN_FONT_SIZE, 1.0, not is_sel_btn, 700.0)
-
-	# --- RESET ボタン（右下固定） ---
-	var reset_rect: Rect2 = _game.get_config_reset_button_rect(vp)
-	var reset_center := Vector2(reset_rect.position.x + reset_rect.size.x * 0.5,
-								reset_rect.position.y + reset_rect.size.y * 0.5)
-	var is_reset_off: bool = not _game.config_reset_hovered
-	_draw_auto_button_with_shadow(reset_center, "RESET", _game.CONFIG_RESET_BTN_FS, 1.0, is_reset_off, _game.CONFIG_RESET_BTN_W)
-
-	# --- STAGE60 RESET ボタン（左下固定、全クリア後のみ表示）---
-	if StageSelectManager.all_cleared:
-		var zou_reset_rect: Rect2 = _game.get_config_zou_reset_button_rect(vp)
-		var zou_reset_center := Vector2(
-			zou_reset_rect.position.x + zou_reset_rect.size.x * 0.5,
-			zou_reset_rect.position.y + zou_reset_rect.size.y * 0.5
-		)
-		var is_zou_reset_off: bool = not _game.config_zou_reset_hovered
-		var zou_btn_label: String = "STAGE60: ZOU ON" if StageSelectManager.zou_cleared else "STAGE60: ZOU OFF"
-		_draw_auto_button_with_shadow(zou_reset_center, zou_btn_label, _game.CONFIG_ZOU_RESET_BTN_FS, 1.0, is_zou_reset_off, _game.CONFIG_ZOU_RESET_BTN_W)
+		if act_i == 6:
+			# スタッフクレジット本体はサイズ・位置とも変更しない
+			var credit_is_on: bool = is_sel_btn and not (not GameConfig.IS_TRIAL and _game.config_row6_reset_selected)
+			_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, btn_cy), item_labels[act_i], BTN_FONT_SIZE, 1.0, not credit_is_on, 700.0)
+			# その右に、間隔を空けて一回り小さい RESET ボタンを添える（製品版のみ）
+			if not GameConfig.IS_TRIAL:
+				var reset_rect: Rect2 = _game.get_config_reset_button_rect(vp)
+				var reset_center := Vector2(reset_rect.position.x + reset_rect.size.x * 0.5,
+											reset_rect.position.y + reset_rect.size.y * 0.5)
+				var reset_is_on: bool = is_sel_btn and _game.config_row6_reset_selected
+				_draw_auto_button_with_shadow(reset_center, "RESET", _game.CONFIG_RESET_BTN_FS, 1.0, not reset_is_on, _game.CONFIG_RESET_BTN_W)
+		else:
+			_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, btn_cy), item_labels[act_i], BTN_FONT_SIZE, 1.0, not is_sel_btn, 700.0)
 
 	# --- RESET 確認ダイアログ ---
 	if _game.config_reset_confirm:
@@ -1690,27 +1696,6 @@ func _draw_config(vp: Vector2) -> void:
 		_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
 		_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off,  cbtn_w)
 
-	# --- STAGE60 RESET 確認ダイアログ ---
-	if _game.config_zou_reset_confirm:
-		_game.draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.40))
-		var cx2: float = vp.x / 2.0
-		var cy2: float = vp.y / 2.0
-		var dlg_w2: float = 640.0
-		var dlg_h2: float = 260.0
-		var dlg_rect2 := Rect2(cx2 - dlg_w2 * 0.5, cy2 - dlg_h2 * 0.5, dlg_w2, dlg_h2)
-		_game.draw_rect(dlg_rect2.grow(4.0), Color(0.95, 0.19, 0.32))
-		_game.draw_rect(dlg_rect2, Color(1.0, 0.98, 0.96))
-		var msg_y2: float = cy2 - dlg_h2 * 0.12
-		_game.draw_string(_game.font, Vector2(cx2 - dlg_w2 * 0.5, msg_y2),
-			"STAGE60のクリアデータをリセットしますか？",
-			HORIZONTAL_ALIGNMENT_CENTER, dlg_w2, 28, LINE_COLOR)
-		var cbtn_gap2: float = vp.x * 0.10
-		var cbtn_cy2: float = vp.y * 0.60
-		var cbtn_w2: float = vp.x * 0.16
-		var yes_off2: bool = _game.config_zou_reset_confirm_index != 0
-		var no_off2: bool  = _game.config_zou_reset_confirm_index != 1
-		_draw_auto_button_with_shadow(Vector2(cx2 - cbtn_gap2, cbtn_cy2), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off2, cbtn_w2)
-		_draw_auto_button_with_shadow(Vector2(cx2 + cbtn_gap2, cbtn_cy2), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off2,  cbtn_w2)
 
 
 func _draw_se_config(vp: Vector2) -> void:
@@ -2637,6 +2622,9 @@ func _draw_game(vp: Vector2) -> void:
 			if not skip_fill_circle:
 				if _cat_phase != 0 and _game.input_handler.is_point_free(i):
 					_draw_cat_anim_point(pos, radius)
+				elif _game._is_locked(i):
+					var half: float = radius * 0.85
+					_game.draw_rect(Rect2(pos - Vector2(half, half), Vector2(half * 2.0, half * 2.0)), color)
 				else:
 					_game.draw_circle(pos, radius, color)
 			if i == focus_idx and _game.input_handler.grab_input_active:
@@ -2683,6 +2671,10 @@ func _draw_game(vp: Vector2) -> void:
 
 	if _game.game_state != "cleared" and not StageSelectManager.time_attack_active:
 		_draw_hud(vp)
+	if _game.game_state == "playing" and not StageSelectManager.time_attack_active:
+		_draw_ingame_menu_hint(vp)
+	if _game.game_state == "playing":
+		_draw_ripple_effects()
 
 	# 右スティック: ピンクのガイド線（先端へ向かってフェード）
 	_draw_right_stick_debug_line(vp)
@@ -2937,6 +2929,36 @@ func _draw_player_avatar() -> void:
 	elif repelling:
 		ring_color = Color(1.0, 0.55, 0.62, 0.14 * av_mul)
 		edge_color = Color(1.0, 0.82, 0.86, 0.28 * av_mul)
+	if _game._is_frozen_avatar_stage():
+		# ステージ1〜3: 正方形アバター（スケール・振動演出付き）
+		var sq_scale: float = 1.0
+		var jitter: Vector2 = Vector2.ZERO
+		if _game._frozen_avatar_blocked_active:
+			sq_scale = _game.FROZEN_AVATAR_SHRINK_SCALE
+			var t_now: float = Time.get_ticks_msec() / 1000.0
+			var jitter_amp: float = core_r * 0.18
+			jitter = Vector2(sin(t_now * 45.0), cos(t_now * 53.0)) * jitter_amp
+		elif _game._frozen_avatar_return_start >= 0.0:
+			var t_since: float = (Time.get_ticks_msec() / 1000.0) - _game._frozen_avatar_return_start
+			if t_since < _game.FROZEN_AVATAR_RETURN_DUR:
+				var rt: float = t_since / _game.FROZEN_AVATAR_RETURN_DUR
+				sq_scale = lerpf(_game.FROZEN_AVATAR_SHRINK_SCALE, 1.0, 1.0 - pow(1.0 - rt, 3.0))
+			else:
+				sq_scale = 1.0
+		var sq_center: Vector2 = center + jitter
+		if attracting or repelling:
+			_draw_player_force_influence_visual(sq_center, core_r, field_r, attracting, av_mul)
+		else:
+			var fr: float = field_r * sq_scale
+			_game.draw_rect(Rect2(sq_center - Vector2(fr, fr), Vector2(fr * 2.0, fr * 2.0)), ring_color)
+			_game.draw_rect(Rect2(sq_center - Vector2(fr, fr), Vector2(fr * 2.0, fr * 2.0)), edge_color, false, 2.0)
+		var outer_half: float = core_r * 1.45 * sq_scale
+		_game.draw_rect(Rect2(sq_center - Vector2(outer_half, outer_half), Vector2(outer_half, outer_half) * 2.0), Color(LINE_COLOR, 0.92 * av_mul))
+		var inner_half: float = core_r * sq_scale
+		_game.draw_rect(Rect2(sq_center - Vector2(inner_half, inner_half), Vector2(inner_half, inner_half) * 2.0), Color(LINE_COLOR, 1.0 * av_mul))
+		var core_half: float = core_r * 0.28 * sq_scale
+		_game.draw_rect(Rect2(sq_center - Vector2(core_half, core_half), Vector2(core_half, core_half) * 2.0), Color(1.0, 1.0, 1.0, 0.95 * av_mul))
+		return
 	if attracting or repelling:
 		_draw_player_force_influence_visual(center, core_r, field_r, attracting, av_mul)
 	else:
@@ -3055,6 +3077,43 @@ func _draw_right_stick_shoulder_corridor_guide(vp: Vector2) -> void:
 				Color(fill_rgb.r, fill_rgb.g, fill_rgb.b, a10),
 			])
 			_game.draw_polygon(pts, cols)
+
+
+func _draw_ripple_effects() -> void:
+	var now: float = Time.get_ticks_msec() / 1000.0
+	for r in _game._ripple_effects:
+		var t: float = (now - float(r.start_time)) / _game.RIPPLE_DURATION_SEC
+		if t < 0.0 or t > 1.0:
+			continue
+		var radius: float = lerpf(6.0, _game.RIPPLE_MAX_RADIUS, t)
+		var alpha: float = (1.0 - t) * 0.65
+		_game.draw_arc(r.pos, radius, 0.0, TAU, 32, Color(_game.GUIDE_COLOR, alpha), 2.0, true)
+
+
+## インゲーム左下: ポーズメニューを開くための操作ガイド
+func _draw_ingame_menu_hint(vp: Vector2) -> void:
+	if _game.pause_active or _ig_hint_style == null:
+		return
+	if not is_stage_intro_done():
+		return
+	var is_pad: bool = _game.input_handler.get_last_input_method() == "pad"
+	var icon_tex: Texture2D = _ig_start_pad_texture if is_pad else _ig_esc_key_texture
+	var hint_txt: String = tr("MENU_OPEN_HINT")
+	var hint_fs: int = 16
+	var icon_h: float = 26.0
+	var gap: float = 8.0
+	var icon_w: float = icon_h
+	if icon_tex != null:
+		icon_w = icon_h * float(icon_tex.get_width()) / float(icon_tex.get_height())
+	var txt_w: float = _game.font.get_string_size(hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs).x
+	var panel_w: float = _ig_hint_style.content_margin_left + icon_w + gap + txt_w + _ig_hint_style.content_margin_right
+	var panel_h: float = _ig_hint_style.content_margin_top + icon_h + _ig_hint_style.content_margin_bottom
+	var panel_x: float = 20.0
+	var panel_y: float = vp.y - 14.0 - panel_h
+	_game.draw_style_box(_ig_hint_style, Rect2(panel_x, panel_y, panel_w, panel_h))
+	if icon_tex != null:
+		_game.draw_texture_rect(icon_tex, Rect2(panel_x + _ig_hint_style.content_margin_left, panel_y + _ig_hint_style.content_margin_top, icon_w, icon_h), false)
+	_game.draw_string(_game.font, Vector2(panel_x + _ig_hint_style.content_margin_left + icon_w + gap, panel_y + panel_h - _ig_hint_style.content_margin_bottom - 2.0), hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs, Color(1.0, 0.9, 1.0, 0.9))
 
 
 func _draw_right_stick_debug_line(vp: Vector2) -> void:

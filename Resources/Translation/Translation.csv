@@ -71,6 +71,7 @@ CONFIG_MOUSE_CONFINE_ON,オン,On,开,開
 CONFIG_MOUSE_CONFINE_OFF,オフ,Off,关,關
 CONFIG_LANG_JA,日本語,日本語,日本語,日本語
 CONFIG_LANG_EN,English,English,English,English
+MENU_OPEN_HINT,メニューを開く,Open Menu,打开菜单,打開選單
 PAUSE_CLOSE,閉じる,Close,关闭,關閉
 PAUSE_RETRY,やりなおし,Retry,重试,重試
 PAUSE_TITLE,ステージをやめる,Quit Stage,放弃关卡,放棄關卡
