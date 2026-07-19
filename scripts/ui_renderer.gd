@@ -120,8 +120,8 @@ const STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX := 32.0  # 下端からのマージン
 # square（ピンク）／ hex（水色）のコーナー説明ループ用。0.5s 非表示→2.5s 拡大・位置共通
 const PLAYING_BTN_DEMO_PAUSE_SEC := 0.5
 const PLAYING_BTN_DEMO_EXPAND_SEC := 2.5
-const PLAYING_BTN_DEMO_CENTER_X_FRAC := 0.22
-const PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC := 0.18
+const PLAYING_BTN_DEMO_CENTER_X_FRAC := 0.14
+const PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC := 0.07
 const PLAYING_BTN_DEMO_MAX_R_FRAC := 0.22
 const PLAYING_BTN_DEMO_RING_ALPHA_MUL := 2.0  # 拡大する円の塗り・縁のみ濃く（ダミー自キャラは対象外）
 # --- Particle state ---
@@ -2033,7 +2033,7 @@ func _draw_stage_playing_press_hint(vp: Vector2) -> void:
 	)
 
 	# con_bt_non.png（505×624）上のマウス右側空きスペース中心（ローカル座標）
-	var gap_center_local := Vector2(351.0, 130.0)
+	var gap_center_local := Vector2(388.0, 130.0)
 	var bar_center: Vector2 = con_topleft + gap_center_local * con_scale
 
 	var bar_sz_raw: Vector2 = bar_tex.get_size()  # 141 x 37
