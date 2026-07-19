@@ -2018,25 +2018,32 @@ func _draw_stage_playing_press_hint(vp: Vector2) -> void:
 
 	var bar_tex: Texture2D = _get_ui_texture(ph2_name if use_base else ph1_name)
 	var hand_tex: Texture2D = _get_ui_texture("bt_hand.png")
-	if bar_tex == null or hand_tex == null:
+	var con_tex: Texture2D = _get_ui_texture("con_bt_non.png")
+	if bar_tex == null or hand_tex == null or con_tex == null:
 		return
 
+	# con_bt画像と同じスケール・原点を使う（マウス/パッドと同じ縮尺で配置するため）
 	var vmin: float = minf(vp.x, vp.y)
-	var ctrl_y: float = vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - vmin * STAGE_CTRL_HINT_SIZE_FRAC * 0.5
-	var bar_center := Vector2(
-		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
-		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
+	var max_side: float = vmin * STAGE_CTRL_HINT_SIZE_FRAC
+	var con_sz_raw: Vector2 = con_tex.get_size()  # 505 x 624
+	var con_scale: float = max_side / maxf(con_sz_raw.x, con_sz_raw.y)
+	var con_topleft: Vector2 = Vector2(
+		STAGE_CTRL_HINT_BL_MARGIN_LEFT_PX,
+		vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - con_sz_raw.y * con_scale
 	)
 
-	var bar_max_side: float = vmin * 0.05
-	var bar_sz_raw: Vector2 = bar_tex.get_size()
-	var bar_scale: float = bar_max_side / maxf(bar_sz_raw.x, bar_sz_raw.y)
-	var bar_h: float = bar_sz_raw.y * bar_scale
+	# con_bt_non.png（505×624）上のマウス右側空きスペース中心（ローカル座標）
+	var gap_center_local := Vector2(351.0, 130.0)
+	var bar_center: Vector2 = con_topleft + gap_center_local * con_scale
 
-	var hand_max_side: float = vmin * 0.06
-	var hand_sz_raw: Vector2 = hand_tex.get_size()
-	var hand_scale: float = hand_max_side / maxf(hand_sz_raw.x, hand_sz_raw.y)
-	var hand_h: float = hand_sz_raw.y * hand_scale
+	var bar_sz_raw: Vector2 = bar_tex.get_size()  # 141 x 37
+	var bar_h: float = bar_sz_raw.y * con_scale
+	var bar_max_side: float = maxf(bar_sz_raw.x, bar_sz_raw.y) * con_scale
+
+	var hand_sz_raw: Vector2 = hand_tex.get_size()  # 141 x 121
+	var hand_h: float = hand_sz_raw.y * con_scale
+	var hand_max_side: float = maxf(hand_sz_raw.x, hand_sz_raw.y) * con_scale
+
 	var not_pressed_y: float = bar_center.y - bar_h * 0.5 - hand_h * 0.5
 	var pressed_y: float = not_pressed_y + bar_h * 0.5
 	var target_y: float = not_pressed_y if use_base else pressed_y
