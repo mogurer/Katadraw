@@ -2067,11 +2067,13 @@ func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
 		return
 	if _game.stage_type != "square" and _game.stage_type != "triangle":
 		return
-	var cycle: float = PLAYING_BTN_DEMO_PAUSE_SEC + PLAYING_BTN_DEMO_EXPAND_SEC
+	var pause_sec: float = 0.5 if _game.stage_type == "triangle" else PLAYING_BTN_DEMO_PAUSE_SEC
+	var expand_sec: float = 0.5 if _game.stage_type == "triangle" else PLAYING_BTN_DEMO_EXPAND_SEC
+	var cycle: float = pause_sec + expand_sec
 	var t: float = fmod(Time.get_ticks_msec() * 0.001, cycle)
-	if t < PLAYING_BTN_DEMO_PAUSE_SEC:
+	if t < pause_sec:
 		return
-	var u: float = (t - PLAYING_BTN_DEMO_PAUSE_SEC) / PLAYING_BTN_DEMO_EXPAND_SEC
+	var u: float = (t - pause_sec) / expand_sec
 	var ease: float = u * u * (3.0 - 2.0 * u)
 	var vmin: float = minf(vp.x, vp.y)
 	var ctrl_y: float = vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - vmin * STAGE_CTRL_HINT_SIZE_FRAC * 0.5
@@ -2088,9 +2090,10 @@ func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
 	_game.draw_circle(center, ring_r, fill_c)
 	var edge_a: float = clampf(lerpf(0.55, 0.22, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
 	_game.draw_arc(center, ring_r, 0.0, TAU, 72, Color(0.98, 0.38, 0.55, edge_a), 3.5, true)
-	_game.draw_circle(center, core_r * 1.45, Color(LINE_COLOR,0.92 * dm))
-	_game.draw_circle(center, core_r, Color(LINE_COLOR,1.0 * dm))
-	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
+	var dummy_avatar_r: float = core_r * 0.25
+	_game.draw_circle(center, dummy_avatar_r * 1.45, Color(LINE_COLOR,0.92 * dm))
+	_game.draw_circle(center, dummy_avatar_r, Color(LINE_COLOR,1.0 * dm))
+	_game.draw_circle(center, dummy_avatar_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
 
 
 ## hexagon のみ: 「X で水色の引力圏」（square のピンクと同構成）
@@ -2123,9 +2126,10 @@ func _draw_hexagon_stage_attract_demo(vp: Vector2) -> void:
 	_game.draw_circle(center, ring_r, fill_c)
 	var edge_a: float = clampf(lerpf(0.52, 0.2, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
 	_game.draw_arc(center, ring_r, 0.0, TAU, 72, Color(0.42, 0.82, 1.0, edge_a), 3.5, true)
-	_game.draw_circle(center, core_r * 1.45, Color(LINE_COLOR,0.92 * dm))
-	_game.draw_circle(center, core_r, Color(LINE_COLOR,1.0 * dm))
-	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
+	var dummy_avatar_r: float = core_r * 0.25
+	_game.draw_circle(center, dummy_avatar_r * 1.45, Color(LINE_COLOR,0.92 * dm))
+	_game.draw_circle(center, dummy_avatar_r, Color(LINE_COLOR,1.0 * dm))
+	_game.draw_circle(center, dummy_avatar_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
 
 
 ## タイムアタックHUD用: 背景パネルなしでも視認できるよう、暗い縁取り＋明るい文字色で描画する。
@@ -3004,8 +3008,6 @@ func _draw_player_avatar() -> void:
 	var attracting: bool = _game.input_handler.is_player_attracting()
 	var repelling: bool = _game.input_handler.is_player_repelling()
 	var av_mul: float = 1.0
-	if _game.game_state == "playing" and _game.stage_type == "square":
-		av_mul = 0.5
 	var ring_color: Color = Color(0.58, 0.62, 0.74, 0.08 * av_mul)
 	var edge_color: Color = Color(0.88, 0.9, 0.97, 0.18 * av_mul)
 	if attracting:
