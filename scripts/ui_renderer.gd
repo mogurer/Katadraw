@@ -152,6 +152,13 @@ const _CAT_WIGGLE_DEG: float = 5.0
 const _CAT_WIGGLE_FREQ: float = 5.0
 var _cat_texture: Texture2D = null
 var _tri_deco_texture: Texture2D = null
+
+# --- ステージ1〜3: ボタン押下ヒント（手＋バー）のアニメーション状態 ---
+var _press_hint_current_y: float = 0.0
+var _press_hint_anim_from_y: float = 0.0
+var _press_hint_target_y: float = 0.0
+var _press_hint_anim_start: float = 0.0
+const PRESS_HINT_ANIM_DUR: float = 0.1
 var _ig_esc_key_texture: Texture2D = null
 var _ig_start_pad_texture: Texture2D = null
 var _ig_hint_style: StyleBoxFlat = null
@@ -1979,9 +1986,79 @@ func _draw_stage_playing_controller_hint(vp: Vector2) -> void:
 	_draw_ui_texture_centered(tex, center, max_side)
 
 
-## square のみ: X とは別に「A でピンクの斥力圏」説明ループ（0.5s 非表示→2.5s 拡大）
+## ステージ1〜3: ボタン押下ヒント（bt_hand.png + bt_A/X_ph1/2.png）。
+## 既存コントローラーヒントと同周期で ON/OFF を切り替え、手画像を上下にアニメーションさせる。
+## ダミー自キャラ＋波紋より奥（背面）に描画する（呼び出し順で制御）。
+func _draw_stage_playing_press_hint(vp: Vector2) -> void:
+	if _game.game_state != "playing" or StageSelectManager.time_attack_active:
+		return
+	var ph1_name: String
+	var ph2_name: String
+	var t_second: float
+	match _game.stage_type:
+		"triangle":
+			ph1_name = "bt_A_ph1.png"
+			ph2_name = "bt_A_ph2.png"
+			t_second = 0.5
+		"square":
+			ph1_name = "bt_A_ph1.png"
+			ph2_name = "bt_A_ph2.png"
+			t_second = 2.5
+		"hexagon":
+			ph1_name = "bt_X_ph1.png"
+			ph2_name = "bt_X_ph2.png"
+			t_second = 2.5
+		_:
+			return
+	var t_first: float = 0.5
+	var cycle: float = t_first + t_second
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var ph: float = fmod(now, cycle)
+	var use_base: bool = ph < t_first  # true=「押していない」（con_bt_non 相当）
+
+	var bar_tex: Texture2D = _get_ui_texture(ph2_name if use_base else ph1_name)
+	var hand_tex: Texture2D = _get_ui_texture("bt_hand.png")
+	if bar_tex == null or hand_tex == null:
+		return
+
+	var vmin: float = minf(vp.x, vp.y)
+	var ctrl_y: float = vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - vmin * STAGE_CTRL_HINT_SIZE_FRAC * 0.5
+	var bar_center := Vector2(
+		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
+		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
+	)
+
+	var bar_max_side: float = vmin * 0.05
+	var bar_sz_raw: Vector2 = bar_tex.get_size()
+	var bar_scale: float = bar_max_side / maxf(bar_sz_raw.x, bar_sz_raw.y)
+	var bar_h: float = bar_sz_raw.y * bar_scale
+
+	var hand_max_side: float = vmin * 0.06
+	var hand_sz_raw: Vector2 = hand_tex.get_size()
+	var hand_scale: float = hand_max_side / maxf(hand_sz_raw.x, hand_sz_raw.y)
+	var hand_h: float = hand_sz_raw.y * hand_scale
+	var not_pressed_y: float = bar_center.y - bar_h * 0.5 - hand_h * 0.5
+	var pressed_y: float = not_pressed_y + bar_h * 0.5
+	var target_y: float = not_pressed_y if use_base else pressed_y
+
+	if not is_equal_approx(_press_hint_target_y, target_y):
+		_press_hint_anim_from_y = _press_hint_current_y if _press_hint_anim_start > 0.0 else target_y
+		_press_hint_target_y = target_y
+		_press_hint_anim_start = now
+
+	var anim_t: float = clampf((now - _press_hint_anim_start) / PRESS_HINT_ANIM_DUR, 0.0, 1.0)
+	var eased_t: float = anim_t * anim_t * (3.0 - 2.0 * anim_t)
+	_press_hint_current_y = lerpf(_press_hint_anim_from_y, _press_hint_target_y, eased_t)
+
+	_draw_ui_texture_centered(bar_tex, bar_center, bar_max_side)
+	_draw_ui_texture_centered(hand_tex, Vector2(bar_center.x, _press_hint_current_y), hand_max_side)
+
+
+## square/triangle: 「A でピンクの斥力圏」説明ループ（0.5s 非表示→2.5s 拡大）
 func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
-	if _game.game_state != "playing" or _game.stage_type != "square" or StageSelectManager.time_attack_active:
+	if _game.game_state != "playing" or StageSelectManager.time_attack_active:
+		return
+	if _game.stage_type != "square" and _game.stage_type != "triangle":
 		return
 	var cycle: float = PLAYING_BTN_DEMO_PAUSE_SEC + PLAYING_BTN_DEMO_EXPAND_SEC
 	var t: float = fmod(Time.get_ticks_msec() * 0.001, cycle)
@@ -2652,7 +2729,8 @@ func _draw_game(vp: Vector2) -> void:
 	if _game.game_state == "playing" and GameConfig.USE_SCREEN_HUD_GUIDE:
 		_stage_renderer.draw_guide_proximity_reveal()
 
-	# square: A 斥力（ピンク）／hex: X 引力（水色）。左・コントロよりやや上
+	# ステージ1〜3: ボタン押下ヒント（奥）→ ダミー自キャラ＋波紋（手前）の順で描画
+	_draw_stage_playing_press_hint(vp)
 	_draw_square_stage_repulse_demo(vp)
 	_draw_hexagon_stage_attract_demo(vp)
 	_draw_ta_hud(vp)
