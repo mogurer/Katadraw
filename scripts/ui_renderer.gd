@@ -2061,19 +2061,15 @@ func _draw_stage_playing_press_hint(vp: Vector2) -> void:
 	_draw_ui_texture_centered(hand_tex, Vector2(bar_center.x, _press_hint_current_y), hand_max_side)
 
 
-## square/triangle: 「A でピンクの斥力圏」説明ループ（0.5s 非表示→2.5s 拡大）
+## square のみ: 「A でピンクの斥力圏」説明ループ（0.5s 非表示→2.5s 拡大）
 func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
-	if _game.game_state != "playing" or StageSelectManager.time_attack_active:
+	if _game.game_state != "playing" or _game.stage_type != "square" or StageSelectManager.time_attack_active:
 		return
-	if _game.stage_type != "square" and _game.stage_type != "triangle":
-		return
-	var pause_sec: float = 0.5 if _game.stage_type == "triangle" else PLAYING_BTN_DEMO_PAUSE_SEC
-	var expand_sec: float = 0.5 if _game.stage_type == "triangle" else PLAYING_BTN_DEMO_EXPAND_SEC
-	var cycle: float = pause_sec + expand_sec
+	var cycle: float = PLAYING_BTN_DEMO_PAUSE_SEC + PLAYING_BTN_DEMO_EXPAND_SEC
 	var t: float = fmod(Time.get_ticks_msec() * 0.001, cycle)
-	if t < pause_sec:
+	if t < PLAYING_BTN_DEMO_PAUSE_SEC:
 		return
-	var u: float = (t - pause_sec) / expand_sec
+	var u: float = (t - PLAYING_BTN_DEMO_PAUSE_SEC) / PLAYING_BTN_DEMO_EXPAND_SEC
 	var ease: float = u * u * (3.0 - 2.0 * u)
 	var vmin: float = minf(vp.x, vp.y)
 	var ctrl_y: float = vp.y - STAGE_CTRL_HINT_BL_MARGIN_BOTTOM_PX - vmin * STAGE_CTRL_HINT_SIZE_FRAC * 0.5
@@ -2081,7 +2077,7 @@ func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
 		vp.x * PLAYING_BTN_DEMO_CENTER_X_FRAC,
 		ctrl_y - vmin * PLAYING_BTN_DEMO_ABOVE_CONTROLLER_FRAC
 	)
-	var dm: float = 0.5  # 説明用ダミーは通常の 50% の不透明度
+	var dm: float = 0.5
 	var core_r: float = InputHandler.PLAYER_RADIUS
 	var max_r: float = vmin * PLAYING_BTN_DEMO_MAX_R_FRAC
 	var ring_r: float = lerpf(core_r * 1.25, max_r, ease)
@@ -2090,10 +2086,9 @@ func _draw_square_stage_repulse_demo(vp: Vector2) -> void:
 	_game.draw_circle(center, ring_r, fill_c)
 	var edge_a: float = clampf(lerpf(0.55, 0.22, ease) * dm * PLAYING_BTN_DEMO_RING_ALPHA_MUL, 0.0, 1.0)
 	_game.draw_arc(center, ring_r, 0.0, TAU, 72, Color(0.98, 0.38, 0.55, edge_a), 3.5, true)
-	var dummy_avatar_r: float = core_r * 0.25
-	_game.draw_circle(center, dummy_avatar_r * 1.45, Color(LINE_COLOR,0.92 * dm))
-	_game.draw_circle(center, dummy_avatar_r, Color(LINE_COLOR,1.0 * dm))
-	_game.draw_circle(center, dummy_avatar_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
+	_game.draw_circle(center, core_r * 1.45, Color(LINE_COLOR,0.92 * dm))
+	_game.draw_circle(center, core_r, Color(LINE_COLOR,1.0 * dm))
+	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * dm))
 
 
 ## hexagon のみ: 「X で水色の引力圏」（square のピンクと同構成）
