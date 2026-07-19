@@ -2731,10 +2731,7 @@ func get_distance_to_hint_guide_outline(p: Vector2) -> float:
 	return best
 
 
-func is_locked(idx: int) -> bool:
-	# ステージ1（正三角形）の下辺2ポイント（KATA index 1, 2）を固定する仮実装。
-	if current_stage == 0 and (idx == 1 or idx == 2):
-		return true
+func is_locked(_idx: int) -> bool:
 	return false
 
 

@@ -1044,7 +1044,11 @@ func process_mouse_lerp(delta: float) -> void:
 		return
 	if not player_position_initialized:
 		return
-	if (_game.game_state == "playing" or _game.game_state == "guide_countdown" or _game.game_state == "guide_info") and _game._is_frozen_avatar_stage():
+	if _game.game_state == "guide_countdown" and _game.current_stage in [0, 1, 2]:
+		return
+	if _game.game_state == "guide_info" and _game.current_stage in [0, 1, 2]:
+		return
+	if _game.game_state == "playing" and not _game.pause_active and _game.current_stage in [0, 1, 2]:
 		return
 	player_position = player_position.lerp(_mouse_target, PLAYER_MOUSE_LERP * delta)
 	_clamp_player_to_viewport()
@@ -1221,7 +1225,7 @@ func process_pad(delta: float) -> void:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
 
-	if _game.game_state == "playing" and _game._is_frozen_avatar_stage():
+	if _game.game_state == "playing" and not _game.pause_active and _game.current_stage in [0, 1, 2]:
 		player_velocity = Vector2.ZERO
 	else:
 		player_position += player_velocity * delta

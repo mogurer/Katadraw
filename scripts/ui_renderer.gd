@@ -2600,7 +2600,7 @@ func _draw_game(vp: Vector2) -> void:
 				and d_outline <= InputHandler.GUIDE_ATTRACT_FREE_EDGE_DIST_PX
 			)
 			var skip_fill_circle: bool = false
-			if _game._is_locked(i):
+			if _game._is_stage1_fixed_point(i):
 				color = Color(0.40, 0.33, 0.38, 0.5)
 				radius = r_guide
 			elif on_guide_outline and not (_cat_phase != 0 and _game.input_handler.is_point_free(i)):
@@ -2622,9 +2622,9 @@ func _draw_game(vp: Vector2) -> void:
 			if not skip_fill_circle:
 				if _cat_phase != 0 and _game.input_handler.is_point_free(i):
 					_draw_cat_anim_point(pos, radius)
-				elif _game._is_locked(i):
+				elif _game._is_stage1_fixed_point(i):
 					var half: float = radius * 0.85
-					_game.draw_rect(Rect2(pos - Vector2(half, half), Vector2(half * 2.0, half * 2.0)), color)
+					_game.draw_rect(Rect2(pos - Vector2(half, half), Vector2(half * 2.0, half * 2.0)), Color(0.40, 0.33, 0.38, 0.9))
 				else:
 					_game.draw_circle(pos, radius, color)
 			if i == focus_idx and _game.input_handler.grab_input_active:

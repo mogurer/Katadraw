@@ -1428,7 +1428,10 @@ func _is_locked(idx: int) -> bool:
 
 ## ステージ1〜3 の特殊仕様（自キャラ固定・正方形表示）の対象かどうか
 func _is_frozen_avatar_stage() -> bool:
-	return current_stage in [0, 1, 2]
+	return game_state == "playing" and not pause_active and current_stage in [0, 1, 2]
+
+func _is_stage1_fixed_point(idx: int) -> bool:
+	return game_state == "playing" and current_stage == 0 and (idx == 1 or idx == 2)
 
 func _is_x_button_disabled_stage() -> bool:
 	return current_stage in [0, 1]
@@ -1451,9 +1454,9 @@ func _update_frozen_avatar_reject_state() -> void:
 
 	var attempted: bool = false
 
-	# 移動試行の検知: マウス目標と自キャラ位置が離れていれば「動かそうとしている」
+	# 移動試行の検知: マウスが実際に動いているか（速度）を見る
 	if input_handler.get_last_input_method() == "mouse":
-		if input_handler._mouse_target.distance_to(input_handler.get_player_position()) > 4.0:
+		if Input.get_last_mouse_velocity().length() > 40.0:
 			attempted = true
 	# パッドスティックの入力
 	if absf(_ui_stick_lx) > 0.15 or absf(_ui_stick_ly) > 0.15:
@@ -1470,6 +1473,18 @@ func _update_frozen_avatar_reject_state() -> void:
 	if not attempted and _frozen_avatar_blocked_active:
 		_frozen_avatar_return_start = Time.get_ticks_msec() / 1000.0
 	_frozen_avatar_blocked_active = attempted
+
+
+func _enforce_stage1_fixed_points() -> void:
+	if game_state != "playing" or current_stage != 0:
+		return
+	var corners: Array = stage_manager.get_corner_positions_world()
+	if corners.size() < 3:
+		return
+	if point_positions.size() > 1:
+		point_positions[1] = corners[1]
+	if point_positions.size() > 2:
+		point_positions[2] = corners[2]
 
 
 func _update_ripple_effects() -> void:
@@ -5610,6 +5625,7 @@ func _process(delta: float) -> void:
 	_process_pad(delta)
 	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
+	_enforce_stage1_fixed_points()
 	_update_ripple_effects()
 	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":
