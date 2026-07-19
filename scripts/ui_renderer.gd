@@ -3045,11 +3045,13 @@ func _draw_player_avatar() -> void:
 	if repelling:
 		var repel_prog: float = _game.input_handler.get_repel_charge_progress()
 		if repel_prog > 0.0:
-			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, repel_prog, Color(0.95, 0.19, 0.32, 0.85))
+			var repel_color := Color(PLAYER_FORCE_FIELD_FILL_REPEL.r, PLAYER_FORCE_FIELD_FILL_REPEL.g, PLAYER_FORCE_FIELD_FILL_REPEL.b, 0.85)
+			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, repel_prog, repel_color)
 	elif attracting:
 		var attract_prog: float = _game.input_handler.get_attract_charge_progress()
 		if attract_prog > 0.0:
-			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, attract_prog, Color(0.2, 0.56, 1.0, 0.85))
+			var attract_color := Color(PLAYER_FORCE_FIELD_FILL_ATTRACT.r, PLAYER_FORCE_FIELD_FILL_ATTRACT.g, PLAYER_FORCE_FIELD_FILL_ATTRACT.b, 0.85)
+			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, attract_prog, attract_color)
 
 
 func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:
