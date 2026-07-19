@@ -2715,18 +2715,11 @@ func _draw_game(vp: Vector2) -> void:
 
 		_draw_spore_particles()
 
-	# 3. 実現率（最上層）: 掴み中は常に / 掴まないでも一致度が動いた直後。自キャラのやや右上
+	# 実現率の内部トラッキングは他機能（波紋エフェクトの80%判定等）で使うため維持する。
+	# 画面上へのパーセンテージ表示自体は撤去した。
 	if _game.game_state == "playing":
 		var circ_tracked: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
 		_repro_rate_float_on_metric(circ_tracked)
-	if _game.game_state == "playing" and _game.input_handler.has_player_avatar() and (
-		_game.input_handler.grab_input_active or _repro_rate_should_show_temporary()
-	):
-		var pt: Vector2 = _game.input_handler.get_player_position()
-		var disp_val: float = _repro_get_display_value()
-		var rate_text: String = "%.1f%%" % disp_val
-		var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(disp_val)
-		_draw_realization_rate_with_glow(pt + REPRO_RATE_OFFSET_FROM_PLAYER, rate_text, rate_color)
 
 	# イントロ演出のtransformをリセット（HUDはスケーリングしない）
 	if intro_scale != 1.0:
@@ -2993,6 +2986,21 @@ func _draw_discharge_lightning_between(
 		_game.draw_line(from_p, to_p, Color(bolt_rgb.r, bolt_rgb.g, bolt_rgb.b, 0.55 * branch_fade), 1.5, true)
 
 
+func _draw_charge_gauge(center: Vector2, radius: float, progress: float, color: Color) -> void:
+	var p: float = clampf(progress, 0.0, 1.0)
+	if p <= 0.0:
+		return
+	var start_angle: float = -PI / 2.0
+	var end_angle: float = start_angle + TAU * p
+	var segments: int = maxi(2, int(64.0 * p))
+	var points := PackedVector2Array()
+	points.append(center)
+	for i in range(segments + 1):
+		var a: float = lerpf(start_angle, end_angle, float(i) / float(segments))
+		points.append(center + Vector2(cos(a), sin(a)) * radius)
+	_game.draw_colored_polygon(points, color)
+
+
 func _draw_player_avatar() -> void:
 	if not _game.input_handler.has_player_avatar():
 		return
@@ -3034,6 +3042,14 @@ func _draw_player_avatar() -> void:
 	_game.draw_circle(draw_center, core_r * av_scale, Color(LINE_COLOR, 1.0 * av_mul))
 	_game.draw_arc(draw_center, core_r * 0.72 * av_scale, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7 * av_mul), 2.5)
 	_game.draw_circle(draw_center, core_r * 0.28 * av_scale, Color(1.0, 1.0, 1.0, 0.95 * av_mul))
+	if repelling:
+		var repel_prog: float = _game.input_handler.get_repel_charge_progress()
+		if repel_prog > 0.0:
+			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, repel_prog, Color(0.95, 0.19, 0.32, 0.85))
+	elif attracting:
+		var attract_prog: float = _game.input_handler.get_attract_charge_progress()
+		if attract_prog > 0.0:
+			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, attract_prog, Color(0.2, 0.56, 1.0, 0.85))
 
 
 func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:

@@ -299,6 +299,18 @@ var _empty_repulse_stationary_ms: float = 0.0
 var _empty_attract_stationary_ms: float = 0.0
 var _empty_repulse_radius_bonus: float = 0.0
 var _empty_attract_radius_bonus: float = 0.0
+
+func get_repel_charge_progress() -> float:
+	var max_charge_ms: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
+	if max_charge_ms <= 0.0:
+		return 0.0
+	return clampf(_empty_repulse_stationary_ms / max_charge_ms, 0.0, 1.0)
+
+func get_attract_charge_progress() -> float:
+	var max_charge_ms: float = float(EMPTY_FORCE_RADIUS_TICK_CAP - 1) * float(EMPTY_FORCE_RADIUS_TICK_MS)
+	if max_charge_ms <= 0.0:
+		return 0.0
+	return clampf(_empty_attract_stationary_ms / max_charge_ms, 0.0, 1.0)
 ## ideal_points ドリフト: プレイヤーが離れた後も物理ループを継続する残り時間（秒）
 var _ideal_drift_timer: float = 0.0
 var _prev_player_force_active: bool = false
