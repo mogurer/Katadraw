@@ -81,10 +81,17 @@ var current_smoothness_error: float = 100.0
 
 var _ripple_effects: Array = []
 var _ripple_next_spawn_time: float = 0.0
+var _ripple_armed: bool = false
 const RIPPLE_THRESHOLD_PCT: float = 80.0
 const RIPPLE_INTERVAL_SEC: float = 3.0
 const RIPPLE_DURATION_SEC: float = 1.0
 const RIPPLE_MAX_RADIUS: float = 40.0
+var _snap_count_raw_last: int = -1
+var _snap_count_raw_change_time: float = -1.0
+var _snap_count_confirmed: int = -1
+var _snap_count_stable_since: float = -1.0
+const SNAP_COUNT_DEBOUNCE_SEC: float = 1.0
+const RIPPLE_STAGNATION_SEC: float = 10.0
 var current_smoothness: float = 0.0
 
 # --- Progress Dwell Sampling ---
@@ -1477,19 +1484,30 @@ func _enforce_stage1_fixed_points() -> void:
 
 
 func _update_ripple_effects() -> void:
-	if game_state != "playing" or current_circularity < RIPPLE_THRESHOLD_PCT:
+	if game_state != "playing":
+		_ripple_armed = false
 		_ripple_effects.clear()
 		_ripple_next_spawn_time = 0.0
 		return
 	var now: float = Time.get_ticks_msec() / 1000.0
+	var is_stagnant: bool = (
+		_snap_count_stable_since >= 0.0
+		and now - _snap_count_stable_since >= RIPPLE_STAGNATION_SEC
+	)
+	if is_stagnant:
+		if not _ripple_armed:
+			_ripple_armed = true
+			_ripple_next_spawn_time = now
+		if now >= _ripple_next_spawn_time:
+			_spawn_ripple_effects(now)
+			_ripple_next_spawn_time = now + RIPPLE_INTERVAL_SEC
+	else:
+		_ripple_armed = false
 	var alive: Array = []
 	for r in _ripple_effects:
 		if now - float(r.start_time) < RIPPLE_DURATION_SEC:
 			alive.append(r)
 	_ripple_effects = alive
-	if now >= _ripple_next_spawn_time:
-		_spawn_ripple_effects(now)
-		_ripple_next_spawn_time = now + RIPPLE_INTERVAL_SEC
 
 
 func _spawn_ripple_effects(now: float) -> void:
@@ -1497,10 +1515,31 @@ func _spawn_ripple_effects(now: float) -> void:
 	var corners: Array = stage_manager.get_corner_positions_world()
 	for i in range(point_positions.size()):
 		if not ih.is_point_corner_snapped(i):
-			_ripple_effects.append({pos = point_positions[i], start_time = now})
+			_ripple_effects.append({kind = "point", idx = i, start_time = now, color = ui_renderer.POINT_COLOR})
 	for ci in range(corners.size()):
 		if not ih._snap_corner_occupant.has(ci):
-			_ripple_effects.append({pos = corners[ci] as Vector2, start_time = now})
+			_ripple_effects.append({kind = "corner", pos = corners[ci] as Vector2, start_time = now, color = GUIDE_COLOR})
+
+
+func _update_snap_count_tracking() -> void:
+	if game_state != "playing":
+		_snap_count_raw_last = -1
+		_snap_count_raw_change_time = -1.0
+		_snap_count_confirmed = -1
+		_snap_count_stable_since = -1.0
+		return
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var raw_count: int = 0
+	for i in range(point_positions.size()):
+		if input_handler.is_point_corner_snapped(i):
+			raw_count += 1
+	if raw_count != _snap_count_raw_last:
+		_snap_count_raw_last = raw_count
+		_snap_count_raw_change_time = now
+	if _snap_count_raw_change_time >= 0.0 and now - _snap_count_raw_change_time >= SNAP_COUNT_DEBOUNCE_SEC:
+		if _snap_count_confirmed != _snap_count_raw_last:
+			_snap_count_confirmed = _snap_count_raw_last
+			_snap_count_stable_since = now
 
 
 func _is_selected(idx: int) -> bool:
@@ -5615,6 +5654,7 @@ func _process(delta: float) -> void:
 	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
 	_enforce_stage1_fixed_points()
+	_update_snap_count_tracking()
 	_update_ripple_effects()
 	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":

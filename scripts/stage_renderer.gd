@@ -225,16 +225,22 @@ func draw_guide_proximity_reveal() -> void:
 				if ih.is_point_corner_snapped(a) and ih.is_point_corner_snapped(b):
 					var ca: int = ih.get_point_snap_corner_index(a)
 					var cb: int = ih.get_point_snap_corner_index(b)
-					if ca >= 0 and cb == (ca + 1) % n_corners:
-						hide_guide_seg_after[ca] = true
+					if ca >= 0 and cb >= 0:
+						if cb == (ca + 1) % n_corners:
+							hide_guide_seg_after[ca] = true
+						elif cb == (ca - 1 + n_corners) % n_corners:
+							hide_guide_seg_after[cb] = true
 		else:
 			for i2 in range(n_kata):
 				var j: int = (i2 + 1) % n_kata
 				if ih.is_point_corner_snapped(i2) and ih.is_point_corner_snapped(j):
 					var ca2: int = ih.get_point_snap_corner_index(i2)
 					var cb2: int = ih.get_point_snap_corner_index(j)
-					if ca2 >= 0 and cb2 == (ca2 + 1) % n_corners:
-						hide_guide_seg_after[ca2] = true
+					if ca2 >= 0 and cb2 >= 0:
+						if cb2 == (ca2 + 1) % n_corners:
+							hide_guide_seg_after[ca2] = true
+						elif cb2 == (ca2 - 1 + n_corners) % n_corners:
+							hide_guide_seg_after[cb2] = true
 
 	var corner_markers: Array[Vector2] = []
 	var rsq: float = _REVEAL_RADIUS * _REVEAL_RADIUS

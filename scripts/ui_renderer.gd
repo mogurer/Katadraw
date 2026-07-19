@@ -3169,9 +3169,18 @@ func _draw_ripple_effects() -> void:
 		var t: float = (now - float(r.start_time)) / _game.RIPPLE_DURATION_SEC
 		if t < 0.0 or t > 1.0:
 			continue
+		var pos: Vector2
+		if r.get("kind", "corner") == "point":
+			var idx: int = int(r.idx)
+			if idx < 0 or idx >= _game.point_positions.size():
+				continue
+			pos = _game.point_positions[idx]
+		else:
+			pos = r.pos
+		var col: Color = r.get("color", _game.GUIDE_COLOR)
 		var radius: float = lerpf(6.0, _game.RIPPLE_MAX_RADIUS, t)
 		var alpha: float = (1.0 - t) * 0.65
-		_game.draw_arc(r.pos, radius, 0.0, TAU, 32, Color(_game.GUIDE_COLOR, alpha), 2.0, true)
+		_game.draw_arc(pos, radius, 0.0, TAU, 32, Color(col.r, col.g, col.b, alpha), 2.0, true)
 
 
 ## インゲーム左下: ポーズメニューを開くための操作ガイド
