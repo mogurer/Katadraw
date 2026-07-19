@@ -214,6 +214,28 @@ func draw_guide_proximity_reveal() -> void:
 			continue
 		snapped_corner_indices[ci] = true
 
+	# 正しい順番で結ばれているKATA辺に対応するコーナー区間（ci→ci+1）を求める
+	var hide_guide_seg_after: Dictionary = {}
+	if n_corners > 0:
+		if _game.is_polygon_walk_order_active():
+			var ord: PackedInt32Array = _game.polygon_walk_order
+			for k in range(n_kata):
+				var a: int = ord[k]
+				var b: int = ord[(k + 1) % n_kata]
+				if ih.is_point_corner_snapped(a) and ih.is_point_corner_snapped(b):
+					var ca: int = ih.get_point_snap_corner_index(a)
+					var cb: int = ih.get_point_snap_corner_index(b)
+					if ca >= 0 and cb == (ca + 1) % n_corners:
+						hide_guide_seg_after[ca] = true
+		else:
+			for i2 in range(n_kata):
+				var j: int = (i2 + 1) % n_kata
+				if ih.is_point_corner_snapped(i2) and ih.is_point_corner_snapped(j):
+					var ca2: int = ih.get_point_snap_corner_index(i2)
+					var cb2: int = ih.get_point_snap_corner_index(j)
+					if ca2 >= 0 and cb2 == (ca2 + 1) % n_corners:
+						hide_guide_seg_after[ca2] = true
+
 	var corner_markers: Array[Vector2] = []
 	var rsq: float = _REVEAL_RADIUS * _REVEAL_RADIUS
 	for ci in range(n_corners):
@@ -237,8 +259,11 @@ func draw_guide_proximity_reveal() -> void:
 		# 隣の角も吸着済みなら中間地点で合流するのでフェードさせない
 		var prev_also_snapped: bool = snapped_corner_indices.has(ci_prev)
 		var next_also_snapped: bool = snapped_corner_indices.has(ci_next)
-		_draw_guide_seg_full(cp_prev, cp, col, width, not prev_also_snapped, false, 0.5, 1.0)
-		_draw_guide_seg_full(cp, cp_next, col, width, false, not next_also_snapped, 0.0, 0.5)
+		# 正しい順番でKATA辺が結ばれている区間はガイド線を非表示（黒いKATA線のみで表示）
+		if not hide_guide_seg_after.has(ci_prev):
+			_draw_guide_seg_full(cp_prev, cp, col, width, not prev_also_snapped, false, 0.5, 1.0)
+		if not hide_guide_seg_after.has(ci):
+			_draw_guide_seg_full(cp, cp_next, col, width, false, not next_also_snapped, 0.0, 0.5)
 
 	for cp: Vector2 in corner_markers:
 		_draw_guide_corner_marker(cp, col)

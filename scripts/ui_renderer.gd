@@ -2929,45 +2929,29 @@ func _draw_player_avatar() -> void:
 	elif repelling:
 		ring_color = Color(1.0, 0.55, 0.62, 0.14 * av_mul)
 		edge_color = Color(1.0, 0.82, 0.86, 0.28 * av_mul)
-	if _game._is_frozen_avatar_stage():
-		# ステージ1〜3: 正方形アバター（スケール・振動演出付き）
-		var sq_scale: float = 1.0
-		var jitter: Vector2 = Vector2.ZERO
-		if _game._frozen_avatar_blocked_active:
-			sq_scale = _game.FROZEN_AVATAR_SHRINK_SCALE
-			var t_now: float = Time.get_ticks_msec() / 1000.0
-			var jitter_amp: float = core_r * 0.18
-			jitter = Vector2(sin(t_now * 45.0), cos(t_now * 53.0)) * jitter_amp
-		elif _game._frozen_avatar_return_start >= 0.0:
-			var t_since: float = (Time.get_ticks_msec() / 1000.0) - _game._frozen_avatar_return_start
-			if t_since < _game.FROZEN_AVATAR_RETURN_DUR:
-				var rt: float = t_since / _game.FROZEN_AVATAR_RETURN_DUR
-				sq_scale = lerpf(_game.FROZEN_AVATAR_SHRINK_SCALE, 1.0, 1.0 - pow(1.0 - rt, 3.0))
-			else:
-				sq_scale = 1.0
-		var sq_center: Vector2 = center + jitter
-		if attracting or repelling:
-			_draw_player_force_influence_visual(sq_center, core_r, field_r, attracting, av_mul)
-		else:
-			var fr: float = field_r * sq_scale
-			_game.draw_rect(Rect2(sq_center - Vector2(fr, fr), Vector2(fr * 2.0, fr * 2.0)), ring_color)
-			_game.draw_rect(Rect2(sq_center - Vector2(fr, fr), Vector2(fr * 2.0, fr * 2.0)), edge_color, false, 2.0)
-		var outer_half: float = core_r * 1.45 * sq_scale
-		_game.draw_rect(Rect2(sq_center - Vector2(outer_half, outer_half), Vector2(outer_half, outer_half) * 2.0), Color(LINE_COLOR, 0.92 * av_mul))
-		var inner_half: float = core_r * sq_scale
-		_game.draw_rect(Rect2(sq_center - Vector2(inner_half, inner_half), Vector2(inner_half, inner_half) * 2.0), Color(LINE_COLOR, 1.0 * av_mul))
-		var core_half: float = core_r * 0.28 * sq_scale
-		_game.draw_rect(Rect2(sq_center - Vector2(core_half, core_half), Vector2(core_half, core_half) * 2.0), Color(1.0, 1.0, 1.0, 0.95 * av_mul))
-		return
+	# 無効ボタン押下時の縮小・振動演出（ステージ1〜3でのみ発動）
+	var av_scale: float = 1.0
+	var jitter: Vector2 = Vector2.ZERO
+	if _game._frozen_avatar_blocked_active:
+		av_scale = _game.FROZEN_AVATAR_SHRINK_SCALE
+		var t_now: float = Time.get_ticks_msec() / 1000.0
+		var jitter_amp: float = core_r * 0.18
+		jitter = Vector2(sin(t_now * 45.0), cos(t_now * 53.0)) * jitter_amp
+	elif _game._frozen_avatar_return_start >= 0.0:
+		var t_since: float = (Time.get_ticks_msec() / 1000.0) - _game._frozen_avatar_return_start
+		if t_since < _game.FROZEN_AVATAR_RETURN_DUR:
+			var rt: float = t_since / _game.FROZEN_AVATAR_RETURN_DUR
+			av_scale = lerpf(_game.FROZEN_AVATAR_SHRINK_SCALE, 1.0, 1.0 - pow(1.0 - rt, 3.0))
+	var draw_center: Vector2 = center + jitter
 	if attracting or repelling:
-		_draw_player_force_influence_visual(center, core_r, field_r, attracting, av_mul)
+		_draw_player_force_influence_visual(draw_center, core_r * av_scale, field_r * av_scale, attracting, av_mul)
 	else:
-		_game.draw_circle(center, field_r, ring_color)
-		_game.draw_arc(center, field_r, 0.0, TAU, 64, edge_color, 2.0)
-	_game.draw_circle(center, core_r * 1.45, Color(LINE_COLOR,0.92 * av_mul))
-	_game.draw_circle(center, core_r, Color(LINE_COLOR,1.0 * av_mul))
-	_game.draw_arc(center, core_r * 0.72, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7 * av_mul), 2.5)
-	_game.draw_circle(center, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * av_mul))
+		_game.draw_circle(draw_center, field_r * av_scale, ring_color)
+		_game.draw_arc(draw_center, field_r * av_scale, 0.0, TAU, 64, edge_color, 2.0)
+	_game.draw_circle(draw_center, core_r * 1.45 * av_scale, Color(LINE_COLOR, 0.92 * av_mul))
+	_game.draw_circle(draw_center, core_r * av_scale, Color(LINE_COLOR, 1.0 * av_mul))
+	_game.draw_arc(draw_center, core_r * 0.72 * av_scale, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7 * av_mul), 2.5)
+	_game.draw_circle(draw_center, core_r * 0.28 * av_scale, Color(1.0, 1.0, 1.0, 0.95 * av_mul))
 
 
 func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:

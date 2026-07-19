@@ -404,11 +404,6 @@ func reset_for_stage() -> void:
 
 func _reset_player_position() -> void:
 	player_position = _default_player_position()
-	if _game.current_stage == 0:
-		# ステージ1仮実装: 頂上とガイド中央の間（頂上寄り1/3）に配置
-		var apex_guide: Vector2 = _game.stage_manager.hud_guide_center + Vector2(0.0, -1.0) * _game.stage_manager.hud_guide_scale
-		var center_guide: Vector2 = _game.stage_manager.hud_guide_center
-		player_position = center_guide.lerp(apex_guide, 1.0 / 3.0)
 	_mouse_target = player_position
 	player_position_initialized = true
 
@@ -1044,12 +1039,6 @@ func process_mouse_lerp(delta: float) -> void:
 		return
 	if not player_position_initialized:
 		return
-	if _game.game_state == "guide_countdown" and _game.current_stage in [0, 1, 2]:
-		return
-	if _game.game_state == "guide_info" and _game.current_stage in [0, 1, 2]:
-		return
-	if _game.game_state == "playing" and not _game.pause_active and _game.current_stage in [0, 1, 2]:
-		return
 	player_position = player_position.lerp(_mouse_target, PLAYER_MOUSE_LERP * delta)
 	_clamp_player_to_viewport()
 	_refresh_hovered_point()
@@ -1225,10 +1214,7 @@ func process_pad(delta: float) -> void:
 		_empty_repulse_stationary_ms = 0.0
 		_empty_attract_stationary_ms = 0.0
 
-	if _game.game_state == "playing" and not _game.pause_active and _game.current_stage in [0, 1, 2]:
-		player_velocity = Vector2.ZERO
-	else:
-		player_position += player_velocity * delta
+	player_position += player_velocity * delta
 	if wish.length_squared() > 0.0001 or player_velocity.length_squared() > 3600.0:
 		moved = true
 

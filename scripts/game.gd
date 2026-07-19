@@ -1427,9 +1427,6 @@ func _is_locked(idx: int) -> bool:
 	return stage_manager.is_locked(idx)
 
 ## ステージ1〜3 の特殊仕様（自キャラ固定・正方形表示）の対象かどうか
-func _is_frozen_avatar_stage() -> bool:
-	return game_state == "playing" and not pause_active and current_stage in [0, 1, 2]
-
 func _is_stage1_fixed_point(idx: int) -> bool:
 	return game_state == "playing" and current_stage == 0 and (idx == 1 or idx == 2)
 
@@ -1447,22 +1444,14 @@ const FROZEN_AVATAR_SHRINK_SCALE: float = 0.55
 
 ## ステージ1〜3で、ブロックされた操作（固定中の移動・無効化ボタン）を試みているかを毎フレーム判定する。
 func _update_frozen_avatar_reject_state() -> void:
-	if not (game_state == "playing" and _is_frozen_avatar_stage()):
+	if not (game_state == "playing" and current_stage in [0, 1, 2]):
 		_frozen_avatar_blocked_active = false
 		_frozen_avatar_return_start = -1.0
 		return
 
 	var attempted: bool = false
 
-	# 移動試行の検知: マウスが実際に動いているか（速度）を見る
-	if input_handler.get_last_input_method() == "mouse":
-		if Input.get_last_mouse_velocity().length() > 40.0:
-			attempted = true
-	# パッドスティックの入力
-	if absf(_ui_stick_lx) > 0.15 or absf(_ui_stick_ly) > 0.15:
-		attempted = true
-
-	# 無効化されているボタンの押下試行
+	# 無効化されているボタンの押下試行のみを検知する
 	if _is_x_button_disabled_stage():
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_joy_button_pressed(0, JOY_BUTTON_X):
 			attempted = true
