@@ -391,6 +391,10 @@ const RULES_DEMO_HOLD_PULL_SEC: float = 1.8
 const RULES_DEMO_REST_SEC: float = 0.8
 const RULES_DEMO_DENT_FACTOR: float = 0.35
 const RULES_DEMO_APPROACH_OFFSET_PX: float = 70.0
+# 動く点の移動方向（「向こう側＝コーナー」から「こちら側＝凹み位置」へ向かう方向）。
+# 左上⇔右下の斜め方向。Godotの座標系はy下向きが正なので、Vector2(-1,-1)が「左上」方向になる。
+const RULES_DEMO_MOVE_DIR := Vector2(-1.0, -1.0)  # 正規化はコード側で行う
+const RULES_DEMO_DENT_DIST_PX: float = 130.0      # コーナーから凹み位置までの距離（px）
 
 # --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
@@ -2984,10 +2988,10 @@ func _setup_rules_demo_shape() -> void:
 	# コーナー順: 0=上, 1=右, 2=下, 3=左。動かす点 = 0（上）。
 	_rules_demo_move_idx = 0
 	_rules_demo_locked_indices = [1, 2, 3]
-	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
+	var move_dir: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
 	for i in range(4):
 		if i == _rules_demo_move_idx:
-			point_positions[i] = centroid.lerp(corners[i], RULES_DEMO_DENT_FACTOR)
+			point_positions[i] = corners[i] - move_dir * RULES_DEMO_DENT_DIST_PX
 		else:
 			point_positions[i] = corners[i]
 	_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
@@ -3015,14 +3019,12 @@ func _process_rules_demo_script(_delta: float) -> void:
 	var corners: Array = stage_manager.get_corner_positions_world()
 	if corners.size() != 4:
 		return
-	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
-
 	match _rules_demo_phase:
 		RulesDemoPhase.APPROACH_PUSH:
-			# 凹み位置（こちら側）にある動く点へ、外側から接近する
+			# 凹み位置（こちら側）にある動く点へ、斜め方向のさらに外側から接近する
 			var target_pos: Vector2 = point_positions[_rules_demo_move_idx]
-			var outward_dir: Vector2 = (target_pos - centroid).normalized()
-			var approach_from: Vector2 = target_pos + outward_dir * RULES_DEMO_APPROACH_OFFSET_PX
+			var move_dir: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
+			var approach_from: Vector2 = target_pos - move_dir * RULES_DEMO_APPROACH_OFFSET_PX
 			var t: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
 			input_handler.player_position = approach_from.lerp(target_pos, t)
 			input_handler.player_force_repelling = false
@@ -3047,17 +3049,17 @@ func _process_rules_demo_script(_delta: float) -> void:
 				_rules_demo_phase_start = now
 
 		RulesDemoPhase.APPROACH_PULL:
-			# 向こう側（正しいコーナー）にある動く点へ接近する
+			# 向こう側（正しいコーナー）にある動く点へ、斜め方向の外側から接近する
 			var target_pos2: Vector2 = point_positions[_rules_demo_move_idx]
-			var outward_dir2: Vector2 = (target_pos2 - centroid).normalized()
-			var approach_from2: Vector2 = target_pos2 + outward_dir2 * RULES_DEMO_APPROACH_OFFSET_PX
+			var move_dir2: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
+			var approach_from2: Vector2 = target_pos2 + move_dir2 * RULES_DEMO_APPROACH_OFFSET_PX
 			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
 			input_handler.player_position = approach_from2.lerp(target_pos2, t2)
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
 			if t2 >= 1.0:
 				_rules_demo_pull_start_pos = target_pos2
-				_rules_demo_pull_end_pos = centroid.lerp(corners[_rules_demo_move_idx], RULES_DEMO_DENT_FACTOR)
+				_rules_demo_pull_end_pos = target_pos2 - move_dir2 * RULES_DEMO_DENT_DIST_PX
 				_rules_demo_phase = RulesDemoPhase.HOLD_PULL
 				_rules_demo_phase_start = now
 
