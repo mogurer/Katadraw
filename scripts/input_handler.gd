@@ -3518,6 +3518,19 @@ func is_point_corner_snapped(idx: int) -> bool:
 	return idx < _snap_point_state.size() and _snap_point_state[idx] == 1
 
 
+## 指定ポイントのスナップ状態を強制的に解除する（rulesデモの初期形状セットアップ用）。
+func unsnap_point(idx: int) -> void:
+	if idx < 0 or idx >= _snap_point_state.size():
+		return
+	if _snap_point_state[idx] == 1:
+		var ci: int = _snap_point_corner_idx[idx] if idx < _snap_point_corner_idx.size() else -1
+		if ci >= 0:
+			_snap_corner_occupant.erase(ci)
+	_snap_point_state[idx] = 0
+	if idx < _snap_point_corner_idx.size():
+		_snap_point_corner_idx[idx] = -1
+
+
 func get_point_snap_corner_index(idx: int) -> int:
 	if idx < 0 or idx >= _snap_point_corner_idx.size():
 		return -1

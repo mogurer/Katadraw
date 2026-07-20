@@ -369,6 +369,23 @@ var rules_focus_button: bool = false  # false=デモ操作, true=[次へ]にフ�
 var rules_demo_center: Vector2 = Vector2.ZERO
 var rules_demo_radius: float = 90.0
 
+# --- rulesデモ 台本アニメーション ---
+enum RulesDemoPhase {
+	APPROACH_REPEL,
+	TOUCH_REPEL,
+	REST_AFTER_REPEL,
+	APPROACH_ATTRACT,
+	TOUCH_ATTRACT,
+	REST_AFTER_ATTRACT,
+}
+var _rules_demo_phase: RulesDemoPhase = RulesDemoPhase.APPROACH_REPEL
+var _rules_demo_phase_start: float = 0.0
+var _rules_demo_dent_idx: int = -1
+var _rules_demo_top_idx: int = -1
+const RULES_DEMO_APPROACH_SEC: float = 1.2
+const RULES_DEMO_TOUCH_SEC: float = 1.6
+const RULES_DEMO_REST_SEC: float = 1.0
+
 # --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
 const STAGE_DEBUG_HEADER_H: float = 64.0
@@ -2949,6 +2966,87 @@ func _enter_rules() -> void:
 	# skip_hud を付けない: 通常ステージ同様に HUD エリアへフィットしたガイドを組み立てる。
 	# skip ありだと hud_guide が再計算されず、前画面のガイドが残って拘束が強く不自然になることがある。
 	_begin_stage_with_config(-1, demo_cfg, rules_demo_center, "rules", false)
+	_setup_rules_demo_shape()
+
+
+func _setup_rules_demo_shape() -> void:
+	var corners: Array = stage_manager.get_corner_positions_world()
+	if corners.size() != 4 or point_positions.size() != 4:
+		return
+	# コーナー順は rhombus の場合: 0=上, 1=右, 2=下, 3=左（_hud_square_corner_world_positions の順）
+	# 実機確認後にインデックスを調整すること。
+	_rules_demo_dent_idx = 1  # 斥力デモで使う頂点（右側）
+	_rules_demo_top_idx = 1   # 引力デモで使う頂点（同じ頂点を交互に操作するシンプルなサイクル）
+	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
+	for i in range(4):
+		if i == _rules_demo_dent_idx:
+			point_positions[i] = centroid.lerp(corners[i], 0.35)
+		else:
+			point_positions[i] = corners[i]
+	input_handler.unsnap_point(_rules_demo_dent_idx)
+	_rules_demo_phase = RulesDemoPhase.APPROACH_REPEL
+	_rules_demo_phase_start = Time.get_ticks_msec() / 1000.0
+
+
+func _process_rules_demo_script(delta: float) -> void:
+	if _rules_demo_dent_idx < 0 or _rules_demo_top_idx < 0:
+		return
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var elapsed: float = now - _rules_demo_phase_start
+	match _rules_demo_phase:
+		RulesDemoPhase.APPROACH_REPEL:
+			var target_pos: Vector2 = point_positions[_rules_demo_dent_idx]
+			# 凹んだ点の外側から接近（中心からの方向ベクトルで80px外側を起点とする）
+			var approach_from: Vector2 = target_pos + (target_pos - shape_center).normalized() * 80.0
+			var t: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
+			input_handler.player_position = approach_from.lerp(target_pos, t)
+			input_handler.player_force_repelling = true
+			input_handler.player_force_attracting = false
+			if t >= 1.0:
+				_rules_demo_phase = RulesDemoPhase.TOUCH_REPEL
+				_rules_demo_phase_start = now
+		RulesDemoPhase.TOUCH_REPEL:
+			# 中心に固定: 斥力が全ポイントを外側（コーナー方向）へ押し出す
+			input_handler.player_position = shape_center
+			input_handler.player_force_repelling = true
+			input_handler.player_force_attracting = false
+			if elapsed >= RULES_DEMO_TOUCH_SEC:
+				_rules_demo_phase = RulesDemoPhase.REST_AFTER_REPEL
+				_rules_demo_phase_start = now
+		RulesDemoPhase.REST_AFTER_REPEL:
+			input_handler.player_force_repelling = false
+			input_handler.player_force_attracting = false
+			input_handler.player_position = input_handler.player_position.lerp(shape_center, clampf(delta * 3.0, 0.0, 1.0))
+			if elapsed >= RULES_DEMO_REST_SEC:
+				_rules_demo_phase = RulesDemoPhase.APPROACH_ATTRACT
+				_rules_demo_phase_start = now
+		RulesDemoPhase.APPROACH_ATTRACT:
+			var target_pos2: Vector2 = point_positions[_rules_demo_top_idx]
+			# 中心から頂点へ向かって接近（引力なので内側から出向く方向）
+			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
+			input_handler.player_position = shape_center.lerp(target_pos2, t2)
+			input_handler.player_force_repelling = false
+			input_handler.player_force_attracting = true
+			if t2 >= 1.0:
+				_rules_demo_phase = RulesDemoPhase.TOUCH_ATTRACT
+				_rules_demo_phase_start = now
+		RulesDemoPhase.TOUCH_ATTRACT:
+			# 頂点の内側40%地点に固定: 引力が頂点を内側へ引き込む
+			input_handler.player_position = shape_center.lerp(point_positions[_rules_demo_top_idx], 0.4)
+			input_handler.player_force_repelling = false
+			input_handler.player_force_attracting = true
+			if elapsed >= RULES_DEMO_TOUCH_SEC:
+				_rules_demo_phase = RulesDemoPhase.REST_AFTER_ATTRACT
+				_rules_demo_phase_start = now
+		RulesDemoPhase.REST_AFTER_ATTRACT:
+			input_handler.player_force_repelling = false
+			input_handler.player_force_attracting = false
+			var next_start: Vector2 = point_positions[_rules_demo_dent_idx] + (point_positions[_rules_demo_dent_idx] - shape_center).normalized() * 80.0
+			input_handler.player_position = input_handler.player_position.lerp(next_start, clampf(delta * 3.0, 0.0, 1.0))
+			if elapsed >= RULES_DEMO_REST_SEC:
+				_rules_demo_phase = RulesDemoPhase.APPROACH_REPEL
+				_rules_demo_phase_start = now
+	queue_redraw()
 
 
 func _input_rules(event: InputEvent, _is_confirm_key: bool, _is_confirm_pad: bool, _is_confirm_click: bool) -> void:
@@ -5645,14 +5743,18 @@ func _process(delta: float) -> void:
 	if DEBUG_UI_STICK_NAV and game_state == "config":
 		_debug_ui_stick_nav_poll_config(delta)
 	_process_ui_menu_stick_navigation(delta)
-	input_handler.process_mouse_lerp(delta)
+	if game_state != "rules":
+		input_handler.process_mouse_lerp(delta)
 	_update_player_hover()
 	if pause_active:
 		queue_redraw()
 		return
-	_process_pad(delta)
+	if game_state != "rules":
+		_process_pad(delta)
 	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
+	if game_state == "rules":
+		_process_rules_demo_script(delta)
 	_enforce_stage1_fixed_points()
 	_update_snap_count_tracking()
 	_update_ripple_effects()
