@@ -3021,9 +3021,9 @@ func _process_rules_demo_script(_delta: float) -> void:
 		return
 	match _rules_demo_phase:
 		RulesDemoPhase.APPROACH_PUSH:
-			# 凹み位置（こちら側）にある動く点へ、斜め方向のさらに外側から接近する
-			var target_pos: Vector2 = point_positions[_rules_demo_move_idx]
+			# 凹み位置（こちら側）を、固定コーナー座標から都度再計算する（ドリフト防止）
 			var move_dir: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
+			var target_pos: Vector2 = corners[_rules_demo_move_idx] - move_dir * RULES_DEMO_DENT_DIST_PX
 			var approach_from: Vector2 = target_pos - move_dir * RULES_DEMO_APPROACH_OFFSET_PX
 			var t: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
 			input_handler.player_position = approach_from.lerp(target_pos, t)
@@ -3049,9 +3049,9 @@ func _process_rules_demo_script(_delta: float) -> void:
 				_rules_demo_phase_start = now
 
 		RulesDemoPhase.APPROACH_PULL:
-			# 向こう側（正しいコーナー）にある動く点へ、斜め方向の外側から接近する
-			var target_pos2: Vector2 = point_positions[_rules_demo_move_idx]
+			# 向こう側（正しいコーナー）を、固定コーナー座標から取得する（ドリフト防止）
 			var move_dir2: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
+			var target_pos2: Vector2 = corners[_rules_demo_move_idx]
 			var approach_from2: Vector2 = target_pos2 + move_dir2 * RULES_DEMO_APPROACH_OFFSET_PX
 			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
 			input_handler.player_position = approach_from2.lerp(target_pos2, t2)
@@ -3059,7 +3059,7 @@ func _process_rules_demo_script(_delta: float) -> void:
 			input_handler.player_force_attracting = false
 			if t2 >= 1.0:
 				_rules_demo_pull_start_pos = target_pos2
-				_rules_demo_pull_end_pos = target_pos2 - move_dir2 * RULES_DEMO_DENT_DIST_PX
+				_rules_demo_pull_end_pos = corners[_rules_demo_move_idx] - move_dir2 * RULES_DEMO_DENT_DIST_PX
 				_rules_demo_phase = RulesDemoPhase.HOLD_PULL
 				_rules_demo_phase_start = now
 
