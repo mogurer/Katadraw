@@ -2974,9 +2974,9 @@ func _setup_rules_demo_shape() -> void:
 	if corners.size() != 4 or point_positions.size() != 4:
 		return
 	# コーナー順は rhombus の場合: 0=上, 1=右, 2=下, 3=左（_hud_square_corner_world_positions の順）
-	# 実機確認後にインデックスを調整すること。
-	_rules_demo_dent_idx = 1  # 斥力デモで使う頂点（右側）
-	_rules_demo_top_idx = 1   # 引力デモで使う頂点（同じ頂点を交互に操作するシンプルなサイクル）
+	# dent_idx と top_idx は対角の関係にある別々の点（右と左）を使用する。
+	_rules_demo_dent_idx = 1  # 斥力デモで凹ませ押し出す頂点（右）
+	_rules_demo_top_idx = 3   # 引力デモで引き込む頂点（左、対角）
 	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
 	for i in range(4):
 		if i == _rules_demo_dent_idx:
@@ -2984,6 +2984,7 @@ func _setup_rules_demo_shape() -> void:
 		else:
 			point_positions[i] = corners[i]
 	input_handler.unsnap_point(_rules_demo_dent_idx)
+	input_handler.unsnap_point(_rules_demo_top_idx)
 	_rules_demo_phase = RulesDemoPhase.APPROACH_REPEL
 	_rules_demo_phase_start = Time.get_ticks_msec() / 1000.0
 
@@ -3006,8 +3007,8 @@ func _process_rules_demo_script(delta: float) -> void:
 				_rules_demo_phase = RulesDemoPhase.TOUCH_REPEL
 				_rules_demo_phase_start = now
 		RulesDemoPhase.TOUCH_REPEL:
-			# 中心に固定: 斥力が全ポイントを外側（コーナー方向）へ押し出す
-			input_handler.player_position = shape_center
+			# 対象点に密着（毎フレーム追従）: 斥力で点を後ろから押し続ける
+			input_handler.player_position = point_positions[_rules_demo_dent_idx]
 			input_handler.player_force_repelling = true
 			input_handler.player_force_attracting = false
 			if elapsed >= RULES_DEMO_TOUCH_SEC:
@@ -3031,8 +3032,8 @@ func _process_rules_demo_script(delta: float) -> void:
 				_rules_demo_phase = RulesDemoPhase.TOUCH_ATTRACT
 				_rules_demo_phase_start = now
 		RulesDemoPhase.TOUCH_ATTRACT:
-			# 頂点の内側40%地点に固定: 引力が頂点を内側へ引き込む
-			input_handler.player_position = shape_center.lerp(point_positions[_rules_demo_top_idx], 0.4)
+			# 対象点に密着（毎フレーム追従）: 引力で点を引き続ける
+			input_handler.player_position = point_positions[_rules_demo_top_idx]
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = true
 			if elapsed >= RULES_DEMO_TOUCH_SEC:

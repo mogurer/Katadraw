@@ -2463,11 +2463,11 @@ func _draw_rules(vp: Vector2) -> void:
 	# 操作デモ: 文言の代わりに demo_controller_xbox.png を上半分中央に表示
 	_draw_rules_demo_control_images(vp, shift_down)
 
-	# 本編と同じ HUD ガイド（物理の get_active_guide_loops と一致させるため shape_center で再計算）
+	# 本編と同じガイド近接表示（コーナー吸着済み区間の表示・正しい順番での非表示等、最新のロジックと統一する）
 	if GameConfig.USE_SCREEN_HUD_GUIDE:
 		_game.stage_manager.recompute_hud_guide_layout_if_needed(_game.shape_center, vp)
 		_game.guide_center_1 = _game.stage_manager.guide_center_1
-		_stage_renderer.draw_hud_overlay_guide(0.7)
+		_stage_renderer.draw_guide_proximity_reveal()
 	_refresh_guide_point_distance_bounds()
 
 	# 中央: デモ図形の線・頂点（自キャラは [つぎへ] の上に重ねる）
@@ -2569,21 +2569,10 @@ func _draw_rules_demo_lines_only(vp: Vector2) -> void:
 	else:
 		for i in range(n):
 			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
-	var _dbg_hl: Dictionary = _game.input_handler._debug_reconnect_highlight
-	var _dbg_now: int = Time.get_ticks_msec()
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var r: float = _point_radius_by_guide(i)
 		_game.draw_circle(pos, r, POINT_COLOR)
-		# デバッグ: 再接続発火ポイントを赤円でハイライト
-		if _dbg_hl.has(i):
-			var _exp: int = _dbg_hl[i] as int
-			if _dbg_now < _exp:
-				var _fade: float = clampf(float(_exp - _dbg_now) / 500.0, 0.0, 1.0)
-				_game.draw_circle(pos, r * 1.6, Color(1.0, 0.08, 0.08, 0.72 * _fade))
-				_game.draw_arc(pos, r * 1.6, 0.0, TAU, 24, Color(1.0, 0.5, 0.1, _fade), 2.5, true)
-			else:
-				_dbg_hl.erase(i)
 
 
 func _repro_get_display_value() -> float:
@@ -2620,17 +2609,7 @@ func _draw_rules_demo_player_layer(vp: Vector2) -> void:
 		return
 	_draw_laser_effect()
 	_draw_spore_particles()
-	# 本編同様: 実現率（掴み中 or 一致度が動いた直後）
-	var focus_idx: int = _game.input_handler.get_player_focus_index()
-	if focus_idx >= 0 and focus_idx < _game.point_positions.size():
-		var circ_val: float = _game.get_display_reproduction_rate_floor(_game.current_circularity)
-		_repro_rate_float_on_metric(circ_val)
-		if _game.input_handler.grab_input_active or _repro_rate_should_show_temporary():
-			var pt: Vector2 = _game.input_handler.get_player_position()
-			var disp_val: float = _repro_get_display_value()
-			var rate_text: String = "%.1f%%" % disp_val
-			var rate_color: Color = _stage_renderer.get_metric_color_for_display_rate(disp_val)
-			_draw_realization_rate_with_glow(pt + REPRO_RATE_OFFSET_FROM_PLAYER, rate_text, rate_color)
+	# rules デモでは達成率のパーセンテージ表示は不要のため撤去した。
 	_draw_right_stick_debug_line(vp)
 
 
