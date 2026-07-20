@@ -371,20 +371,26 @@ var rules_demo_radius: float = 90.0
 
 # --- rulesデモ 台本アニメーション ---
 enum RulesDemoPhase {
-	APPROACH_REPEL,
-	TOUCH_REPEL,
-	REST_AFTER_REPEL,
-	APPROACH_ATTRACT,
-	TOUCH_ATTRACT,
-	REST_AFTER_ATTRACT,
+	APPROACH_PUSH,   # 押し出す対象の点（凹み位置）へ自キャラが接近
+	HOLD_PUSH,       # 接触・静止したまま斥力。点が自キャラから離れて正しいコーナーへ
+	REST_A,          # 力を止めて一拍おく
+	APPROACH_PULL,   # 引き込む対象の点（正しいコーナー）へ自キャラが接近
+	HOLD_PULL,       # 接触後、自キャラ自身が凹み位置へ移動しながら引力。点が追従する
+	REST_B,          # 力を止めて一拍おく。ここで役割をスワップして次周へ
 }
-var _rules_demo_phase: RulesDemoPhase = RulesDemoPhase.APPROACH_REPEL
+var _rules_demo_phase: RulesDemoPhase = RulesDemoPhase.APPROACH_PUSH
 var _rules_demo_phase_start: float = 0.0
-var _rules_demo_dent_idx: int = -1
-var _rules_demo_top_idx: int = -1
-const RULES_DEMO_APPROACH_SEC: float = 1.2
-const RULES_DEMO_TOUCH_SEC: float = 1.6
-const RULES_DEMO_REST_SEC: float = 1.0
+var _rules_demo_push_idx: int = -1   # 今周「外へ押し出す」対象の点（開始時は凹み位置にある）
+var _rules_demo_pull_idx: int = -1   # 今周「内へ引き込む」対象の点（開始時は正しいコーナーにある）
+var _rules_demo_pull_start_pos: Vector2 = Vector2.ZERO  # 引力パート開始時の自キャラ位置（コーナー）
+var _rules_demo_pull_end_pos: Vector2 = Vector2.ZERO    # 引力パートで自キャラが向かう先（凹み位置）
+
+const RULES_DEMO_APPROACH_SEC: float = 1.0
+const RULES_DEMO_HOLD_PUSH_SEC: float = 1.8
+const RULES_DEMO_HOLD_PULL_SEC: float = 1.8
+const RULES_DEMO_REST_SEC: float = 0.8
+const RULES_DEMO_DENT_FACTOR: float = 0.35
+const RULES_DEMO_APPROACH_OFFSET_PX: float = 70.0
 
 # --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
@@ -2969,84 +2975,109 @@ func _enter_rules() -> void:
 	_setup_rules_demo_shape()
 
 
+## rulesデモの初期形状をセットアップする。1点だけ本来のコーナーより内側にずらし、
+## 「凹んだ」いびつな四角形から開始する。
 func _setup_rules_demo_shape() -> void:
 	var corners: Array = stage_manager.get_corner_positions_world()
 	if corners.size() != 4 or point_positions.size() != 4:
 		return
-	# コーナー順は rhombus の場合: 0=上, 1=右, 2=下, 3=左（_hud_square_corner_world_positions の順）
-	# dent_idx と top_idx は対角の関係にある別々の点（右と左）を使用する。
-	_rules_demo_dent_idx = 1  # 斥力デモで凹ませ押し出す頂点（右）
-	_rules_demo_top_idx = 3   # 引力デモで引き込む頂点（左、対角）
+	# コーナー順: 0=上, 1=右, 2=下, 3=左（対角ペア: 1=右 と 3=左）
+	_rules_demo_push_idx = 1  # この点を凹ませて開始し、1周目は斥力で押し出す
+	_rules_demo_pull_idx = 3  # 上記と対角にある点。1周目は正しいコーナーのまま、引力パートで引き込む対象
 	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
 	for i in range(4):
-		if i == _rules_demo_dent_idx:
-			point_positions[i] = centroid.lerp(corners[i], 0.35)
+		if i == _rules_demo_push_idx:
+			point_positions[i] = centroid.lerp(corners[i], RULES_DEMO_DENT_FACTOR)
 		else:
 			point_positions[i] = corners[i]
-	input_handler.unsnap_point(_rules_demo_dent_idx)
-	input_handler.unsnap_point(_rules_demo_top_idx)
-	_rules_demo_phase = RulesDemoPhase.APPROACH_REPEL
+	# push_idx は凹み位置に移動するため unsnap 必須
+	input_handler.unsnap_point(_rules_demo_push_idx)
+	_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
 	_rules_demo_phase_start = Time.get_ticks_msec() / 1000.0
 
 
-func _process_rules_demo_script(delta: float) -> void:
-	if _rules_demo_dent_idx < 0 or _rules_demo_top_idx < 0:
+## rulesデモの台本アニメーションを毎フレーム進行させる。
+## 自キャラの位置・斥力/引力フラグを直接書き換えることで、実際の物理演算に本物の移動・スナップ・
+## 交差解消を行わせる（座標を直接いじって偽装しない）。
+func _process_rules_demo_script(_delta: float) -> void:
+	if _rules_demo_push_idx < 0 or _rules_demo_pull_idx < 0:
 		return
 	var now: float = Time.get_ticks_msec() / 1000.0
 	var elapsed: float = now - _rules_demo_phase_start
+	var corners: Array = stage_manager.get_corner_positions_world()
+	if corners.size() != 4:
+		return
+	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
+
 	match _rules_demo_phase:
-		RulesDemoPhase.APPROACH_REPEL:
-			var target_pos: Vector2 = point_positions[_rules_demo_dent_idx]
-			# 凹んだ点の外側から接近（中心からの方向ベクトルで80px外側を起点とする）
-			var approach_from: Vector2 = target_pos + (target_pos - shape_center).normalized() * 80.0
+		RulesDemoPhase.APPROACH_PUSH:
+			# 凹み位置にある「押し出す」対象の点へ、外側から接近する
+			var target_pos: Vector2 = point_positions[_rules_demo_push_idx]
+			var outward_dir: Vector2 = (target_pos - centroid).normalized()
+			var approach_from: Vector2 = target_pos + outward_dir * RULES_DEMO_APPROACH_OFFSET_PX
 			var t: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
 			input_handler.player_position = approach_from.lerp(target_pos, t)
-			input_handler.player_force_repelling = true
+			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
 			if t >= 1.0:
-				_rules_demo_phase = RulesDemoPhase.TOUCH_REPEL
+				_rules_demo_phase = RulesDemoPhase.HOLD_PUSH
 				_rules_demo_phase_start = now
-		RulesDemoPhase.TOUCH_REPEL:
-			# 対象点に密着（毎フレーム追従）: 斥力で点を後ろから押し続ける
-			input_handler.player_position = point_positions[_rules_demo_dent_idx]
+
+		RulesDemoPhase.HOLD_PUSH:
+			# 自キャラはここで一切動かさない。斥力だけをONにし、点が離れていくのに任せる。
 			input_handler.player_force_repelling = true
 			input_handler.player_force_attracting = false
-			if elapsed >= RULES_DEMO_TOUCH_SEC:
-				_rules_demo_phase = RulesDemoPhase.REST_AFTER_REPEL
+			if elapsed >= RULES_DEMO_HOLD_PUSH_SEC:
+				_rules_demo_phase = RulesDemoPhase.REST_A
 				_rules_demo_phase_start = now
-		RulesDemoPhase.REST_AFTER_REPEL:
+
+		RulesDemoPhase.REST_A:
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
-			input_handler.player_position = input_handler.player_position.lerp(shape_center, clampf(delta * 3.0, 0.0, 1.0))
 			if elapsed >= RULES_DEMO_REST_SEC:
-				_rules_demo_phase = RulesDemoPhase.APPROACH_ATTRACT
+				_rules_demo_phase = RulesDemoPhase.APPROACH_PULL
 				_rules_demo_phase_start = now
-		RulesDemoPhase.APPROACH_ATTRACT:
-			var target_pos2: Vector2 = point_positions[_rules_demo_top_idx]
-			# 中心から頂点へ向かって接近（引力なので内側から出向く方向）
+
+		RulesDemoPhase.APPROACH_PULL:
+			# 正しいコーナーにある「引き込む」対象の点へ接近する
+			var target_pos2: Vector2 = point_positions[_rules_demo_pull_idx]
+			var outward_dir2: Vector2 = (target_pos2 - centroid).normalized()
+			var approach_from2: Vector2 = target_pos2 + outward_dir2 * RULES_DEMO_APPROACH_OFFSET_PX
 			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
-			input_handler.player_position = shape_center.lerp(target_pos2, t2)
-			input_handler.player_force_repelling = false
-			input_handler.player_force_attracting = true
-			if t2 >= 1.0:
-				_rules_demo_phase = RulesDemoPhase.TOUCH_ATTRACT
-				_rules_demo_phase_start = now
-		RulesDemoPhase.TOUCH_ATTRACT:
-			# 対象点に密着（毎フレーム追従）: 引力で点を引き続ける
-			input_handler.player_position = point_positions[_rules_demo_top_idx]
-			input_handler.player_force_repelling = false
-			input_handler.player_force_attracting = true
-			if elapsed >= RULES_DEMO_TOUCH_SEC:
-				_rules_demo_phase = RulesDemoPhase.REST_AFTER_ATTRACT
-				_rules_demo_phase_start = now
-		RulesDemoPhase.REST_AFTER_ATTRACT:
+			input_handler.player_position = approach_from2.lerp(target_pos2, t2)
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
-			var next_start: Vector2 = point_positions[_rules_demo_dent_idx] + (point_positions[_rules_demo_dent_idx] - shape_center).normalized() * 80.0
-			input_handler.player_position = input_handler.player_position.lerp(next_start, clampf(delta * 3.0, 0.0, 1.0))
-			if elapsed >= RULES_DEMO_REST_SEC:
-				_rules_demo_phase = RulesDemoPhase.APPROACH_REPEL
+			if t2 >= 1.0:
+				# 引力パートの移動経路（コーナー→凹み位置）をここで確定する
+				# pull_idx はここで unsnap してはじめて引力で動けるようになる
+				input_handler.unsnap_point(_rules_demo_pull_idx)
+				_rules_demo_pull_start_pos = point_positions[_rules_demo_pull_idx]
+				_rules_demo_pull_end_pos = centroid.lerp(corners[_rules_demo_pull_idx], RULES_DEMO_DENT_FACTOR)
+				_rules_demo_phase = RulesDemoPhase.HOLD_PULL
 				_rules_demo_phase_start = now
+
+		RulesDemoPhase.HOLD_PULL:
+			# 自キャラ自身が、コーナー位置から凹み位置へ向かって移動する。引力ONのまま。
+			# 点は自キャラに引き寄せられて追従してくる。
+			var t3: float = clampf(elapsed / RULES_DEMO_HOLD_PULL_SEC, 0.0, 1.0)
+			input_handler.player_position = _rules_demo_pull_start_pos.lerp(_rules_demo_pull_end_pos, t3)
+			input_handler.player_force_repelling = false
+			input_handler.player_force_attracting = true
+			if t3 >= 1.0:
+				_rules_demo_phase = RulesDemoPhase.REST_B
+				_rules_demo_phase_start = now
+
+		RulesDemoPhase.REST_B:
+			input_handler.player_force_repelling = false
+			input_handler.player_force_attracting = false
+			if elapsed >= RULES_DEMO_REST_SEC:
+				# 1周終了。役割をスワップして次周へ
+				var tmp: int = _rules_demo_push_idx
+				_rules_demo_push_idx = _rules_demo_pull_idx
+				_rules_demo_pull_idx = tmp
+				_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
+				_rules_demo_phase_start = now
+
 	queue_redraw()
 
 
