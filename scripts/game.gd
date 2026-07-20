@@ -617,6 +617,13 @@ var sfx_motion: AudioStreamPlayer
 var sfx_stagestart: AudioStreamPlayer
 var sfx_cat: AudioStreamPlayer
 var sfx_spot: AudioStreamPlayer
+var _sfx_spot_streams: Array[AudioStream] = []
+var _spot_combo: int = 0
+var _spot_combo_last_time_ms: int = -1
+const SPOT_COMBO_INTERVAL_MS: int = 1000
+const SPOT_COMBO_MAX_INDEX: int = 9  # se_spot01(0) ～ se_spot10(9)
+const SPOT_RE_SNAP_SUPPRESS_MS: int = 500
+var _spot_vertex_release_records: Dictionary = {}  # point_idx -> {corner_idx, time_ms}
 var sfx_ui_count: AudioStreamPlayer      # 体験版リザルト: 数値スロット演出中に鳴らし続ける
 var sfx_telop_complete: AudioStreamPlayer  # 体験版リザルト: 数値スロット演出が確定した瞬間に鳴らす
 var _results_all_slots_telop_played: bool = false  # sfx_telop_complete を全スロット確定後に1回だけ鳴らすためのフラグ
@@ -1090,7 +1097,10 @@ func _setup_audio() -> void:
 	add_child(sfx_cat)
 
 	sfx_spot = AudioStreamPlayer.new()
-	sfx_spot.stream = _load_audio("res://assets/sounds/SE/se_spot02.wav")
+	_sfx_spot_streams.clear()
+	for i in range(1, 11):
+		_sfx_spot_streams.append(_load_audio("res://assets/sounds/SE/se_spot%02d.wav" % i))
+	sfx_spot.stream = _sfx_spot_streams[0]
 	sfx_spot.volume_db = -14.5
 	add_child(sfx_spot)
 
@@ -1177,8 +1187,48 @@ func _start_sfx_move() -> void:
 		_sfx_move_playing = true
 
 
-func play_sfx_spot() -> void:
+func notify_spot_vertex_released(point_idx: int, corner_idx: int) -> void:
+	if point_idx < 0 or corner_idx < 0:
+		return
+	_spot_vertex_release_records[point_idx] = {
+		"corner_idx": corner_idx,
+		"time_ms": Time.get_ticks_msec(),
+	}
+
+
+func play_sfx_spot(point_idx: int = -1, corner_idx: int = -1) -> void:
+	if _should_suppress_spot_re_snap(point_idx, corner_idx):
+		return
+	var now_ms: int = Time.get_ticks_msec()
+	if _spot_combo_last_time_ms >= 0 and (now_ms - _spot_combo_last_time_ms) <= SPOT_COMBO_INTERVAL_MS:
+		_spot_combo = min(_spot_combo + 1, SPOT_COMBO_MAX_INDEX)
+	else:
+		_spot_combo = 0
+	_spot_combo_last_time_ms = now_ms
+	if point_idx >= 0:
+		_spot_vertex_release_records.erase(point_idx)
+	if _sfx_spot_streams.size() > _spot_combo:
+		sfx_spot.stream = _sfx_spot_streams[_spot_combo]
 	_play_sfx(sfx_spot)
+
+
+func _should_suppress_spot_re_snap(point_idx: int, corner_idx: int) -> bool:
+	if point_idx < 0 or corner_idx < 0:
+		return false
+	if not _spot_vertex_release_records.has(point_idx):
+		return false
+	var rec: Dictionary = _spot_vertex_release_records[point_idx]
+	if int(rec.get("corner_idx", -1)) != corner_idx:
+		return false
+	return (Time.get_ticks_msec() - int(rec.get("time_ms", 0))) <= SPOT_RE_SNAP_SUPPRESS_MS
+
+
+func _reset_spot_combo() -> void:
+	_spot_combo = 0
+	_spot_combo_last_time_ms = -1
+	_spot_vertex_release_records.clear()
+	if _sfx_spot_streams.size() > 0:
+		sfx_spot.stream = _sfx_spot_streams[0]
 
 
 func play_sfx_ui_in() -> void:
@@ -1588,6 +1638,7 @@ func _check_clear() -> void:
 	if _snap_ok:
 		is_dragging = false
 		game_state = "cleared"
+		_reset_spot_combo()
 		_cleared_screen_start_time = Time.get_ticks_msec() / 1000.0
 		input_handler.release_mouse_grab()
 		_stop_sfx_move()
@@ -1642,6 +1693,7 @@ func _force_clear_for_debug() -> void:
 	"""デバッグ用: 実現率を無視してステージクリア扱いにする"""
 	is_dragging = false
 	game_state = "cleared"
+	_reset_spot_combo()
 	input_handler.release_mouse_grab()
 	_stop_sfx_move()
 	clear_time = Time.get_ticks_msec() / 1000.0 - start_time
@@ -3447,6 +3499,7 @@ func _hit_pause_button(pos: Vector2, vp: Vector2) -> int:
 
 func _do_pause_retry() -> void:
 	"""やりなおし: guide_info へ戻す。タイマーはリセットしない"""
+	_reset_spot_combo()
 	pause_retry_elapsed = pause_elapsed
 	pause_active = false
 	var vp: Vector2 = get_viewport_rect().size
@@ -3498,6 +3551,7 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 				pause_active = false
 				pause_confirm_title = false
 				pause_retry_elapsed = -1.0
+				_reset_spot_combo()
 				# play_balance_debug のテスト開始経由のみデバッグ用戻り先へ。
 				if _pbd_return_after_test:
 					BGMManager.stop()

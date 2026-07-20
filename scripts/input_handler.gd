@@ -2687,7 +2687,7 @@ func _presnap_at_corners() -> void:
 				_snap_point_target[i] = corners[ci]
 				_snap_point_corner_idx[i] = ci
 				_snap_corner_occupant[ci] = i
-				_game.play_sfx_spot()
+				_game.play_sfx_spot(i, ci)
 				_game.ui_renderer.trigger_snap_color(i)
 				break
 
@@ -2719,6 +2719,8 @@ func _snap_release_point(i: int) -> void:
 		var ci: int = _snap_point_corner_idx[i]
 		if ci >= 0 and _snap_corner_occupant.get(ci, -1) == i:
 			_snap_corner_occupant.erase(ci)
+		if ci >= 0:
+			_game.notify_spot_vertex_released(i, ci)
 	_snap_point_state[i] = 0
 	_snap_point_corner_idx[i] = -1
 
@@ -2818,7 +2820,7 @@ func _apply_snap_approach_forces(forces: Array[Vector2]) -> void:
 				_snap_point_corner_idx[i] = best_ci
 				_game.point_positions[i] = target
 				point_velocities[i] = Vector2.ZERO
-				_game.play_sfx_spot()
+				_game.play_sfx_spot(i, best_ci)
 				_game.ui_renderer.trigger_snap_color(i)
 			else:
 				# 常時アプローチバネ力（スムーズ移動）
@@ -3049,7 +3051,7 @@ func _apply_snap_vertex_forces(forces: Array[Vector2]) -> void:
 				_snap_point_corner_idx[i] = best_ci
 				_game.point_positions[i] = target
 				point_velocities[i] = Vector2.ZERO
-				_game.play_sfx_spot()
+				_game.play_sfx_spot(i, best_ci)
 				_game.ui_renderer.trigger_snap_color(i)
 			else:
 				# 近接バネ力
