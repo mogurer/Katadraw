@@ -371,19 +371,19 @@ var rules_demo_radius: float = 90.0
 
 # --- rulesデモ 台本アニメーション ---
 enum RulesDemoPhase {
-	APPROACH_PUSH,   # 押し出す対象の点（凹み位置）へ自キャラが接近
-	HOLD_PUSH,       # 接触・静止したまま斥力。点が自キャラから離れて正しいコーナーへ
-	REST_A,          # 力を止めて一拍おく
-	APPROACH_PULL,   # 引き込む対象の点（正しいコーナー）へ自キャラが接近
-	HOLD_PULL,       # 接触後、自キャラ自身が凹み位置へ移動しながら引力。点が追従する
-	REST_B,          # 力を止めて一拍おく。ここで役割をスワップして次周へ
+	APPROACH_PUSH,   # 動く点（凹み位置）へ自キャラが接近
+	HOLD_PUSH,       # 接触・静止したまま斥力。点が向こう側（正しいコーナー）へ
+	REST_A,
+	APPROACH_PULL,   # 動く点（正しいコーナー）へ自キャラが接近
+	HOLD_PULL,       # 接触後、自キャラ自身が凹み位置へ移動しながら引力。点が追従
+	REST_B,
 }
 var _rules_demo_phase: RulesDemoPhase = RulesDemoPhase.APPROACH_PUSH
 var _rules_demo_phase_start: float = 0.0
-var _rules_demo_push_idx: int = -1   # 今周「外へ押し出す」対象の点（開始時は凹み位置にある）
-var _rules_demo_pull_idx: int = -1   # 今周「内へ引き込む」対象の点（開始時は正しいコーナーにある）
-var _rules_demo_pull_start_pos: Vector2 = Vector2.ZERO  # 引力パート開始時の自キャラ位置（コーナー）
-var _rules_demo_pull_end_pos: Vector2 = Vector2.ZERO    # 引力パートで自キャラが向かう先（凹み位置）
+var _rules_demo_move_idx: int = -1               # 動く点。常にこの1点だけを動かす
+var _rules_demo_locked_indices: Array[int] = []  # 固定する残り3点
+var _rules_demo_pull_start_pos: Vector2 = Vector2.ZERO
+var _rules_demo_pull_end_pos: Vector2 = Vector2.ZERO
 
 const RULES_DEMO_APPROACH_SEC: float = 1.0
 const RULES_DEMO_HOLD_PUSH_SEC: float = 1.8
@@ -2975,32 +2975,40 @@ func _enter_rules() -> void:
 	_setup_rules_demo_shape()
 
 
-## rulesデモの初期形状をセットアップする。1点だけ本来のコーナーより内側にずらし、
-## 「凹んだ」いびつな四角形から開始する。
+## rulesデモの初期形状をセットアップする。1点（動く点）だけ本来のコーナーより内側にずらし、
+## 残り3点は正しいコーナーに固定した状態から開始する。
 func _setup_rules_demo_shape() -> void:
 	var corners: Array = stage_manager.get_corner_positions_world()
 	if corners.size() != 4 or point_positions.size() != 4:
 		return
-	# コーナー順: 0=上, 1=右, 2=下, 3=左（対角ペア: 1=右 と 3=左）
-	_rules_demo_push_idx = 1  # この点を凹ませて開始し、1周目は斥力で押し出す
-	_rules_demo_pull_idx = 3  # 上記と対角にある点。1周目は正しいコーナーのまま、引力パートで引き込む対象
+	# コーナー順: 0=上, 1=右, 2=下, 3=左。動かす点 = 0（上）。
+	_rules_demo_move_idx = 0
+	_rules_demo_locked_indices = [1, 2, 3]
 	var centroid: Vector2 = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0
 	for i in range(4):
-		if i == _rules_demo_push_idx:
+		if i == _rules_demo_move_idx:
 			point_positions[i] = centroid.lerp(corners[i], RULES_DEMO_DENT_FACTOR)
 		else:
 			point_positions[i] = corners[i]
-	# push_idx は凹み位置に移動するため unsnap 必須
-	input_handler.unsnap_point(_rules_demo_push_idx)
 	_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
 	_rules_demo_phase_start = Time.get_ticks_msec() / 1000.0
 
 
-## rulesデモの台本アニメーションを毎フレーム進行させる。
-## 自キャラの位置・斥力/引力フラグを直接書き換えることで、実際の物理演算に本物の移動・スナップ・
-## 交差解消を行わせる（座標を直接いじって偽装しない）。
+## rulesデモで固定する3点を、他の力の影響を受けても毎フレーム強制的にコーナー位置へ戻す。
+func _enforce_rules_demo_locked_points() -> void:
+	if _rules_demo_locked_indices.is_empty():
+		return
+	var corners: Array = stage_manager.get_corner_positions_world()
+	if corners.size() != 4:
+		return
+	for idx in _rules_demo_locked_indices:
+		if idx >= 0 and idx < point_positions.size() and idx < corners.size():
+			point_positions[idx] = corners[idx]
+
+
+## rulesデモの台本アニメーションを毎フレーム進行させる（動く点は常に1点のみ）。
 func _process_rules_demo_script(_delta: float) -> void:
-	if _rules_demo_push_idx < 0 or _rules_demo_pull_idx < 0:
+	if _rules_demo_move_idx < 0:
 		return
 	var now: float = Time.get_ticks_msec() / 1000.0
 	var elapsed: float = now - _rules_demo_phase_start
@@ -3011,8 +3019,8 @@ func _process_rules_demo_script(_delta: float) -> void:
 
 	match _rules_demo_phase:
 		RulesDemoPhase.APPROACH_PUSH:
-			# 凹み位置にある「押し出す」対象の点へ、外側から接近する
-			var target_pos: Vector2 = point_positions[_rules_demo_push_idx]
+			# 凹み位置（こちら側）にある動く点へ、外側から接近する
+			var target_pos: Vector2 = point_positions[_rules_demo_move_idx]
 			var outward_dir: Vector2 = (target_pos - centroid).normalized()
 			var approach_from: Vector2 = target_pos + outward_dir * RULES_DEMO_APPROACH_OFFSET_PX
 			var t: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
@@ -3024,7 +3032,7 @@ func _process_rules_demo_script(_delta: float) -> void:
 				_rules_demo_phase_start = now
 
 		RulesDemoPhase.HOLD_PUSH:
-			# 自キャラはここで一切動かさない。斥力だけをONにし、点が離れていくのに任せる。
+			# 自キャラはここで一切動かさない。斥力だけをONにし、点が向こう側（コーナー）へ離れるに任せる。
 			input_handler.player_force_repelling = true
 			input_handler.player_force_attracting = false
 			if elapsed >= RULES_DEMO_HOLD_PUSH_SEC:
@@ -3039,8 +3047,8 @@ func _process_rules_demo_script(_delta: float) -> void:
 				_rules_demo_phase_start = now
 
 		RulesDemoPhase.APPROACH_PULL:
-			# 正しいコーナーにある「引き込む」対象の点へ接近する
-			var target_pos2: Vector2 = point_positions[_rules_demo_pull_idx]
+			# 向こう側（正しいコーナー）にある動く点へ接近する
+			var target_pos2: Vector2 = point_positions[_rules_demo_move_idx]
 			var outward_dir2: Vector2 = (target_pos2 - centroid).normalized()
 			var approach_from2: Vector2 = target_pos2 + outward_dir2 * RULES_DEMO_APPROACH_OFFSET_PX
 			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
@@ -3048,17 +3056,13 @@ func _process_rules_demo_script(_delta: float) -> void:
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
 			if t2 >= 1.0:
-				# 引力パートの移動経路（コーナー→凹み位置）をここで確定する
-				# pull_idx はここで unsnap してはじめて引力で動けるようになる
-				input_handler.unsnap_point(_rules_demo_pull_idx)
-				_rules_demo_pull_start_pos = point_positions[_rules_demo_pull_idx]
-				_rules_demo_pull_end_pos = centroid.lerp(corners[_rules_demo_pull_idx], RULES_DEMO_DENT_FACTOR)
+				_rules_demo_pull_start_pos = target_pos2
+				_rules_demo_pull_end_pos = centroid.lerp(corners[_rules_demo_move_idx], RULES_DEMO_DENT_FACTOR)
 				_rules_demo_phase = RulesDemoPhase.HOLD_PULL
 				_rules_demo_phase_start = now
 
 		RulesDemoPhase.HOLD_PULL:
-			# 自キャラ自身が、コーナー位置から凹み位置へ向かって移動する。引力ONのまま。
-			# 点は自キャラに引き寄せられて追従してくる。
+			# 自キャラ自身が、コーナー位置からこちら側（凹み位置）へ向かって移動する。引力ONのまま。
 			var t3: float = clampf(elapsed / RULES_DEMO_HOLD_PULL_SEC, 0.0, 1.0)
 			input_handler.player_position = _rules_demo_pull_start_pos.lerp(_rules_demo_pull_end_pos, t3)
 			input_handler.player_force_repelling = false
@@ -3071,10 +3075,7 @@ func _process_rules_demo_script(_delta: float) -> void:
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
 			if elapsed >= RULES_DEMO_REST_SEC:
-				# 1周終了。役割をスワップして次周へ
-				var tmp: int = _rules_demo_push_idx
-				_rules_demo_push_idx = _rules_demo_pull_idx
-				_rules_demo_pull_idx = tmp
+				# 役割交代はしない。同じ点で次周へ（無限ループ）
 				_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
 				_rules_demo_phase_start = now
 
@@ -5786,6 +5787,7 @@ func _process(delta: float) -> void:
 	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
 	if game_state == "rules":
+		_enforce_rules_demo_locked_points()
 		_process_rules_demo_script(delta)
 	_enforce_stage1_fixed_points()
 	_update_snap_count_tracking()
