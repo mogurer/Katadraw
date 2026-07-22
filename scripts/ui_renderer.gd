@@ -1880,7 +1880,7 @@ func _draw_credit(vp: Vector2) -> void:
 	var start_y: float = vp.y * 0.38 - 270.0
 	var lines: Array[String] = [
 		"Producer / Director / UI&Logo Design : Kionachi",
-		"Planner : Hirame Kumokura",
+		"Planner : Hirame Kumogura",
 		"Stage Editing / Web Design : Irori Hibachi",
 		"Title Music Composition / Sound Effect Design : tigerlily",
 		"Cat : Ohagi",
@@ -2376,7 +2376,7 @@ func _draw_controls_content(origin: Vector2, width: float, start_y: float, fs_h:
 
 const ZOU_STAFF_ROLL_LINES: PackedStringArray = [
 	"Producer / Director : Kionachi",
-	"Planner : Hirame Kumokura",
+	"Planner : Hirame Kumogura",
 	"Stage Editing / Web Design : Irori Hibachi",
 	"Title Music Composition / Sound Effect Design : tigerlily",
 	"Music Support : Diverse System",
