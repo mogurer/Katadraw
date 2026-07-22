@@ -64,7 +64,7 @@ const POINT_COLOR := GameConfig.INK_COLOR
 const POINT_COLOR_2 := Color(0.55, 0.20, 0.30)
 const POINT_RADIUS := 9.0
 const POINT_RADIUS_HOVER := 13.0
-const LINE_WIDTH := 5.0
+const LINE_WIDTH := 7.0
 # ガイド線から遠いほど大きい円（px 半径）。距離は get_distance_to_hint_guide_outline 基準
 const POINT_RADIUS_GUIDE_NEAR_MIN := 5.0
 const POINT_RADIUS_GUIDE_FAR_MAX := 25.0

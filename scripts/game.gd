@@ -391,7 +391,7 @@ const RULES_DEMO_ATTRACT_WAIT_SEC: float = 0.4
 ## 折り返し地点（B・A）に到達する何秒前に力を止めるか。
 ## 0にすると、これまで通り折り返し地点に着くまで力をかけ続ける。
 const RULES_DEMO_REPEL_STOP_BEFORE_SEC: float = 0.3
-const RULES_DEMO_ATTRACT_STOP_BEFORE_SEC: float = 0.3
+const RULES_DEMO_ATTRACT_STOP_BEFORE_SEC: float = 1.5
 const RULES_DEMO_REST_SEC: float = 0.2
 ## rulesデモ: 自キャラ・ポイントが行き来する「1本の直線」の方向（画面には描画しない、内部データのみ）。
 ## 正規化はコード側で行う。
