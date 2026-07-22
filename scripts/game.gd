@@ -6011,8 +6011,12 @@ func _process(delta: float) -> void:
 			_dwell_counts = [0,   0,   0,   0,   0,   0,   0,   0,   0,   0  ]
 			_dwell_prev_bucket = clampi(int(current_circularity / 10.0), 0, 9)
 			_dwell_counts[_dwell_prev_bucket] = 1
+			if GameConfig.IS_TRIAL and pause_retry_elapsed >= 0.0:
+				# 体験版のみ: やりなおし後もタイマーをリセットせず、経過時間を継続する
+				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION - pause_retry_elapsed
+			else:
+				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
 			pause_retry_elapsed = -1.0
-			start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
 			BGMManager.resume_ingame()
 		queue_redraw()
 
