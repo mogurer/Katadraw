@@ -969,6 +969,43 @@ func _update_player_hover() -> void:
 	var pos: Vector2 = input_handler.player_position
 	var vp: Vector2 = get_viewport_rect().size
 
+	if pause_active:
+		var ui_w: float = vp.x * GameConfig.UI_WIDTH_RATIO
+		var play_w: float = vp.x - ui_w
+		var play_cx: float = ui_w + play_w / 2.0
+		if pause_confirm_title:
+			# TA中断確認ダイアログ（はい/いいえ）
+			var cbtn_w: float = 220.0
+			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
+			var cbtn_cy: float = vp.y / 2.0 + 50.0
+			if pos.y >= cbtn_cy - 35.0 and pos.y <= cbtn_cy + 35.0:
+				if pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
+					pause_confirm_index = 0
+				elif pos.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
+					pause_confirm_index = 1
+		else:
+			# 通常のポーズメニュー（とじる／やりなおす／タイトルへ）
+			var ps: float = 0.9
+			var full_h: float = vp.y - 48.0
+			var panel_h: float = full_h * ps
+			var panel_y: float = (vp.y - panel_h) / 2.0
+			var panel_end_y: float = panel_y + panel_h
+			var full_w: float = play_w - 48.0
+			var panel_w: float = full_w * ps
+			var btn_w: float = panel_w * 0.27
+			var btn_gap: float = panel_w * 0.03
+			var base_cy: float = panel_end_y - 56.0 * ps - 50.0 * ps
+			var labels: Array[String] = _pause_menu_labels()
+			var n: int = labels.size()
+			var total_w: float = btn_w * float(n) + btn_gap * float(n - 1)
+			var btn_start_x: float = play_cx - total_w / 2.0 + btn_w / 2.0
+			if pos.y >= base_cy - 35.0 and pos.y <= base_cy + 35.0:
+				for i in range(n):
+					var bcx: float = btn_start_x + i * (btn_w + btn_gap)
+					if pos.x >= bcx - btn_w / 2.0 and pos.x <= bcx + btn_w / 2.0:
+						pause_index = i
+		return
+
 	if game_state == "menu":
 		if _menu_hover_holdoff_frames <= 0:
 			if _cursor_pad_override_hidden:
@@ -1020,24 +1057,6 @@ func _update_player_hover() -> void:
 				config_reset_hovered = false
 				if config_index == 6 and not GameConfig.IS_TRIAL:
 					config_row6_reset_selected = get_config_reset_button_rect(vp).has_point(pos)
-		return
-
-	if game_state == "playing" and pause_active:
-		if pause_confirm_title:
-			var play_cx: float = vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) / 2.0
-			var cbtn_cy: float = vp.y / 2.0 + 50.0
-			var cbtn_w: float = 220.0
-			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-			var btn_h: float = 64.0
-			if pos.y >= cbtn_cy - btn_h / 2.0 and pos.y <= cbtn_cy + btn_h / 2.0:
-				if pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
-					pause_confirm_index = 0
-				elif pos.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
-					pause_confirm_index = 1
-		else:
-			var hit: int = _hit_pause_button(pos, vp)
-			if hit >= 0:
-				pause_index = hit
 		return
 
 	if game_state == "results":
