@@ -591,6 +591,7 @@ var pause_confirm_title: bool = false
 var pause_confirm_index: int = 0  # 0=はい, 1=いいえ
 var pause_elapsed: float = 0.0    # elapsed time saved when pausing
 var pause_retry_elapsed: float = -1.0  # やりなおし時、再開時の経過時間を保持（-1=未使用）
+var _lr_retry_prev_held: bool = false  # L+R同時押しによるやりなおしショートカットの、直前フレームでの押下状態
 
 # --- Logo ---
 var logo_texture: Texture2D
@@ -2363,6 +2364,16 @@ func _input(event: InputEvent) -> void:
 		_force_clear_for_debug()
 		return
 
+	if (
+		game_state == "playing"
+		and event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_R
+	):
+		_trigger_quick_retry()
+		return
+
 	if game_state == "playing" and is_pause_key:
 		pause_active = true
 		pause_index = 0
@@ -3534,7 +3545,7 @@ func _hit_pause_button(pos: Vector2, vp: Vector2) -> int:
 
 
 func _do_pause_retry() -> void:
-	"""やりなおし: guide_info へ戻す。タイマーはリセットしない"""
+	"""やりなおし: guide_info へ戻す。カウントダウン完了時にタイマーをリセットする"""
 	_reset_spot_combo()
 	pause_retry_elapsed = pause_elapsed
 	pause_active = false
@@ -3544,6 +3555,15 @@ func _do_pause_retry() -> void:
 		var master_idx_r: int = GameConfig.resolve_play_stage_to_master_index(current_stage)
 		cfg = StageDebugOverrides.build_config_for_index(master_idx_r)
 	_begin_stage_with_config(current_stage, cfg, _default_stage_shape_center(vp, current_stage))
+
+
+## パッドL+R同時押し／キーボードRキーによる、即時やりなおし。
+## 通常の「やりなおし」（ポーズメニュー経由）と同じ処理を、ポーズを経由せずに直接呼び出す。
+func _trigger_quick_retry() -> void:
+	if game_state != "playing":
+		return
+	pause_elapsed = Time.get_ticks_msec() / 1000.0 - start_time
+	_do_pause_retry()
 
 
 func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: bool) -> void:
@@ -5887,6 +5907,13 @@ func _process(delta: float) -> void:
 	_update_ripple_effects()
 	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":
+		var lr_held: bool = (
+			Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
+			and Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
+		)
+		if lr_held and not _lr_retry_prev_held:
+			_trigger_quick_retry()
+		_lr_retry_prev_held = lr_held
 		var cur_move_grab: bool = _is_move_grab_active_for_count()
 		if _move_grab_was_active and not cur_move_grab:
 			if _move_count_track_valid:
@@ -5965,11 +5992,8 @@ func _process(delta: float) -> void:
 			_dwell_counts = [0,   0,   0,   0,   0,   0,   0,   0,   0,   0  ]
 			_dwell_prev_bucket = clampi(int(current_circularity / 10.0), 0, 9)
 			_dwell_counts[_dwell_prev_bucket] = 1
-			if pause_retry_elapsed >= 0.0:
-				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION - pause_retry_elapsed
-				pause_retry_elapsed = -1.0
-			else:
-				start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
+			pause_retry_elapsed = -1.0
+			start_time = Time.get_ticks_msec() / 1000.0 + ui_renderer.STAGE_INTRO_DURATION
 			BGMManager.resume_ingame()
 		queue_redraw()
 

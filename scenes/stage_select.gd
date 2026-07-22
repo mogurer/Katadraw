@@ -115,6 +115,7 @@ var _focus_return_id: int = -1    # フォーカス演出終了後に戻るス�
 
 # --- 最終ステージ演出 ---
 var _final_directing: bool = false
+var _scene_transition_started: bool = false  # ゲームシーンへの遷移を開始したら true。以降の入力を無視する。
 var _final_direction_played: bool = false  # セッション中フラグ（セーブなし）
 var _final_overlay_alpha: float = 0.0      # 暗転オーバーレイのアルファ値
 var _final_spark_drawn: Array = []          # 描画済みエッジ Array[[from: Vector2, to: Vector2]]
@@ -576,6 +577,8 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _scene_transition_started:
+		return
 	# 入力モード自動切替
 	if event is InputEventMouseButton and event.pressed:
 		_set_input_mode(0)
@@ -1608,6 +1611,7 @@ func _handle_popup_click(pos: Vector2) -> void:
 func _handle_popup_confirm(yes: bool) -> void:
 	_sfx_click.play()
 	if yes:
+		_scene_transition_started = true
 		StageSelectManager.pending_stage_id = _popup_stage
 		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 	else:
@@ -2076,6 +2080,7 @@ func _handle_esc_popup_click(pos: Vector2) -> void:
 func _handle_esc_popup_confirm(yes: bool) -> void:
 	_sfx_click.play()
 	if yes:
+		_scene_transition_started = true
 		BGMManager.stop()
 		TransitionManager.play_diagonal(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 	else:
@@ -2138,6 +2143,7 @@ func _handle_zou_popup_click(pos: Vector2) -> void:
 func _handle_zou_popup_confirm(yes: bool) -> void:
 	_sfx_click.play()
 	if yes:
+		_scene_transition_started = true
 		StageSelectManager.pending_stage_id = StageSelectManager._zou_stage_idx
 		TransitionManager.play_triangle(func(): get_tree().change_scene_to_file(_GAME_SCENE))
 	else:

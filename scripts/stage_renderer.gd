@@ -41,19 +41,19 @@ func draw_stage_lines() -> void:
 		for k in range(n):
 			var a: int = ord[k]
 			var b: int = ord[(k + 1) % n]
-			var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(a, b, n_corners) else _renderer.LINE_WIDTH / 3.0
+			var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(a, b, n_corners) else _renderer.LINE_WIDTH / 2.0
 			_game.draw_line(_game.point_positions[a], _game.point_positions[b], _renderer.LINE_COLOR, w, true)
 		return
 	match _game.stage_type:
 		"triangle", "square", "rhombus", "hexagon", "circle", "star", "cat_face", "fish", "heptagram", "heptagram_silhouette", "rugby_ball":
 			for i in range(n):
 				var b: int = (i + 1) % n
-				var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(i, b, n_corners) else _renderer.LINE_WIDTH / 3.0
+				var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(i, b, n_corners) else _renderer.LINE_WIDTH / 2.0
 				_game.draw_line(_game.point_positions[i], _game.point_positions[b], _renderer.LINE_COLOR, w, true)
 		_:
 			for i in range(n):
 				var b: int = (i + 1) % n
-				var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(i, b, n_corners) else _renderer.LINE_WIDTH / 3.0
+				var w: float = _renderer.LINE_WIDTH if _is_kata_edge_correct(i, b, n_corners) else _renderer.LINE_WIDTH / 2.0
 				_game.draw_line(_game.point_positions[i], _game.point_positions[b], _renderer.LINE_COLOR, w, true)
 
 
