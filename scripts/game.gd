@@ -371,33 +371,37 @@ var rules_demo_radius: float = 90.0
 
 # --- rulesデモ 台本アニメーション ---
 enum RulesDemoPhase {
-	APPROACH_PUSH,   # 動く点（凹み位置）へ自キャラが接近
-	HOLD_PUSH,       # 接触・静止したまま斥力。点が向こう側（正しいコーナー）へ
-	REST_A,
-	APPROACH_PULL,   # 動く点（正しいコーナー）へ自キャラが接近
-	HOLD_PULL,       # 接触後、自キャラ自身が凹み位置へ移動しながら引力。点が追従
-	REST_B,
+	MOVE_TO_B,   # A→Bへ移動しながら斥力
+	REST_AT_B,   # Bで静止
+	MOVE_TO_A,   # B→Aへ移動しながら引力
+	REST_AT_A,   # Aで静止
 }
-var _rules_demo_phase: RulesDemoPhase = RulesDemoPhase.APPROACH_PUSH
+var _rules_demo_phase: RulesDemoPhase = RulesDemoPhase.MOVE_TO_B
 var _rules_demo_phase_start: float = 0.0
 var _rules_demo_move_idx: int = -1               # 動く点。常にこの1点だけを動かす
 var _rules_demo_locked_indices: Array[int] = []  # 固定する残り3点
-var _rules_demo_pull_start_pos: Vector2 = Vector2.ZERO
-var _rules_demo_pull_end_pos: Vector2 = Vector2.ZERO
 var _rules_real_cursor_pos: Vector2 = Vector2.ZERO   # 実際のプレイヤーカーソル位置（デモのダミー自キャラとは独立）
 var _rules_real_cursor_initialized: bool = false
 
-const RULES_DEMO_APPROACH_SEC: float = 1.0
-const RULES_DEMO_HOLD_PUSH_SEC: float = 1.8
-const RULES_DEMO_HOLD_PULL_SEC: float = 1.8
-const RULES_DEMO_REST_SEC: float = 0.8
-const RULES_DEMO_DENT_FACTOR: float = 0.35
-const RULES_DEMO_APPROACH_OFFSET_PX: float = 70.0
-const RULES_DEMO_APPROACH_MIN_Y: float = 400.0    # 接近開始位置のY座標下限（画面上部アイコンとの重なり防止）。実機で要調整。
-# 動く点の移動方向（「向こう側＝コーナー」から「こちら側＝凹み位置」へ向かう方向）。
-# 左上⇔右下の斜め方向。Godotの座標系はy下向きが正なので、Vector2(-1,-1)が「左上」方向になる。
-const RULES_DEMO_MOVE_DIR := Vector2(-1.0, -1.0)  # 正規化はコード側で行う
-const RULES_DEMO_DENT_DIST_PX: float = 240.0      # コーナーから凹み位置までの距離（px）
+const RULES_DEMO_MOVE_SEC: float = 5.0
+## 斥力/引力をONにしてから、自キャラが実際に移動を始めるまでの待ち時間（秒）。
+## 「力をかけているのに、ポイントがすぐには動き出さない」溜めの表現に使う。
+const RULES_DEMO_REPEL_WAIT_SEC: float = 0.4
+const RULES_DEMO_ATTRACT_WAIT_SEC: float = 0.4
+## 折り返し地点（B・A）に到達する何秒前に力を止めるか。
+## 0にすると、これまで通り折り返し地点に着くまで力をかけ続ける。
+const RULES_DEMO_REPEL_STOP_BEFORE_SEC: float = 0.3
+const RULES_DEMO_ATTRACT_STOP_BEFORE_SEC: float = 0.3
+const RULES_DEMO_REST_SEC: float = 0.2
+## rulesデモ: 自キャラ・ポイントが行き来する「1本の直線」の方向（画面には描画しない、内部データのみ）。
+## 正規化はコード側で行う。
+const RULES_DEMO_LINE_DIR := Vector2(-1.0, -1.0)
+## コーナーから、直線に沿って「下流側（右下）」へどれだけ離れた位置をA地点とするか
+const RULES_DEMO_A_DIST: float = 300.0
+## コーナーから、直線に沿って「上流側（左上）」へどれだけ離れた位置をB地点とするか
+const RULES_DEMO_B_DIST: float = -200.0
+## rulesデモ: ひし形の左右頂点（半横）を標準(1.0)よりどれだけ外側にするか
+const RULES_DEMO_RHOMBUS_HORIZONTAL_HALF: float = 1.75
 
 # --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
@@ -3025,6 +3029,7 @@ func _enter_rules() -> void:
 		"display_rate_min_pct": 0.0,
 		"guide_follows_player_radius": 0,
 		"rhombus_vertical_half": 0.5,
+		"rhombus_horizontal_half": RULES_DEMO_RHOMBUS_HORIZONTAL_HALF,
 		# min/max だけでは縮まない（HUD フィット後に点が再配置される）。見た目の目標形をここで縮小。
 		"hud_guide_layout_scale_mul": 0.5,
 	})
@@ -3043,13 +3048,17 @@ func _setup_rules_demo_shape() -> void:
 	# コーナー順: 0=上, 1=右, 2=下, 3=左。動かす点 = 0（上）。
 	_rules_demo_move_idx = 0
 	_rules_demo_locked_indices = [1, 2, 3]
-	var move_dir: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
+	var line_dir: Vector2 = RULES_DEMO_LINE_DIR.normalized()
+	var dent_dist: float = RULES_DEMO_A_DIST * 0.5
+	var corner_pos: Vector2 = corners[_rules_demo_move_idx]
+	var pos_a: Vector2 = corner_pos - line_dir * RULES_DEMO_A_DIST
 	for i in range(4):
 		if i == _rules_demo_move_idx:
-			point_positions[i] = corners[i] - move_dir * RULES_DEMO_DENT_DIST_PX
+			point_positions[i] = corners[i] - line_dir * dent_dist
 		else:
 			point_positions[i] = corners[i]
-	_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
+	input_handler.player_position = pos_a
+	_rules_demo_phase = RulesDemoPhase.MOVE_TO_B
 	_rules_demo_phase_start = Time.get_ticks_msec() / 1000.0
 
 
@@ -3060,9 +3069,23 @@ func _enforce_rules_demo_locked_points() -> void:
 	var corners: Array = stage_manager.get_corner_positions_world()
 	if corners.size() != 4:
 		return
+	# 距離ベース: 2-optでインデックスが入れ替わっても最近傍コーナーへ正しく追従する
+	var used_corners: Array[int] = []
 	for idx in _rules_demo_locked_indices:
-		if idx >= 0 and idx < point_positions.size() and idx < corners.size():
-			point_positions[idx] = corners[idx]
+		if idx < 0 or idx >= point_positions.size():
+			continue
+		var best_corner_idx: int = -1
+		var best_dist: float = INF
+		for ci in range(corners.size()):
+			if used_corners.has(ci):
+				continue
+			var d: float = point_positions[idx].distance_to(corners[ci])
+			if d < best_dist:
+				best_dist = d
+				best_corner_idx = ci
+		if best_corner_idx >= 0:
+			point_positions[idx] = corners[best_corner_idx]
+			used_corners.append(best_corner_idx)
 
 
 ## rulesデモの台本アニメーションを毎フレーム進行させる（動く点は常に1点のみ）。
@@ -3074,67 +3097,61 @@ func _process_rules_demo_script(_delta: float) -> void:
 	var corners: Array = stage_manager.get_corner_positions_world()
 	if corners.size() != 4:
 		return
+
+	var line_dir: Vector2 = RULES_DEMO_LINE_DIR.normalized()
+	var corner_pos: Vector2 = corners[_rules_demo_move_idx]
+	var pos_a: Vector2 = corner_pos - line_dir * RULES_DEMO_A_DIST
+	var pos_b: Vector2 = corner_pos + line_dir * RULES_DEMO_B_DIST
+
 	match _rules_demo_phase:
-		RulesDemoPhase.APPROACH_PUSH:
-			# 凹み位置（こちら側）を、固定コーナー座標から都度再計算する（ドリフト防止）
-			var move_dir: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
-			var target_pos: Vector2 = corners[_rules_demo_move_idx] - move_dir * RULES_DEMO_DENT_DIST_PX
-			var approach_from: Vector2 = target_pos - move_dir * RULES_DEMO_APPROACH_OFFSET_PX
-			var t: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
-			input_handler.player_position = approach_from.lerp(target_pos, t)
-			input_handler.player_force_repelling = false
-			input_handler.player_force_attracting = false
-			if t >= 1.0:
-				_rules_demo_phase = RulesDemoPhase.HOLD_PUSH
-				_rules_demo_phase_start = now
+		RulesDemoPhase.MOVE_TO_B:
+			if elapsed < RULES_DEMO_REPEL_WAIT_SEC:
+				# 待ち時間中は自キャラを開始位置に留め、力だけをかけ続ける
+				input_handler.player_position = pos_a
+				input_handler.player_force_repelling = true
+				input_handler.player_force_attracting = false
+			else:
+				var move_elapsed: float = elapsed - RULES_DEMO_REPEL_WAIT_SEC
+				var t: float = clampf(move_elapsed / RULES_DEMO_MOVE_SEC, 0.0, 1.0)
+				input_handler.player_position = pos_a.lerp(pos_b, t)
+				# 折り返し地点（B）に到達する RULES_DEMO_REPEL_STOP_BEFORE_SEC 秒前に力を止める
+				var remaining: float = RULES_DEMO_MOVE_SEC - move_elapsed
+				input_handler.player_force_repelling = remaining > RULES_DEMO_REPEL_STOP_BEFORE_SEC
+				input_handler.player_force_attracting = false
+				if t >= 1.0:
+					_rules_demo_phase = RulesDemoPhase.REST_AT_B
+					_rules_demo_phase_start = now
 
-		RulesDemoPhase.HOLD_PUSH:
-			# 自キャラはここで一切動かさない。斥力だけをONにし、点が向こう側（コーナー）へ離れるに任せる。
-			input_handler.player_force_repelling = true
-			input_handler.player_force_attracting = false
-			if elapsed >= RULES_DEMO_HOLD_PUSH_SEC:
-				_rules_demo_phase = RulesDemoPhase.REST_A
-				_rules_demo_phase_start = now
-
-		RulesDemoPhase.REST_A:
+		RulesDemoPhase.REST_AT_B:
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
 			if elapsed >= RULES_DEMO_REST_SEC:
-				_rules_demo_phase = RulesDemoPhase.APPROACH_PULL
+				_rules_demo_phase = RulesDemoPhase.MOVE_TO_A
 				_rules_demo_phase_start = now
 
-		RulesDemoPhase.APPROACH_PULL:
-			# 向こう側（正しいコーナー）を、固定コーナー座標から取得する（ドリフト防止）
-			var move_dir2: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
-			var target_pos2: Vector2 = corners[_rules_demo_move_idx]
-			var approach_from2: Vector2 = corners[_rules_demo_move_idx] - move_dir2 * RULES_DEMO_DENT_DIST_PX
-			approach_from2.y = maxf(approach_from2.y, RULES_DEMO_APPROACH_MIN_Y)
-			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
-			input_handler.player_position = approach_from2.lerp(target_pos2, t2)
-			input_handler.player_force_repelling = false
-			input_handler.player_force_attracting = false
-			if t2 >= 1.0:
-				_rules_demo_pull_start_pos = target_pos2
-				_rules_demo_pull_end_pos = corners[_rules_demo_move_idx] - move_dir2 * RULES_DEMO_DENT_DIST_PX
-				_rules_demo_phase = RulesDemoPhase.HOLD_PULL
-				_rules_demo_phase_start = now
+		RulesDemoPhase.MOVE_TO_A:
+			if elapsed < RULES_DEMO_ATTRACT_WAIT_SEC:
+				# 待ち時間中は自キャラを開始位置（B地点）に留め、力だけをかけ続ける
+				input_handler.player_position = pos_b
+				input_handler.player_force_repelling = false
+				input_handler.player_force_attracting = true
+			else:
+				var move_elapsed2: float = elapsed - RULES_DEMO_ATTRACT_WAIT_SEC
+				var t2: float = clampf(move_elapsed2 / RULES_DEMO_MOVE_SEC, 0.0, 1.0)
+				input_handler.player_position = pos_b.lerp(pos_a, t2)
+				# 折り返し地点（A）に到達する RULES_DEMO_ATTRACT_STOP_BEFORE_SEC 秒前に力を止める
+				var remaining2: float = RULES_DEMO_MOVE_SEC - move_elapsed2
+				input_handler.player_force_attracting = remaining2 > RULES_DEMO_ATTRACT_STOP_BEFORE_SEC
+				input_handler.player_force_repelling = false
+				if t2 >= 1.0:
+					_rules_demo_phase = RulesDemoPhase.REST_AT_A
+					_rules_demo_phase_start = now
 
-		RulesDemoPhase.HOLD_PULL:
-			# 自キャラ自身が、コーナー位置からこちら側（凹み位置）へ向かって移動する。引力ONのまま。
-			var t3: float = clampf(elapsed / RULES_DEMO_HOLD_PULL_SEC, 0.0, 1.0)
-			input_handler.player_position = _rules_demo_pull_start_pos.lerp(_rules_demo_pull_end_pos, t3)
-			input_handler.player_force_repelling = false
-			input_handler.player_force_attracting = true
-			if t3 >= 1.0:
-				_rules_demo_phase = RulesDemoPhase.REST_B
-				_rules_demo_phase_start = now
-
-		RulesDemoPhase.REST_B:
+		RulesDemoPhase.REST_AT_A:
 			input_handler.player_force_repelling = false
 			input_handler.player_force_attracting = false
 			if elapsed >= RULES_DEMO_REST_SEC:
-				# 役割交代はしない。同じ点で次周へ（無限ループ）
-				_rules_demo_phase = RulesDemoPhase.APPROACH_PUSH
+				_rules_demo_phase = RulesDemoPhase.MOVE_TO_B
 				_rules_demo_phase_start = now
 
 	queue_redraw()

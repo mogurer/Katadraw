@@ -1434,18 +1434,7 @@ func _step_drag_physics(delta: float) -> bool:
 					_game.point_positions[_pd].snapped(Vector2.ONE),
 				])
 			topology_changed = true
-			if _game.game_state == "rules":
-				# rules デモ: 固定3点を含む2-optは _enforce_rules_demo_locked_points() により毎フレーム無効化される。
-				# 代わりに動く点だけをコーナーへ直接リセットして交差を解消する。
-				var _ridx: int = _game._rules_demo_move_idx
-				if _ridx >= 0 and _ridx < _game.point_positions.size():
-					var _rc: Array = _game.stage_manager.get_corner_positions_world()
-					if _rc.size() > _ridx:
-						_game.point_positions[_ridx] = _rc[_ridx]
-						if _ridx < point_velocities.size():
-							point_velocities[_ridx] = Vector2.ZERO
-			else:
-				_resolve_intersections_2opt(lo, hi)
+			_resolve_intersections_2opt(lo, hi)
 			_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS
 		elif _foldback_cooldown == 0:
 			var fb_k: int = _find_first_foldback_vertex_index(FOLDBACK_DOT_THRESHOLD)

@@ -749,13 +749,14 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 			_score_arcs_norm = {}
 		"rhombus":
 			_generate_rhombus_shape(shape_center, point_positions, cfg)
+			var a_rh: float = float(cfg.get("rhombus_horizontal_half", 1.0))
 			var b_rh: float = float(cfg.get("rhombus_vertical_half", 0.5))
-			ideal_outline_points = _build_rhombus_outline(b_rh)
+			ideal_outline_points = _build_rhombus_outline(a_rh, b_rh)
 			ideal_outline_segment_is_arc = _outline_segments_all_straight(ideal_outline_points.size())
 			correspondence_scale = guide_radius_val
-			shape_corner_points = [Vector2(0.0,-b_rh), Vector2(1.0,0.0), Vector2(0.0,b_rh), Vector2(-1.0,0.0)]
+			shape_corner_points = [Vector2(0.0, -b_rh), Vector2(a_rh, 0.0), Vector2(0.0, b_rh), Vector2(-a_rh, 0.0)]
 			# スコア用: ひし形の頂点（単位スケール、弧なし）
-			_score_verts_norm = [Vector2(0.0, -b_rh), Vector2(1.0, 0.0), Vector2(0.0, b_rh), Vector2(-1.0, 0.0)]
+			_score_verts_norm = [Vector2(0.0, -b_rh), Vector2(a_rh, 0.0), Vector2(0.0, b_rh), Vector2(-a_rh, 0.0)]
 			_score_arcs_norm = {}
 		"hexagon":
 			_generate_hexagon_shape(shape_center, point_positions, cfg)
@@ -960,13 +961,13 @@ func _generate_square_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionar
 
 func _generate_rhombus_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
 	"""ひし形: 4 辺上に理想点。輪郭は _build_rhombus_outline と辺 8 サンプルで整合"""
+	var a_half: float = float(cfg.get("rhombus_horizontal_half", 1.0))
 	var b_half: float = float(cfg.get("rhombus_vertical_half", 0.5))
-	var a: float = 1.0
 	var verts: Array = [
 		Vector2(0.0, -b_half),
-		Vector2(a, 0.0),
+		Vector2(a_half, 0.0),
 		Vector2(0.0, b_half),
-		Vector2(-a, 0.0),
+		Vector2(-a_half, 0.0),
 	]
 	var base_r: float = (min_radius + max_radius) / 2.0
 	var variance_factor: float = float(cfg.get("variance", 0.0))
@@ -984,9 +985,9 @@ func _generate_rhombus_shape(center: Vector2, pts: Array[Vector2], cfg: Dictiona
 		pts.append(center + (ideal + noise) * base_r)
 
 
-func _build_rhombus_outline(vertical_half: float) -> Array:
-	"""横長のひし形（半横 a=1、半縦 = vertical_half）。辺 8 サンプル×4=32 点。"""
-	var a: float = 1.0
+func _build_rhombus_outline(horizontal_half: float, vertical_half: float) -> Array:
+	"""横長のひし形（半横 = horizontal_half、半縦 = vertical_half）。辺 8 サンプル×4=32 点。"""
+	var a: float = horizontal_half
 	var b: float = vertical_half
 	var verts: Array = [
 		Vector2(0.0, -b),
@@ -1003,8 +1004,8 @@ func _build_rhombus_outline(vertical_half: float) -> Array:
 	return result
 
 
-func _build_rhombus_edges(vertical_half: float) -> Array:
-	var a: float = 1.0
+func _build_rhombus_edges(horizontal_half: float, vertical_half: float) -> Array:
+	var a: float = horizontal_half
 	var b: float = vertical_half
 	var verts: Array = [
 		Vector2(0.0, -b),
@@ -1791,7 +1792,10 @@ func _get_outline_edges_for_stage(stage_t: String) -> Array:
 		"square":
 			return _build_square_edges()
 		"rhombus":
-			return _build_rhombus_edges(float(effective_config.get("rhombus_vertical_half", 0.5)))
+			return _build_rhombus_edges(
+				float(effective_config.get("rhombus_horizontal_half", 1.0)),
+				float(effective_config.get("rhombus_vertical_half", 0.5))
+			)
 		"hexagon":
 			return _build_hexagon_edges()
 		"cat_face":
