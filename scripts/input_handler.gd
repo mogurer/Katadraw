@@ -459,6 +459,8 @@ func handle_mouse_motion(mouse: Vector2, motion_relative: Vector2 = Vector2.ZERO
 
 func handle_mouse_press(mouse: Vector2, button: int = MOUSE_BUTTON_LEFT) -> void:
 	_last_input_method = "mouse"
+	if _game.game_state == "rules":
+		return
 	_mouse_target = mouse
 	if not player_position_initialized:
 		player_position = mouse
@@ -685,6 +687,8 @@ func handle_pad_button(btn: int, pressed: bool) -> void:
 	if _game.point_positions.is_empty():
 		return
 	_last_input_method = "pad"
+	if _game.game_state == "rules":
+		return
 	if btn == JOY_BUTTON_A:
 		if pressed and _game._is_a_button_disabled_stage():
 			return
@@ -1430,7 +1434,18 @@ func _step_drag_physics(delta: float) -> bool:
 					_game.point_positions[_pd].snapped(Vector2.ONE),
 				])
 			topology_changed = true
-			_resolve_intersections_2opt(lo, hi)
+			if _game.game_state == "rules":
+				# rules デモ: 固定3点を含む2-optは _enforce_rules_demo_locked_points() により毎フレーム無効化される。
+				# 代わりに動く点だけをコーナーへ直接リセットして交差を解消する。
+				var _ridx: int = _game._rules_demo_move_idx
+				if _ridx >= 0 and _ridx < _game.point_positions.size():
+					var _rc: Array = _game.stage_manager.get_corner_positions_world()
+					if _rc.size() > _ridx:
+						_game.point_positions[_ridx] = _rc[_ridx]
+						if _ridx < point_velocities.size():
+							point_velocities[_ridx] = Vector2.ZERO
+			else:
+				_resolve_intersections_2opt(lo, hi)
 			_foldback_cooldown = FOLDBACK_COOLDOWN_STEPS
 		elif _foldback_cooldown == 0:
 			var fb_k: int = _find_first_foldback_vertex_index(FOLDBACK_DOT_THRESHOLD)

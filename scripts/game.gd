@@ -384,6 +384,8 @@ var _rules_demo_move_idx: int = -1               # 動く点。常にこの1点�
 var _rules_demo_locked_indices: Array[int] = []  # 固定する残り3点
 var _rules_demo_pull_start_pos: Vector2 = Vector2.ZERO
 var _rules_demo_pull_end_pos: Vector2 = Vector2.ZERO
+var _rules_real_cursor_pos: Vector2 = Vector2.ZERO   # 実際のプレイヤーカーソル位置（デモのダミー自キャラとは独立）
+var _rules_real_cursor_initialized: bool = false
 
 const RULES_DEMO_APPROACH_SEC: float = 1.0
 const RULES_DEMO_HOLD_PUSH_SEC: float = 1.8
@@ -391,10 +393,11 @@ const RULES_DEMO_HOLD_PULL_SEC: float = 1.8
 const RULES_DEMO_REST_SEC: float = 0.8
 const RULES_DEMO_DENT_FACTOR: float = 0.35
 const RULES_DEMO_APPROACH_OFFSET_PX: float = 70.0
+const RULES_DEMO_APPROACH_MIN_Y: float = 400.0    # 接近開始位置のY座標下限（画面上部アイコンとの重なり防止）。実機で要調整。
 # 動く点の移動方向（「向こう側＝コーナー」から「こちら側＝凹み位置」へ向かう方向）。
 # 左上⇔右下の斜め方向。Godotの座標系はy下向きが正なので、Vector2(-1,-1)が「左上」方向になる。
 const RULES_DEMO_MOVE_DIR := Vector2(-1.0, -1.0)  # 正規化はコード側で行う
-const RULES_DEMO_DENT_DIST_PX: float = 130.0      # コーナーから凹み位置までの距離（px）
+const RULES_DEMO_DENT_DIST_PX: float = 240.0      # コーナーから凹み位置までの距離（px）
 
 # --- Stage debug（Godot エディタからの実行時のみ。F2。エクスポート版では無効）---
 const STAGE_DEBUG_ROW_H: float = 80.0
@@ -3104,7 +3107,8 @@ func _process_rules_demo_script(_delta: float) -> void:
 			# 向こう側（正しいコーナー）を、固定コーナー座標から取得する（ドリフト防止）
 			var move_dir2: Vector2 = RULES_DEMO_MOVE_DIR.normalized()
 			var target_pos2: Vector2 = corners[_rules_demo_move_idx]
-			var approach_from2: Vector2 = target_pos2 + move_dir2 * RULES_DEMO_APPROACH_OFFSET_PX
+			var approach_from2: Vector2 = corners[_rules_demo_move_idx] - move_dir2 * RULES_DEMO_DENT_DIST_PX
+			approach_from2.y = maxf(approach_from2.y, RULES_DEMO_APPROACH_MIN_Y)
 			var t2: float = clampf(elapsed / RULES_DEMO_APPROACH_SEC, 0.0, 1.0)
 			input_handler.player_position = approach_from2.lerp(target_pos2, t2)
 			input_handler.player_force_repelling = false
@@ -3134,6 +3138,21 @@ func _process_rules_demo_script(_delta: float) -> void:
 				_rules_demo_phase_start = now
 
 	queue_redraw()
+
+
+## rules 画面での実カーソル位置を毎フレーム更新する。マウス時は viewport 座標、パッド時はスティック入力で移動。
+func _update_rules_real_cursor(delta: float) -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	if input_handler.get_last_input_method() == "mouse":
+		_rules_real_cursor_pos = get_viewport().get_mouse_position()
+		_rules_real_cursor_initialized = true
+	else:
+		if not _rules_real_cursor_initialized:
+			_rules_real_cursor_pos = vp * 0.5
+			_rules_real_cursor_initialized = true
+		_ui_menu_stick_update_axes_cache()
+		_rules_real_cursor_pos += Vector2(_ui_stick_lx, _ui_stick_ly) * 600.0 * delta
+		_rules_real_cursor_pos = _rules_real_cursor_pos.clamp(Vector2.ZERO, vp)
 
 
 func _input_rules(event: InputEvent, _is_confirm_key: bool, _is_confirm_pad: bool, _is_confirm_click: bool) -> void:
@@ -3166,7 +3185,7 @@ func _input_rules(event: InputEvent, _is_confirm_key: bool, _is_confirm_pad: boo
 
 	# クリックで「つぎへ」
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
-		if event.pressed and _hit_rules_button(input_handler.player_position):
+		if event.pressed and _hit_rules_button(_rules_real_cursor_pos):
 			ui_renderer.set_btn_press_with_callback(tr("BTN_NEXT"), func(): _rules_proceed())
 			queue_redraw()
 			return
@@ -3197,7 +3216,7 @@ func get_rules_next_button_rect() -> Rect2:
 
 
 func _player_on_rules_next_button() -> bool:
-	return get_rules_next_button_rect().has_point(input_handler.get_player_position())
+	return get_rules_next_button_rect().has_point(_rules_real_cursor_pos)
 
 
 ## チュートリアル「つぎへ」: tutorial_return_to によって遷移先を切り替える。
@@ -5843,6 +5862,7 @@ func _process(delta: float) -> void:
 	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
 	if game_state == "rules":
+		_update_rules_real_cursor(delta)
 		_enforce_rules_demo_locked_points()
 		_process_rules_demo_script(delta)
 	_enforce_stage1_fixed_points()

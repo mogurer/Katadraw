@@ -564,7 +564,7 @@ func draw(state: String, vp: Vector2) -> void:
 	#if _game.stage_session.debug_test_mode and state == "playing":
 		#_draw_debug_log_button(vp)
 
-	if not _game.pause_active and state != "logo" and state != "title_intro" and state != "zou_ending" and state != "zou_ta_unlock":
+	if not _game.pause_active and state != "logo" and state != "title_intro" and state != "zou_ending" and state != "zou_ta_unlock" and state != "rules":
 		var _show_avatar: bool = true
 		if state == "title":
 			var _t: float = Time.get_ticks_msec() / 1000.0 - _game.title_start_time
@@ -2489,6 +2489,9 @@ func _draw_rules(vp: Vector2) -> void:
 	_draw_auto_button_with_shadow(Vector2(vp.x / 2.0, vp.y - 48.0 - shift_up), tr("BTN_NEXT"), BTN_FONT_SIZE, alpha * btn_highlight, false, rules_btn_w)
 
 	_draw_rules_demo_player_layer(vp)
+	# 実カーソル（プレイヤーが実際に操作する位置）を通常の見た目で描画する。
+	if _game._rules_real_cursor_initialized:
+		_draw_player_avatar_at(_game._rules_real_cursor_pos, 1.0, true)
 
 
 func _radius_from_guide_distance_provisional(dist: float) -> float:
@@ -2556,23 +2559,25 @@ func _point_radius_by_guide(idx: int) -> float:
 
 
 func _draw_rules_demo_lines_only(vp: Vector2) -> void:
-	"""デモの線・頂点のみ（UIボタンより下のレイヤー）"""
+	"""デモの線・頂点のみ（UIボタンより下のレイヤー）。ダミー自キャラと区別するため薄く表示する。"""
 	var n: int = _game.point_positions.size()
 	if n == 0:
 		return
+	var dim_line: Color = Color(LINE_COLOR, 0.35)
+	var dim_point: Color = Color(POINT_COLOR, 0.35)
 	if _game.is_polygon_walk_order_active():
 		var ord: PackedInt32Array = _game.polygon_walk_order
 		for k in range(n):
 			var a: int = ord[k]
 			var b: int = ord[(k + 1) % n]
-			_game.draw_line(_game.point_positions[a], _game.point_positions[b], LINE_COLOR, LINE_WIDTH, true)
+			_game.draw_line(_game.point_positions[a], _game.point_positions[b], dim_line, LINE_WIDTH, true)
 	else:
 		for i in range(n):
-			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], LINE_COLOR, LINE_WIDTH, true)
+			_game.draw_line(_game.point_positions[i], _game.point_positions[(i + 1) % n], dim_line, LINE_WIDTH, true)
 	for i in range(n):
 		var pos: Vector2 = _game.point_positions[i]
 		var r: float = _point_radius_by_guide(i)
-		_game.draw_circle(pos, r, POINT_COLOR)
+		_game.draw_circle(pos, r, dim_point)
 
 
 func _repro_get_display_value() -> float:
@@ -2611,6 +2616,9 @@ func _draw_rules_demo_player_layer(vp: Vector2) -> void:
 	_draw_spore_particles()
 	# rules デモでは達成率のパーセンテージ表示は不要のため撤去した。
 	_draw_right_stick_debug_line(vp)
+	# ダミー自キャラ（台本アニメーション）を薄い半透明で表示する。
+	if _game._rules_demo_move_idx >= 0:
+		_draw_player_avatar_at(_game.input_handler.get_player_position(), 0.35)
 
 
 # =============================================================================
@@ -3031,6 +3039,29 @@ func _draw_player_avatar() -> void:
 		if attract_prog > 0.0:
 			var attract_color := Color(PLAYER_FORCE_FIELD_FILL_ATTRACT.r, PLAYER_FORCE_FIELD_FILL_ATTRACT.g, PLAYER_FORCE_FIELD_FILL_ATTRACT.b, 0.85)
 			_draw_charge_gauge(draw_center, core_r * 1.5 * av_scale, attract_prog, attract_color)
+
+
+## 指定座標に自キャラを描画する。alpha_mul で透明度を調整。neutral=true にすると力の状態に関係なく中立の見た目で描く。
+## 引力・斥力エフェクト（リング）はデモの見せ場のため alpha_mul を適用せず通常濃度で描画する。
+func _draw_player_avatar_at(pos: Vector2, alpha_mul: float = 1.0, neutral: bool = false) -> void:
+	var core_r: float = InputHandler.PLAYER_RADIUS
+	var field_r: float = InputHandler.PLAYER_FORCE_RADIUS
+	var attracting: bool = false if neutral else _game.input_handler.is_player_attracting()
+	var repelling: bool = false if neutral else _game.input_handler.is_player_repelling()
+	if attracting or repelling:
+		# 引力・斥力リングエフェクトは通常の濃さで描画する（alpha_mul を掛けない）
+		_draw_player_force_influence_visual(pos, core_r, field_r, attracting, 1.0)
+	else:
+		# 中立状態の薄いリングは alpha_mul を適用する
+		var ring_color: Color = Color(0.58, 0.62, 0.74, 0.08 * alpha_mul)
+		var edge_color: Color = Color(0.88, 0.9, 0.97, 0.18 * alpha_mul)
+		_game.draw_circle(pos, field_r, ring_color)
+		_game.draw_arc(pos, field_r, 0.0, TAU, 64, edge_color, 2.0)
+	# 本体（外周ハロー・コア・内側ドット）は alpha_mul で薄く表示する
+	_game.draw_circle(pos, core_r * 1.45, Color(LINE_COLOR, 0.92 * alpha_mul))
+	_game.draw_circle(pos, core_r, Color(LINE_COLOR, 1.0 * alpha_mul))
+	_game.draw_arc(pos, core_r * 0.72, 0.0, TAU, 48, Color(0.82, 0.9, 1.0, 0.7 * alpha_mul), 2.5)
+	_game.draw_circle(pos, core_r * 0.28, Color(1.0, 1.0, 1.0, 0.95 * alpha_mul))
 
 
 func _draw_selected_point(center: Vector2, base_r: float = POINT_RADIUS) -> void:
