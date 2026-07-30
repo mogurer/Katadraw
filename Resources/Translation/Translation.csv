@@ -91,35 +91,35 @@ STAGE_OCARINA,風が似合う,Ocarina,陶笛,陶笛
 STAGE_MUG,一息つく？,Mug,马克杯,馬克杯
 STAGE_TUTORIAL_TRIANGLE,関係性,Triangle,三角形,三角形
 STAGE_TEST_SQUARE,基本形,Square,正方形,正方形
-STAGE_HEXAGON_6,締めるもの,Regular Hexagon,正六边形,正六邊形
+STAGE_HEXAGON_6,スパナの相棒,Regular Hexagon,正六边形,正六邊形
 STAGE_CIRCLE_14,納めたい,Circle,正圆,正圓
 STAGE_ACOUSTIC_GUITAR,かき鳴らせ,Acoustic Guitar,原声吉他,木吉他
-STAGE_AIRSHIP,ドイツ生まれ,Airship,飞艇,飛船
+STAGE_AIRSHIP,風船のボス,Airship,飞艇,飛船
 STAGE_ARROW,毛利の教え,Arrow,箭头,箭頭
 STAGE_BANANA,曲がれ！,Banana,香蕉,香蕉
 STAGE_BED,羊毛３つ,Bed,床,床
 STAGE_BOOK,紙から電子へ,Book,书,書
 STAGE_BOTTLE_S,フタは堅め,Bottle,瓶子,瓶子
-STAGE_BUTTERFLY,変化の元,Butterfly,蝴蝶,蝴蝶
+STAGE_BUTTERFLY,羽化のあと,Butterfly,蝴蝶,蝴蝶
 STAGE_CACTUS,ステーキになる,Cactus,仙人掌,仙人掌
 STAGE_CAP,つばが重要,Cap,帽子,帽子
 STAGE_CICADA,秋の爆弾,Cicada,蝉,蟬
-STAGE_COWS_FACE,翼は授けない,Cow Face,牛脸,牛臉
+STAGE_COWS_FACE,赤い布に注意,Cow Face,牛脸,牛臉
 STAGE_CROSS,アンチ吸血鬼,Cross,十字,十字
-STAGE_CUPCAKE,1234,Cupcake,纸杯蛋糕,紙杯蛋糕
+STAGE_CUPCAKE,小さなごほうび,Cupcake,纸杯蛋糕,紙杯蛋糕
 STAGE_DENT,凸の相棒,Dent,凹陷,凹陷
 STAGE_FOLDING_FAN,涼を運ぶ,Folding Fan,折扇,折扇
 STAGE_FROG,恋が冷める,Frog,青蛙,青蛙
 STAGE_GHOST,出るぞ,Ghost,幽灵,幽靈
 STAGE_GIFT_BOX,ごほうび,Gift Box,礼品盒,禮品盒
 STAGE_HEART,ハツ,Heart,爱心,愛心
-STAGE_HEPTAGRAMSIL_J,誰かの心,Heptagram Silhouette,七芒星剪影,七芒星剪影
+STAGE_HEPTAGRAMSIL_J,７つの光,Heptagram Silhouette,七芒星剪影,七芒星剪影
 STAGE_HOURGLASS,時が落ちる,Hourglass,沙漏,沙漏
 STAGE_KEITORA,660cc,Kei Truck,小型货车,小型貨車
-STAGE_KEY,泣きゲー,Key,钥匙,鑰匙
+STAGE_KEY,扉よ開け,Key,钥匙,鑰匙
 STAGE_KING,統べる存在,King,国王,國王
-STAGE_MILK_CARTON,椅子になる,Milk Carton,牛奶盒,牛奶盒
-STAGE_MOUNT_FUJI,迷子はやばい,Mount Fuji,富士山,富士山
+STAGE_MILK_CARTON,畳んで捨てよう,Milk Carton,牛奶盒,牛奶盒
+STAGE_MOUNT_FUJI,日本一,Mount Fuji,富士山,富士山
 STAGE_MUSHROOMS,旨い菌,Mushrooms,蘑菇,蘑菇
 STAGE_ONE_QUARTER,25%,Quarter,四分之一,四分之一
 STAGE_ONION,目に染みる,Onion,洋葱,洋蔥
@@ -128,7 +128,7 @@ STAGE_PEN,剣より強い,Pen,笔,筆
 STAGE_PENGUIN,ファースト,Penguin,企鹅,企鵝
 STAGE_PENTAGON,国防総省,Pentagon,五边形,五邊形
 STAGE_POT,ごった煮,Pot,锅,鍋
-STAGE_RABBIT,寂しいと,Rabbit,兔子,兔子
+STAGE_RABBIT,赤い目,Rabbit,兔子,兔子
 STAGE_RAINBOW,七色,Rainbow,彩虹,彩虹
 STAGE_SHARK,B級映画,Shark,鲨鱼,鯊魚
 STAGE_SHIP_M,笹で作る,Ship,船,船
@@ -136,7 +136,7 @@ STAGE_SHURIKEN,忍者の武器,Shuriken,手里剑,手裏劍
 STAGE_SMALL_BIRD,カゴの中,Small Bird,小鸟,小鳥
 STAGE_SORBET,夏の救世主,Sorbet,雪芭,雪芭
 STAGE_TEARS,頬を伝う,Tears,泪水,淚水
-STAGE_TELEVISION,力を持つ者,Television,电视,電視
+STAGE_TELEVISION,居間に似合う,Television,电视,電視
 STAGE_TREASURE_CHEST,敵かも,Treasure Chest,宝箱,寶箱
 STAGE_WANING_MOON,パンの形,Waning Moon,弦月,弦月
 STAGE_WRENCH,修理,Wrench,扳手,扳手
