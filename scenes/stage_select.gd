@@ -2224,7 +2224,7 @@ func _is_debug() -> bool:
 func _preview_se(path: String) -> void:
 	if _sfx_se_preview == null:
 		return
-	if FileAccess.file_exists(path):
+	if ResourceLoader.exists(path):
 		_sfx_se_preview.stream = load(path)
 		_sfx_se_preview.stop()
 		_sfx_se_preview.play()

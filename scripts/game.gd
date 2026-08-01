@@ -1270,7 +1270,7 @@ func play_sfx_ui_in() -> void:
 	# 引力SE 開始 + タイマー起動
 	var path := DebugSFXConfig.in_path(DebugSFXConfig.in_idx)
 	if _sfx_ui_in.stream == null or _sfx_ui_in.stream.resource_path != path:
-		_sfx_ui_in.stream = load(path) if FileAccess.file_exists(path) else null
+		_sfx_ui_in.stream = load(path) if ResourceLoader.exists(path) else null
 	if _sfx_ui_in.stream:
 		_sfx_ui_in_active = true
 		_sfx_ui_in.stop()
@@ -1305,7 +1305,7 @@ func play_sfx_ui_out() -> void:
 	# 斥力SE 開始 + タイマー起動
 	var path := DebugSFXConfig.out_path(DebugSFXConfig.out_idx)
 	if _sfx_ui_out.stream == null or _sfx_ui_out.stream.resource_path != path:
-		_sfx_ui_out.stream = load(path) if FileAccess.file_exists(path) else null
+		_sfx_ui_out.stream = load(path) if ResourceLoader.exists(path) else null
 	if _sfx_ui_out.stream:
 		_sfx_ui_out_active = true
 		_sfx_ui_out.stop()
@@ -2370,6 +2370,17 @@ func _input(event: InputEvent) -> void:
 	# ):
 	# 	_enter_play_balance_debug()
 	# 	return
+
+	# デバッグ用: [F9] ステージ面積再計算（エディタ限定・一時ツール）
+	if (
+		_debug_tools_enabled()
+		and event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_F9
+	):
+		StageAreaRecalcDebug.run_and_print()
+		return
 
 	# デバッグ用: [F1] で現在ステージを強制クリア（エディタからの実行時のみ。エクスポート版では無効）
 	if (

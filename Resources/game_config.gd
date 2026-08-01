@@ -93,6 +93,19 @@ const USE_SCREEN_HUD_GUIDE := true
 const HUD_INITIAL_RING_SCALE_MUL := 1.48
 ## 三角形・星など「円形デフォルト配置」以外: 楕円周上の縦半軸 = 横方向の基準半径 × この値（1 未満で横長のなめらかな楕円）
 const HUD_SPAWN_ELLIPSE_VERTICAL_FRAC := 0.58
+## 一般形状ステージで「内側配置」に切り替える面積の閾値（1920×1080基準のpx²）。
+## 実行時は recompute_hud_guide_layout() の inner_w×inner_h に対する面積比で判定する。
+const HUD_SPAWN_INSIDE_AREA_THRESHOLD_PX_AT_1080P := 450000.0
+const HUD_SPAWN_INSIDE_AREA_REF_W := 1920.0
+const HUD_SPAWN_INSIDE_AREA_REF_H := 1080.0
+## 一般形状ステージで「内側配置」に切り替える面積比の閾値（輪郭面積 ÷ 利用可能表示枠面積）。
+## 450000px² @ 1080p を、recompute_hud_guide_layout() と同式の inner_w×inner_h から算出。
+const HUD_SPAWN_INSIDE_AREA_THRESHOLD_RATIO := HUD_SPAWN_INSIDE_AREA_THRESHOLD_PX_AT_1080P / (
+	HUD_SPAWN_INSIDE_AREA_REF_W * (1.0 - UI_WIDTH_RATIO) * (1.0 - 2.0 * HUD_GUIDE_MARGIN_FRAC)
+	* HUD_SPAWN_INSIDE_AREA_REF_H * (1.0 - 2.0 * HUD_GUIDE_MARGIN_FRAC)
+)
+## 内側配置時のリング半径倍率（ガイド輪郭の最大半径に対する割合）。1.0未満で内側に収まる。
+const HUD_SPAWN_INSIDE_RING_SCALE_MUL := 0.55
 
 # --- ヒント ---
 const HINT_TIMES := [60.0, 90.0]

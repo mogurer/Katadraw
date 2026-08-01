@@ -114,6 +114,8 @@ var hud_guide_segment_is_arc: Array = []
 var hud_guide_spawn_centroid: Vector2 = Vector2.ZERO
 ## 単一閉曲線: KATA を載せる初期円半径（ガイド輪郭から重心までの最大距離 × GameConfig.HUD_INITIAL_RING_SCALE_MUL など）
 var hud_guide_spawn_ring_radius: float = 1.0
+## 輪郭面積 ÷ 利用可能表示枠面積（inner_w × inner_h）。一般形状の内側配置判定に使う。
+var hud_guide_area_ratio: float = 0.0
 var _hud_layout_vp: Vector2 = Vector2(-1.0, -1.0)
 var _hud_layout_sc: Vector2 = Vector2.ZERO
 ## 画面フィット後の HUD ガイド半径に乗算（1=従来）。rules デモ等で目標円の見た目だけ縮小する。
@@ -227,6 +229,7 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 		hud_guide_ref_px = maxf(hud_guide_scale, 1.0)
 		hud_guide_spawn_centroid = shape_center
 		hud_guide_spawn_ring_radius = maxf(hud_guide_scale, 1.0) * GameConfig.HUD_INITIAL_RING_SCALE_MUL
+		hud_guide_area_ratio = 0.0
 		guide_center_1 = hud_guide_spawn_centroid
 		_apply_hud_correspondence_scale()
 		# スコア用辺ごとワールド座標（ideal_outline_points がなくても _score_verts_norm から構築）
@@ -257,6 +260,9 @@ func recompute_hud_guide_layout(shape_center: Vector2, viewport_size: Vector2) -
 	hud_guide_scale = s
 	for p in rotated:
 		hud_guide_outline_world.append(shape_center + p * s)
+	var outline_area: float = _shoelace_area_world(hud_guide_outline_world)
+	var avail_area: float = maxf(inner_w * inner_h, 1.0)
+	hud_guide_area_ratio = outline_area / avail_area
 	if ideal_outline_segment_is_arc.size() == hud_guide_outline_world.size():
 		hud_guide_segment_is_arc = ideal_outline_segment_is_arc.duplicate()
 	hud_guide_query_world = _make_runtime_query_polyline(hud_guide_outline_world)
@@ -506,6 +512,13 @@ func _finalize_hud_spawn_points_align_centroid(point_positions: Array[Vector2], 
 	_align_point_positions_to_guide_centroid(point_positions)
 
 
+## 内側配置: 画面中心（hud_guide_center）の楕円周上に等角度配置したまま playfield 内に収める
+func _finalize_hud_spawn_points_inside_ring(point_positions: Array[Vector2], viewport_size: Vector2) -> void:
+	if point_positions.is_empty():
+		return
+	_keep_points_inside_playfield(point_positions, viewport_size)
+
+
 ## 円ステージ: 周上維持のため keep の後にリングへ投影（重心合わせはしない）
 func _finalize_hud_spawn_points_circle_on_guide(point_positions: Array[Vector2], viewport_size: Vector2) -> void:
 	if point_positions.is_empty():
@@ -655,16 +668,40 @@ func _rebuild_initial_points_from_hud_guide(cfg: Dictionary, viewport_size: Vect
 	# 単一閉曲線ステージ（fish / mug / heptagram_silhouette / rugby_ball 等）ほか、
 	# 正方形・六角・円以外: 横長のなめらかな楕円周上に等角度配置（円形リングは使わない）
 	var n_pts: int = num_points
-	var ring_r: float = maxf(hud_guide_spawn_ring_radius, 12.0)
-	var ax: float = ring_r
-	var ay: float = ring_r * GameConfig.HUD_SPAWN_ELLIPSE_VERTICAL_FRAC
-	for i in range(n_pts):
-		var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
-		point_positions.append(
-			hud_guide_spawn_centroid + Vector2(ax * cos(ang), ay * sin(ang))
-		)
+	var use_inside_spawn: bool = hud_guide_area_ratio >= GameConfig.HUD_SPAWN_INSIDE_AREA_THRESHOLD_RATIO
+	if use_inside_spawn:
+		var ring_r: float = maxf(hud_guide_ref_px * GameConfig.HUD_SPAWN_INSIDE_RING_SCALE_MUL, 12.0)
+		var ax: float = ring_r
+		var ay: float = ring_r * GameConfig.HUD_SPAWN_ELLIPSE_VERTICAL_FRAC
+		var center: Vector2 = hud_guide_center
+		for i in range(n_pts):
+			var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
+			point_positions.append(
+				center + Vector2(ax * cos(ang), ay * sin(ang))
+			)
+		_finalize_hud_spawn_points_inside_ring(point_positions, viewport_size)
+	else:
+		var ring_r: float = maxf(hud_guide_spawn_ring_radius, 12.0)
+		var ax: float = ring_r
+		var ay: float = ring_r * GameConfig.HUD_SPAWN_ELLIPSE_VERTICAL_FRAC
+		for i in range(n_pts):
+			var ang: float = TAU * float(i) / float(maxi(n_pts, 1))
+			point_positions.append(
+				hud_guide_spawn_centroid + Vector2(ax * cos(ang), ay * sin(ang))
+			)
+		_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
 
-	_finalize_hud_spawn_points_align_centroid(point_positions, viewport_size)
+
+static func _shoelace_area_world(pts: Array) -> float:
+	var n: int = pts.size()
+	if n < 3:
+		return 0.0
+	var a: float = 0.0
+	for i in range(n):
+		var p1: Vector2 = pts[i]
+		var p2: Vector2 = pts[(i + 1) % n]
+		a += p1.x * p2.y - p2.x * p1.y
+	return absf(a) / 2.0
 
 
 func start_stage(idx: int, shape_center: Vector2, viewport_size: Vector2, point_positions: Array[Vector2], cfg_override: Dictionary = {}) -> void:
@@ -793,7 +830,11 @@ func start_stage_with_config(idx: int, cfg: Dictionary, shape_center: Vector2, v
 	if not skip_hud_initial_layout:
 		_rebuild_initial_points_from_hud_guide(cfg, viewport_size, point_positions)
 	if current_stage >= 0 and stage_type not in ["triangle", "square", "hexagon"]:
-		_constrain_spawn_to_edge_band(point_positions, viewport_size)
+		var use_inside_spawn: bool = (
+			hud_guide_area_ratio >= GameConfig.HUD_SPAWN_INSIDE_AREA_THRESHOLD_RATIO
+		)
+		if not use_inside_spawn:
+			_constrain_spawn_to_edge_band(point_positions, viewport_size)
 	# ステージ切り替え時は前ステージのキャッシュを破棄し、必ずフル計算を行う
 	_hausdorff_call_counter = 0
 	_hausdorff_cached_err = 100.0
