@@ -1,8 +1,7 @@
-／
-おして、のばして、かたどるパズル
+ 点を動かし、かたどろう。
 【KATA-DRAW】
  体験版クリアしました！
-＼
-点を動かし、かたどろう。最小の操作で、深い没入へ。
-#KATADRAW
+
+最小の操作で、深い没入へ。
+2Dミニマル象りパズル #KATADRAW
 https://store.steampowered.com/app/4682190/KATADRAW_Demo/
