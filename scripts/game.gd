@@ -1686,6 +1686,7 @@ func _check_clear() -> void:
 			_new_record_time = _rec.time
 			_new_record_moves = _rec.moves
 		elif _trial_idx >= 0 and _trial_idx < GameConfig.TRIAL_STAGE_ACHIEVEMENTS.size():
+			SteamManager.set_stat_int("demo_max_stage", _trial_idx + 1)
 			SteamManager.unlock_achievement(GameConfig.TRIAL_STAGE_ACHIEVEMENTS[_trial_idx])
 		_save_dwell_log()
 
@@ -6084,6 +6085,7 @@ func _process(delta: float) -> void:
 			_play_sfx(sfx_cat)
 			ui_renderer.start_cat_anim()
 			if GameConfig.IS_TRIAL:
+				SteamManager.set_stat_int("demo_cat_found", 1)
 				SteamManager.unlock_achievement(GameConfig.TRIAL_SECRET_CAT_ACHIEVEMENT)
 		# ZOU スタッフロール: 初回クリア前（zou_cleared=false）のみ表示
 		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:

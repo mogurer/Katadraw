@@ -21,3 +21,12 @@ func unlock_achievement(api_name: String) -> void:
 		return
 	Steam.setAchievement(api_name)
 	Steam.storeStats()
+
+
+## INT型統計を記録する。Steamが未初期化の場合は何もしない。
+## StoreStats()はunlock_achievement()末尾の呼び出しに乗せるため、ここでは呼ばない。
+## stat_name: Steamworks管理画面「データ設定」に登録済みの統計API名
+func set_stat_int(stat_name: String, value: int) -> void:
+	if not _initialized or stat_name == "":
+		return
+	Steam.setStatInt(stat_name, value)
