@@ -1325,6 +1325,66 @@ static func get_fish_arc_controls() -> Dictionary:
 	return {}
 
 
+## ステージセレクトのミニ図形とタイムアタック・リザルト画面のアイコンで共用する、
+## ステージ設定(cfg)から原点中心・半径r基準の表示用頂点列を計算する（描画は行わない）。
+## 戻り値: {"pts": PackedVector2Array, "corner_pts": PackedVector2Array, "is_circle": bool}
+## pts/corner_pts は center=Vector2.ZERO 基準（呼び出し側で好きな中心へオフセットして描画する）。
+## is_circle=true の場合 pts/corner_pts は空で、呼び出し側が draw_circle 等で円として描画すること。
+static func compute_mini_shape_points(cfg: Dictionary, r: float) -> Dictionary:
+	var stype: String = str(cfg.get("shape_type", cfg.get("type", "circle")))
+	var pts := PackedVector2Array()
+	var corner_pts := PackedVector2Array()
+
+	if cfg.has("shape_polygon_vertices"):
+		var raw: Array = cfg["shape_polygon_vertices"] as Array
+		if not raw.is_empty():
+			var verts_local: Array = []
+			for v in raw:
+				var arr: Array = v as Array
+				verts_local.append(Vector2(float(arr[0]), float(arr[1])))
+			var arc_ctrls: Dictionary = _parse_arc_controls_from_cfg_static(cfg.get("shape_arc_controls", {}))
+			var sm := StageManager.new()
+			var outline: Array = sm._build_cat_face_outline(verts_local, arc_ctrls)
+			if outline.is_empty():
+				outline = verts_local
+			var max_dist: float = 0.01
+			for p in outline:
+				max_dist = maxf(max_dist, (p as Vector2).length())
+			var sc: float = r / max_dist
+			for p in outline:
+				pts.append((p as Vector2) * sc)
+			for v in verts_local:
+				corner_pts.append((v as Vector2) * sc)
+		return {"pts": pts, "corner_pts": corner_pts, "is_circle": false}
+
+	match stype:
+		"triangle":
+			for i in range(3):
+				var a: float = -PI * 0.5 + float(i) * TAU / 3.0
+				pts.append(Vector2(cos(a), sin(a)) * r)
+			corner_pts = pts
+		"square":
+			var h: float = r * 0.707
+			pts = PackedVector2Array([
+				Vector2(-h, -h), Vector2(h, -h), Vector2(h,  h), Vector2(-h, h),
+			])
+			corner_pts = pts
+		"rhombus":
+			pts = PackedVector2Array([
+				Vector2(0, -r), Vector2(r * 0.72, 0), Vector2(0,  r), Vector2(-r * 0.72, 0),
+			])
+			corner_pts = pts
+		"hexagon":
+			for i in range(6):
+				var a: float = float(i) * TAU / 6.0 - PI / 6.0
+				pts.append(Vector2(cos(a), sin(a)) * r)
+			corner_pts = pts
+		_:
+			return {"pts": PackedVector2Array(), "corner_pts": PackedVector2Array(), "is_circle": true}
+
+	return {"pts": pts, "corner_pts": corner_pts, "is_circle": false}
+
+
 func _generate_fish_shape(center: Vector2, pts: Array[Vector2], cfg: Dictionary) -> void:
 	"""さかなの理想点を生成。全エッジ直線"""
 	var base_r: float = (min_radius + max_radius) / 2.0
