@@ -1020,8 +1020,10 @@ func _draw_ta_results(vp: Vector2) -> void:
 		for p in range(revealed):
 			var row_appear_time: float = float(p) * tl.row_interval
 			var row_y: float = list_bottom - ROW_H - (scroll_list_elapsed - row_appear_time) * scroll_speed
-			# (項目2の修正) 行全体が枠内([list_top, list_bottom])に収まっている場合のみ描画する。
-			if row_y < list_top or row_y > list_bottom - ROW_H:
+			# 行全体が枠内([list_top, list_bottom])に収まっている場合のみ描画する。
+			# ±1.0px の許容誤差は、スクロール値が境界にごく近いときの浮動小数点誤差対策（保険）。
+			const EDGE_TOLERANCE: float = 1.0
+			if row_y < list_top - EDGE_TOLERANCE or row_y > list_bottom - ROW_H + EDGE_TOLERANCE:
 				continue
 			var row_own_elapsed: float = list_elapsed - row_appear_time
 			var reveal_t: float = clampf(row_own_elapsed / SLIDE_DUR, 0.0, 1.0)
@@ -1078,27 +1080,36 @@ func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: i
 
 
 ## タイムアタック・リザルト画面（新レイアウト）: 右パネル（TOTAL CLEAR TIME / BEST TIME）を描画する。
+## タイムアタック・リザルト画面（新レイアウト）: 右パネル（TOTAL CLEAR TIME / BEST TIME）を描画し、
+## 下部のボタン配置用ゾーン（Rect2）を返す（呼び出し側で _draw_ta_results_action_buttons() に渡す）。
 func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: float) -> Rect2:
 	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 4.0)
 	var total_time: float = 0.0
 	for t in times:
 		total_time += t
 
-	var header_h: float = rect.size.y * 0.12
+	# ゾーン配分（rect.size.y に対する比率）。header + total + best_bar + button_zone = 1.0 になるようにする。
+	const HEADER_FRAC: float = 0.12
+	const TOTAL_FRAC: float = 0.28     # TOTAL CLEAR TIME の数値表示エリア（縮小済み。旧実装比で明確に小さくする）
+	const BEST_BAR_FRAC: float = 0.13
+	# 残り 1.0 - 0.12 - 0.28 - 0.13 = 0.47 がボタンゾーンになる
+
+	var header_h: float = rect.size.y * HEADER_FRAC
 	var header_rect := Rect2(rect.position, Vector2(rect.size.x, header_h))
 	_game.draw_rect(header_rect, Color(LINE_COLOR, alpha))
 	var header_fs: int = int(header_h * 0.45)
 	var header_baseline_y: float = header_rect.position.y + header_h * 0.5 + _game.font_din.get_ascent(header_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(header_rect.position.x + rect.size.x * 0.04, header_baseline_y), "TOTAL CLEAR TIME", HORIZONTAL_ALIGNMENT_LEFT, rect.size.x * 0.9, header_fs, Color(1.0, 1.0, 1.0, alpha))
 
-	var total_fs: int = int(rect.size.y * 0.16)
+	var total_h: float = rect.size.y * TOTAL_FRAC
+	var total_fs: int = int(rect.size.y * 0.14)
 	var total_str: String = "%.2f" % total_time
-	var total_cy: float = rect.position.y + header_h + rect.size.y * 0.40   # (B-2: 0.225 → 0.40)
+	var total_cy: float = rect.position.y + header_h + total_h * 0.5
 	var total_baseline_y: float = total_cy + _game.font_din.get_ascent(total_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(rect.position.x, total_baseline_y), total_str, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, total_fs, Color(LINE_COLOR, alpha))
 
-	var best_bar_h: float = rect.size.y * 0.13
-	var best_bar_y: float = rect.position.y + header_h + rect.size.y * 0.55
+	var best_bar_h: float = rect.size.y * BEST_BAR_FRAC
+	var best_bar_y: float = rect.position.y + header_h + total_h
 	var best_bar_rect := Rect2(rect.position.x, best_bar_y, rect.size.x, best_bar_h)
 	_game.draw_rect(best_bar_rect, Color(0.55, 0.50, 0.58, alpha))
 	var best_label_fs: int = int(best_bar_h * 0.34)
@@ -1108,12 +1119,13 @@ func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: flo
 	var best_str: String = ("%.2f" % best_val) if best_val >= 0.0 else "----.--"
 	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x, best_label_baseline_y), best_str, HORIZONTAL_ALIGNMENT_RIGHT, rect.size.x - rect.size.x * 0.04, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
 
-	# ボタンゾーン: BEST TIMEバー下端 〜 パネル下端
+	# ボタンゾーン: BEST TIMEバー下端 〜 パネル下端（この時点で約0.47、大幅に拡大されている）
 	var btn_zone_y: float = best_bar_y + best_bar_h
-	return Rect2(rect.position.x, btn_zone_y, rect.size.x, rect.end.y - btn_zone_y)
+	return Rect2(rect.position.x, btn_zone_y, rect.size.x, rect.position.y + rect.size.y - btn_zone_y)
 
 
 ## TA リザルト右パネル内ボタンゾーン Rect2 を vp から再計算する（ヒット判定・フォーカス判定で使用）。
+## _draw_ta_results_summary_panel() と必ず同じ比率定数を使うこと。
 func _ta_results_button_zone_rect(vp: Vector2) -> Rect2:
 	var margin_x: float = vp.x * 0.05
 	var top_y: float = vp.y * 0.03
@@ -1125,48 +1137,61 @@ func _ta_results_button_zone_rect(vp: Vector2) -> Rect2:
 	var panel_gap: float = vp.x * 0.015
 	var right_panel_x: float = margin_x + left_panel_w + panel_gap
 	var right_panel_w: float = vp.x - margin_x - right_panel_x
-	var header_h: float = panel_h * 0.12
-	var best_bar_y: float = panels_top + header_h + panel_h * 0.55
-	var best_bar_h: float = panel_h * 0.13
-	var btn_zone_y: float = best_bar_y + best_bar_h
+
+	const HEADER_FRAC: float = 0.12
+	const TOTAL_FRAC: float = 0.28
+	const BEST_BAR_FRAC: float = 0.13
+	var header_h: float = panel_h * HEADER_FRAC
+	var total_h: float = panel_h * TOTAL_FRAC
+	var best_bar_h: float = panel_h * BEST_BAR_FRAC
+	var btn_zone_y: float = panels_top + header_h + total_h + best_bar_h
 	return Rect2(right_panel_x, btn_zone_y, right_panel_w, panels_bottom - btn_zone_y)
 
 
+## ボタンゾーンを3等分し、各セグメントの中央位置(center)とスロット幅(slot_w)・高さ(slot_h)を返す。
+## slot_h はゾーン高さの85%を上限とする（上下に少し余白を持たせる）。
 func _ta_results_btn_icon_layout(zone: Rect2) -> Dictionary:
-	var icon_s: float = minf(zone.size.y * 0.70, zone.size.x / 4.0)
-	var pad: float = (zone.size.x - icon_s * 3.0) / 4.0
-	var y: float = zone.position.y + (zone.size.y - icon_s) * 0.5
-	return {"icon_s": icon_s, "pad": pad, "y": y}
+	var slot_w: float = zone.size.x / 3.0
+	var slot_h: float = minf(zone.size.y * 0.85, slot_w)
+	var cy: float = zone.position.y + zone.size.y * 0.5
+	var cam_cx: float = zone.position.x + slot_w * 0.5
+	var tw_cx: float = zone.position.x + slot_w * 1.5
+	var next_cx: float = zone.position.x + slot_w * 2.5
+	return {"slot_w": slot_w, "slot_h": slot_h, "cy": cy, "cam_cx": cam_cx, "tw_cx": tw_cx, "next_cx": next_cx}
 
+
+## カメラ／Twitterアイコンは画像ファイル自体の透過余白を補正するため、スロットサイズより
+## 大きく（VISUAL_SCALE倍）描画する。NEXTボタンは塗りつぶし矩形のためこの補正は不要。
+const _TA_RESULTS_ICON_VISUAL_SCALE: float = 2.025
 
 func _draw_ta_results_action_buttons(zone: Rect2, alpha: float, active_focus: int) -> void:
 	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
-	var icon_s: float = lo.icon_s
-	var pad: float = lo.pad
-	var y: float = lo.y
-	_draw_result_camera_btn(Vector2(zone.position.x + pad, y), icon_s, alpha, active_focus == 0)
-	_draw_result_twitter_btn(Vector2(zone.position.x + pad * 2.0 + icon_s, y), icon_s, alpha, active_focus == 1)
-	var next_cx: float = zone.position.x + pad * 3.0 + icon_s * 2.5
-	var next_cy: float = y + icon_s * 0.5
-	_draw_results_next_button(Vector2(next_cx, next_cy), tr("TA_RESULT_BTN_TITLE"), 35, alpha, icon_s, active_focus == 2)
+	var slot_h: float = lo.slot_h
+	var cy: float = lo.cy
+	var icon_draw_size: float = slot_h * _TA_RESULTS_ICON_VISUAL_SCALE
+	_draw_result_camera_btn(Vector2(lo.cam_cx - icon_draw_size * 0.5, cy - icon_draw_size * 0.5), icon_draw_size, alpha, active_focus == 0)
+	_draw_result_twitter_btn(Vector2(lo.tw_cx - icon_draw_size * 0.5, cy - icon_draw_size * 0.5), icon_draw_size, alpha, active_focus == 1)
+	_draw_results_next_button(Vector2(lo.next_cx, cy), tr("TA_RESULT_BTN_TITLE"), 35, alpha, slot_h, active_focus == 2)
 
 
 func get_ta_results_camera_button_rect(vp: Vector2) -> Rect2:
 	var zone: Rect2 = _ta_results_button_zone_rect(vp)
 	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
-	return Rect2(zone.position.x + lo.pad, lo.y, lo.icon_s, lo.icon_s)
+	var icon_draw_size: float = lo.slot_h * _TA_RESULTS_ICON_VISUAL_SCALE
+	return Rect2(lo.cam_cx - icon_draw_size * 0.5, lo.cy - icon_draw_size * 0.5, icon_draw_size, icon_draw_size)
 
 
 func get_ta_results_twitter_button_rect(vp: Vector2) -> Rect2:
 	var zone: Rect2 = _ta_results_button_zone_rect(vp)
 	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
-	return Rect2(zone.position.x + lo.pad * 2.0 + lo.icon_s, lo.y, lo.icon_s, lo.icon_s)
+	var icon_draw_size: float = lo.slot_h * _TA_RESULTS_ICON_VISUAL_SCALE
+	return Rect2(lo.tw_cx - icon_draw_size * 0.5, lo.cy - icon_draw_size * 0.5, icon_draw_size, icon_draw_size)
 
 
 func get_ta_results_next_button_rect(vp: Vector2) -> Rect2:
 	var zone: Rect2 = _ta_results_button_zone_rect(vp)
 	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
-	return Rect2(zone.position.x + lo.pad * 3.0 + lo.icon_s * 2.0, lo.y, lo.icon_s, lo.icon_s)
+	return Rect2(lo.next_cx - lo.slot_h * 0.5, lo.cy - lo.slot_h * 0.5, lo.slot_h, lo.slot_h)
 
 
 func get_ta_results_active_focus(vp: Vector2) -> int:

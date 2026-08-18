@@ -198,6 +198,11 @@ func _process_ta_results_scroll(delta: float) -> void:
 	_ta_results_scroll_time = clampf(_ta_results_scroll_time, _ta_results_scroll_min, listing_duration)
 	var smooth_t: float = clampf(delta * SCROLL_SMOOTH_SPEED, 0.0, 1.0)
 	_ta_results_scroll_display_time = lerp(_ta_results_scroll_display_time, _ta_results_scroll_time, smooth_t)
+	# lerpは目標値に限りなく近づくが理論上完全には一致しないため、十分近づいたらスナップする。
+	# これがないと、スクロール下限（#001が最上段に来る位置）に表示値が永遠に届かず、
+	# 境界判定にわずかに引っかかり続けて #001/#002 が表示されないままになる。
+	if absf(_ta_results_scroll_display_time - _ta_results_scroll_time) < 0.01:
+		_ta_results_scroll_display_time = _ta_results_scroll_time
 
 
 ## THANK YOU 表示から3秒後（ボタンが出るタイミング）以降かどうか。
