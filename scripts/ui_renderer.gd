@@ -967,10 +967,16 @@ func _draw_ta_results(vp: Vector2) -> void:
 		var scroll_list_elapsed: float = _game._ta_results_scroll_display_time
 		const ROW_SLIDE_OFFSET: float = 300.0
 		const ROW_SLIDE_DUR: float = 0.45
-		const ICON_R: float = 18.0          # レイアウト（アイコン中心位置）計算専用。表示位置を変えないため据え置き
-		const ICON_DRAW_R: float = 27.0     # 実際に描画するアイコンの半径（ICON_Rの1.5倍）
+		const ICON_R: float = 18.0          # アイコン"アンカー位置"計算専用の基準値。テキスト位置(text_x)の算出にも使うため据え置き
 		const ICON_GAP: float = 10.0
 		const TEXT_RESERVED_W: float = 180.0
+
+		# --- 左右アイコンの個別調整用パラメータ（ここを直接編集して微調整する） ---
+		const LEFT_ICON_DRAW_R: float = 54.0    # 左側アイコンの描画半径
+		const RIGHT_ICON_DRAW_R: float = 54.0   # 右側アイコンの描画半径
+		const LEFT_ICON_OFFSET: Vector2 = Vector2.ZERO   # 左側アイコンの位置微調整（x,y共にpx単位、+xで右へ／+yで下へ）
+		const RIGHT_ICON_OFFSET: Vector2 = Vector2.ZERO  # 右側アイコンの位置微調整（同上）
+
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]
@@ -982,12 +988,14 @@ func _draw_ta_results(vp: Vector2) -> void:
 			var slide_t: float = clampf(row_own_elapsed / ROW_SLIDE_DUR, 0.0, 1.0)
 			var row_x: float = lerp(col2_x - ROW_SLIDE_OFFSET, col2_x, slide_t)
 			var text_x: float = row_x + ICON_R * 2.0 + ICON_GAP
-			var left_icon_cx: float = row_x + ICON_R
-			var right_icon_cx: float = text_x + TEXT_RESERVED_W + ICON_R
-			var icon_cx: float = right_icon_cx if (i % 2 == 1) else left_icon_cx
-			var icon_cy: float = row_y - 6.0
+			var base_icon_cy: float = row_y - 6.0
+			var left_icon_center: Vector2 = Vector2(row_x + ICON_R, base_icon_cy) + LEFT_ICON_OFFSET
+			var right_icon_center: Vector2 = Vector2(text_x + TEXT_RESERVED_W + ICON_R, base_icon_cy) + RIGHT_ICON_OFFSET
+			var is_right_icon: bool = (i % 2 == 1)
+			var icon_center: Vector2 = right_icon_center if is_right_icon else left_icon_center
+			var icon_draw_r: float = RIGHT_ICON_DRAW_R if is_right_icon else LEFT_ICON_DRAW_R
 			var stage_master_idx: int = GameConfig.resolve_play_stage_to_master_index(i)
-			_draw_ta_results_shape_icon(stage_master_idx, Vector2(icon_cx, icon_cy), ICON_DRAW_R)
+			_draw_ta_results_shape_icon(stage_master_idx, icon_center, icon_draw_r)
 			var stage_no: String = "#%03d" % (i + 1)
 			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
 			_draw_ta_hud_text(Vector2(text_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
