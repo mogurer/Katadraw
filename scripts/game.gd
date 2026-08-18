@@ -3754,7 +3754,7 @@ func _ta_advance_after_clear() -> void:
 
 	# チェックモード: 1ステージクリアした時点で即座にta_resultsへ遷移（演出確認用）
 	if GameConfig.DEBUG_TA_RESULTS_CHECK_MODE:
-		_stage_session.fill_check_mode_ta_times(GameConfig.STAGE_COUNT_FOR_TA)
+		stage_session.fill_check_mode_ta_times(GameConfig.STAGE_COUNT_FOR_TA)
 		TransitionManager.play_polygon(func():
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"
