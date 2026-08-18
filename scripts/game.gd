@@ -3752,6 +3752,17 @@ func _ta_start_run() -> void:
 func _ta_advance_after_clear() -> void:
 	var finished_idx: int = current_stage
 
+	# チェックモード: 1ステージクリアした時点で即座にta_resultsへ遷移（演出確認用）
+	if GameConfig.DEBUG_TA_RESULTS_CHECK_MODE:
+		_stage_session.fill_check_mode_ta_times(GameConfig.STAGE_COUNT_FOR_TA)
+		TransitionManager.play_polygon(func():
+			StageSelectManager.time_attack_active = false
+			game_state = "ta_results"
+			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
+			queue_redraw()
+		, false)
+		return
+
 	# 10/20/30/40ステージ クリア → トランジション開始と同時にBGM切替
 	if (finished_idx + 1) % 10 == 0 and finished_idx + 1 < GameConfig.STAGE_COUNT_FOR_TA:
 		var zone_ids: Array[String] = ["", "01-06", "01-08", "02-03", "02-09"]

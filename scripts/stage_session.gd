@@ -31,6 +31,12 @@ func fill_dummy_results(slot_count: int) -> void:
 		stage_result_shapes.append({})
 
 
+func fill_check_mode_ta_times(stage_count: int) -> void:
+	clear_results()
+	for _i in range(stage_count):
+		stage_times.append(randf_range(0.01, 999.00))
+
+
 func start_debug_test(cfg: Dictionary, meta_stage_name: String = "") -> int:
 	debug_test_mode = true
 	debug_test_restart_cfg = cfg.duplicate(true)
