@@ -965,7 +965,7 @@ func _draw_ta_results(vp: Vector2) -> void:
 		var scroll_speed: float = tl.row_h / tl.row_interval
 		var revealed: int = mini(stage_count, int(list_elapsed / tl.row_interval) + 1)
 		const ROW_SLIDE_OFFSET: float = 300.0
-		const ROW_SLIDE_DUR: float = 0.15
+		const ROW_SLIDE_DUR: float = 0.10
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]

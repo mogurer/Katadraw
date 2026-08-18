@@ -152,7 +152,7 @@ var _ta_results_start_time: float = 0.0
 func _ta_results_timeline() -> Dictionary:
 	const TITLE_SHOW_DUR: float = 0.6
 	const TITLE_SCROLL_DUR: float = 0.5
-	const ROW_INTERVAL: float = 0.35
+	const ROW_INTERVAL: float = 0.15
 	const ROW_H: float = 75.0
 	const THANK_YOU_DELAY: float = 1.0
 	const BUTTONS_DELAY: float = 3.0
