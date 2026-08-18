@@ -162,6 +162,8 @@ const PRESS_HINT_ANIM_DUR: float = 0.1
 var _ig_esc_key_texture: Texture2D = null
 var _ig_start_pad_texture: Texture2D = null
 var _ig_hint_style: StyleBoxFlat = null
+var _ta_results_badge_style: StyleBoxFlat = null
+var _ta_results_pill_style: StyleBoxFlat = null
 
 # --- Animation state ---
 var _prev_state: String = ""          # 前フレームのゲームステート
@@ -254,6 +256,14 @@ func _init(game: Node2D) -> void:
 	_ig_hint_style.content_margin_right  = 10.0
 	_ig_hint_style.content_margin_top    = 6.0
 	_ig_hint_style.content_margin_bottom = 6.0
+
+	# タイムアタック・リザルト画面（新レイアウト）の行バッジ・ピル背景
+	_ta_results_badge_style = StyleBoxFlat.new()
+	_ta_results_badge_style.bg_color = GameConfig.INK_COLOR
+	_ta_results_badge_style.set_corner_radius_all(8)
+	_ta_results_pill_style = StyleBoxFlat.new()
+	_ta_results_pill_style.bg_color = Color(GameConfig.INK_COLOR, 0.08)
+	_ta_results_pill_style.set_corner_radius_all(8)
 
 
 func capture_stage_result_shapes() -> Dictionary:
@@ -943,71 +953,87 @@ func _draw_ta_results(vp: Vector2) -> void:
 	var elapsed: float = tl.elapsed
 	var times: Array[float] = _game.stage_session.stage_times
 	var stage_count: int = times.size()
+	var pair_count: int = tl.pair_count
 
-	# 1. 「Result」タイトル: 中央表示 → 上部へスクロールして停止
-	var title_top_y: float = vp.y * 0.08
-	var title_center_y: float = vp.y * 0.5
-	var scroll_t: float = clampf((elapsed - tl.title_show_dur) / tl.title_scroll_dur, 0.0, 1.0)
-	var ease_t: float = scroll_t * scroll_t * (3.0 - 2.0 * scroll_t)
-	var title_y: float = lerp(title_center_y, title_top_y, ease_t)
-	var title_alpha: float = clampf(elapsed / 0.3, 0.0, 1.0)
-	_draw_ta_hud_text(Vector2(0, title_y), "Result", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 64, Color(1.0, 1.0, 1.0, title_alpha))
+	const CHROME_FADE_DUR: float = 0.3
+	var chrome_a: float = clampf(elapsed / CHROME_FADE_DUR, 0.0, 1.0)
 
-	# 2. 横4分割: 2列目=ステージ別タイム、3列目=トータルタイム / 縦4分割の中央2つ分に表示を限定
-	var col_w: float = vp.x / 4.0
-	var col2_x: float = col_w * 1.0
-	var col3_x: float = col_w * 2.0
-	var band_top: float = vp.y * 0.25
-	var band_bottom: float = vp.y * 0.75
+	# ═══ ① タイトル: 体験版リザルトと同じロゴ + 見出し（開始から静的表示） ═══
+	var margin_x: float = vp.x * 0.05
+	var top_y: float = vp.y * 0.03
+	var logo_tex: Texture2D = _game.result_logo_texture
+	var logo_draw_h: float = vp.y * 0.13
+	var logo_draw_w: float = 0.0
+	if logo_tex:
+		var tex_size: Vector2 = logo_tex.get_size()
+		var sc: float = logo_draw_h / tex_size.y
+		logo_draw_w = tex_size.x * sc
+		_game.draw_texture_rect(logo_tex, Rect2(Vector2(margin_x, top_y), Vector2(logo_draw_w, logo_draw_h)), false, Color(1.0, 1.0, 1.0, chrome_a))
+	var heading_fs: int = int(vp.y * 0.07)
+	var heading_x: float = margin_x + logo_draw_w + vp.x * 0.02
+	var heading_baseline_y: float = top_y + logo_draw_h * 0.5 + _game.font_din.get_ascent(heading_fs) * 0.35
+	_game.draw_string(_game.font_din, Vector2(heading_x, heading_baseline_y), "TIME TRIAL SCORE", HORIZONTAL_ALIGNMENT_LEFT, vp.x - heading_x - margin_x, heading_fs, Color(LINE_COLOR, chrome_a))
 
-	if elapsed >= tl.listing_start and stage_count > 0:
+	# ═══ パネル共通座標 ═══
+	var panels_top: float = top_y + logo_draw_h + vp.y * 0.03
+	var panels_bottom: float = vp.y * 0.93
+	var panel_h: float = panels_bottom - panels_top
+	var left_panel_x: float = margin_x
+	var left_panel_w: float = vp.x * 0.515
+	var panel_gap: float = vp.x * 0.015
+	var right_panel_x: float = left_panel_x + left_panel_w + panel_gap
+	var right_panel_w: float = vp.x - margin_x - right_panel_x
+	var left_panel_rect := Rect2(left_panel_x, panels_top, left_panel_w, panel_h)
+	var right_panel_rect := Rect2(right_panel_x, panels_top, right_panel_w, panel_h)
+
+	# ═══ ② 左パネル: 枠線 + 2列カードリスト ═══
+	if chrome_a > 0.0:
+		_draw_rect_border_with_corners(left_panel_rect, Color(LINE_COLOR, chrome_a), 4.0)
+
+	const ROW_H: float = 62.0            # game.gd _ta_results_timeline() の ROW_H と必ず一致させること
+	const ROW_PAD_V: float = 6.0         # 行間の余白
+	const SLIDE_OFFSET: float = 22.0     # 枠内に収まる範囲でのスライド距離(px)。枠外にはみ出させないため小さめ
+	const SLIDE_DUR: float = 0.28
+	const BADGE_W_FRAC: float = 0.24     # バッジ幅（列幅に対する比率）
+	const ICON_R: float = 16.0
+	const SCROLLBAR_W: float = 10.0
+
+	var inner_pad: float = vp.x * 0.012
+	var list_top: float = left_panel_rect.position.y + inner_pad
+	var list_bottom: float = left_panel_rect.position.y + left_panel_rect.size.y - inner_pad
+	var col_w: float = (left_panel_w - inner_pad * 2.0 - panel_gap - SCROLLBAR_W) * 0.5
+	var col_l_x: float = left_panel_rect.position.x + inner_pad
+	var col_r_x: float = col_l_x + col_w + panel_gap
+
+	if elapsed >= tl.listing_start and pair_count > 0:
 		var list_elapsed: float = elapsed - tl.listing_start
-		var scroll_speed: float = tl.row_h / tl.row_interval
-		var revealed: int = mini(stage_count, int(list_elapsed / tl.row_interval) + 1)
+		var scroll_speed: float = (ROW_H + ROW_PAD_V) / tl.row_interval
+		var revealed: int = mini(pair_count, int(list_elapsed / tl.row_interval) + 1)
 		var scroll_list_elapsed: float = _game._ta_results_scroll_display_time
-		const ROW_SLIDE_OFFSET: float = 300.0
-		const ROW_SLIDE_DUR: float = 0.45
-		const ICON_R: float = 18.0          # アイコン"アンカー位置"計算専用の基準値。テキスト位置(text_x)の算出にも使うため据え置き
-		const ICON_GAP: float = 10.0
-		const TEXT_RESERVED_W: float = 180.0
 
-		# --- 左右アイコンの個別調整用パラメータ（ここを直接編集して微調整する） ---
-		const LEFT_ICON_DRAW_R: float = 54.0    # 左側アイコンの描画半径
-		const RIGHT_ICON_DRAW_R: float = 54.0   # 右側アイコンの描画半径
-		const LEFT_ICON_OFFSET: Vector2 = Vector2.ZERO   # 左側アイコンの位置微調整（x,y共にpx単位、+xで右へ／+yで下へ）
-		const RIGHT_ICON_OFFSET: Vector2 = Vector2.ZERO  # 右側アイコンの位置微調整（同上）
-
-		var total_shown: float = 0.0
-		for i in range(revealed):
-			total_shown += times[i]
-			var row_appear_time: float = float(i) * tl.row_interval
-			var row_y: float = band_bottom - tl.row_h - (scroll_list_elapsed - row_appear_time) * scroll_speed
-			if row_y < band_top - tl.row_h or row_y > band_bottom + tl.row_h:
+		for p in range(revealed):
+			var row_appear_time: float = float(p) * tl.row_interval
+			var row_y: float = list_bottom - ROW_H - (scroll_list_elapsed - row_appear_time) * scroll_speed
+			if row_y < list_top - ROW_H or row_y > list_bottom:
 				continue
 			var row_own_elapsed: float = list_elapsed - row_appear_time
-			var slide_t: float = clampf(row_own_elapsed / ROW_SLIDE_DUR, 0.0, 1.0)
-			var row_x: float = lerp(col2_x - ROW_SLIDE_OFFSET, col2_x, slide_t)
-			var text_x: float = row_x + ICON_R * 2.0 + ICON_GAP
-			var base_icon_cy: float = row_y - 6.0
-			var left_icon_center: Vector2 = Vector2(row_x + ICON_R, base_icon_cy) + LEFT_ICON_OFFSET
-			var right_icon_center: Vector2 = Vector2(text_x + TEXT_RESERVED_W + ICON_R, base_icon_cy) + RIGHT_ICON_OFFSET
-			var is_right_icon: bool = (i % 2 == 1)
-			var icon_center: Vector2 = right_icon_center if is_right_icon else left_icon_center
-			var icon_draw_r: float = RIGHT_ICON_DRAW_R if is_right_icon else LEFT_ICON_DRAW_R
-			var stage_master_idx: int = GameConfig.resolve_play_stage_to_master_index(i)
-			_draw_ta_results_shape_icon(stage_master_idx, icon_center, icon_draw_r)
-			var stage_no: String = "#%03d" % (i + 1)
-			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
-			_draw_ta_hud_text(Vector2(text_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
-		var total_text: String = "%.2f" % total_shown
-		_draw_ta_hud_text(Vector2(col3_x, (band_top + band_bottom) * 0.5), total_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 32, Color(1.0, 1.0, 1.0))
+			var reveal_t: float = clampf(row_own_elapsed / SLIDE_DUR, 0.0, 1.0)
+			var row_a: float = reveal_t
+			var slide_x: float = lerp(-SLIDE_OFFSET, 0.0, reveal_t)
 
-	# 3. THANK YOU FOR PLAYING !!
-	if elapsed >= tl.thank_you_time:
-		var ty_alpha: float = clampf((elapsed - tl.thank_you_time) / 0.5, 0.0, 1.0)
-		_draw_ta_hud_text(Vector2(0, vp.y * 0.9), "THANK YOU FOR PLAYING !!", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 36, Color(1.0, 1.0, 1.0, ty_alpha))
+			var left_idx: int = p * 2
+			if left_idx < stage_count:
+				_draw_ta_results_row(Vector2(col_l_x + slide_x, row_y), col_w, ROW_H, left_idx, times[left_idx], row_a, BADGE_W_FRAC, ICON_R)
+			var right_idx: int = p * 2 + 1
+			if right_idx < stage_count:
+				_draw_ta_results_row(Vector2(col_r_x + slide_x, row_y), col_w, ROW_H, right_idx, times[right_idx], row_a, BADGE_W_FRAC, ICON_R)
 
-	# 4. 操作ボタン（体験版のResult画面と同一のアイコン・配置・遷移関数を再利用）: THANK YOU 表示の3秒後から表示
+	# ═══ ③ 右パネル: TOTAL CLEAR TIME / BEST TIME ═══
+	var p3_a: float = clampf((elapsed - tl.listing_end) / 0.4, 0.0, 1.0)
+	if p3_a > 0.0:
+		_draw_ta_results_summary_panel(right_panel_rect, times, p3_a)
+
+	# ═══ ④ 操作ボタン（カメラ／Twitter／NEXT。体験版のResult画面と同一の関数・遷移を再利用） ═══
 	if elapsed >= tl.buttons_time:
 		var btn_alpha: float = clampf((elapsed - tl.buttons_time) / 0.3, 0.0, 1.0)
 		const NEXT_BTN_S: float = 128.0
@@ -1022,6 +1048,68 @@ func _draw_ta_results(vp: Vector2) -> void:
 		_draw_result_camera_btn(Vector2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, btn_alpha, res_act == 0)
 		_draw_result_twitter_btn(Vector2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, btn_alpha, res_act == 1)
 		_draw_results_next_button(Vector2(next_cx, ig_cy), tr("TA_RESULT_BTN_TITLE"), 35, btn_alpha, NEXT_BTN_S, res_act == 2)
+
+
+## タイムアタック・リザルト画面（新レイアウト）: 1行分（濃色バッジ#0XX + 目標図形アイコン + 右寄せタイム）を描画する。
+## pos は行の左上（バッジの左上）。col_w は列全体の幅。alpha は行の出現演出用の不透明度
+## （テキスト・アイコンにのみ適用。バッジ／ピル背景は常に不透明で描画する＝簡略化した仕様）。
+func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: int, clear_time: float, alpha: float, badge_w_frac: float, icon_r: float) -> void:
+	var badge_w: float = col_w * badge_w_frac
+	var badge_rect := Rect2(pos, Vector2(badge_w, row_h))
+	_game.draw_style_box(_ta_results_badge_style, badge_rect)
+	var badge_fs: int = int(row_h * 0.34)
+	var badge_str: String = "#%03d" % (stage_idx + 1)
+	var badge_baseline_y: float = pos.y + row_h * 0.5 + _game.font_din.get_ascent(badge_fs) * 0.35
+	_game.draw_string(_game.font_din, Vector2(badge_rect.position.x, badge_baseline_y), badge_str, HORIZONTAL_ALIGNMENT_CENTER, badge_w, badge_fs, Color(1.0, 1.0, 1.0, alpha))
+
+	var pill_gap: float = col_w * 0.02
+	var pill_x: float = pos.x + badge_w + pill_gap
+	var pill_w: float = col_w - badge_w - pill_gap
+	var pill_rect := Rect2(Vector2(pill_x, pos.y), Vector2(pill_w, row_h))
+	_game.draw_style_box(_ta_results_pill_style, pill_rect)
+
+	var stage_master_idx: int = GameConfig.resolve_play_stage_to_master_index(stage_idx)
+	var icon_cx: float = pill_x + icon_r + pill_w * 0.06
+	var icon_cy: float = pos.y + row_h * 0.5
+	_draw_ta_results_shape_icon(stage_master_idx, Vector2(icon_cx, icon_cy), icon_r)
+
+	var time_fs: int = int(row_h * 0.34)
+	var time_str: String = "%.2f" % clear_time
+	var time_pad: float = pill_w * 0.06
+	var time_baseline_y: float = pos.y + row_h * 0.5 + _game.font_din.get_ascent(time_fs) * 0.35
+	_game.draw_string(_game.font_din, Vector2(pill_x, time_baseline_y), time_str, HORIZONTAL_ALIGNMENT_RIGHT, pill_w - time_pad, time_fs, Color(LINE_COLOR, alpha))
+
+
+## タイムアタック・リザルト画面（新レイアウト）: 右パネル（TOTAL CLEAR TIME / BEST TIME）を描画する。
+func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: float) -> void:
+	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 4.0)
+	var total_time: float = 0.0
+	for t in times:
+		total_time += t
+
+	var header_h: float = rect.size.y * 0.12
+	var header_rect := Rect2(rect.position, Vector2(rect.size.x, header_h))
+	_game.draw_rect(header_rect, Color(LINE_COLOR, alpha))
+	var header_fs: int = int(header_h * 0.45)
+	var header_baseline_y: float = header_rect.position.y + header_h * 0.5 + _game.font_din.get_ascent(header_fs) * 0.35
+	_game.draw_string(_game.font_din, Vector2(header_rect.position.x + rect.size.x * 0.04, header_baseline_y), "TOTAL CLEAR TIME", HORIZONTAL_ALIGNMENT_LEFT, rect.size.x * 0.9, header_fs, Color(1.0, 1.0, 1.0, alpha))
+
+	var total_fs: int = int(rect.size.y * 0.16)
+	var total_str: String = "%.2f" % total_time
+	var total_cy: float = rect.position.y + header_h + rect.size.y * 0.225
+	var total_baseline_y: float = total_cy + _game.font_din.get_ascent(total_fs) * 0.35
+	_game.draw_string(_game.font_din, Vector2(rect.position.x, total_baseline_y), total_str, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, total_fs, Color(LINE_COLOR, alpha))
+
+	var best_bar_h: float = rect.size.y * 0.13
+	var best_bar_y: float = rect.position.y + header_h + rect.size.y * 0.55
+	var best_bar_rect := Rect2(rect.position.x, best_bar_y, rect.size.x, best_bar_h)
+	_game.draw_rect(best_bar_rect, Color(0.55, 0.50, 0.58, alpha))
+	var best_label_fs: int = int(best_bar_h * 0.34)
+	var best_label_baseline_y: float = best_bar_y + best_bar_h * 0.5 + _game.font_din.get_ascent(best_label_fs) * 0.35
+	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x + rect.size.x * 0.04, best_label_baseline_y), "BEST TIME", HORIZONTAL_ALIGNMENT_LEFT, rect.size.x * 0.5, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
+	var best_val: float = StageSelectManager.ta_best_total_time
+	var best_str: String = ("%.2f" % best_val) if best_val >= 0.0 else "----.--"
+	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x, best_label_baseline_y), best_str, HORIZONTAL_ALIGNMENT_RIGHT, rect.size.x - rect.size.x * 0.04, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
 
 
 func _get_perimeter_pos_topleft_ui(d: float, bx: float, by: float, bw: float, bh: float) -> Vector2:

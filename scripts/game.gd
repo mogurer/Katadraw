@@ -155,25 +155,21 @@ var _ta_results_scroll_display_time: float = 0.0
 ## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
 ## _draw_ta_results()（描画）と ta_results の入力判定の両方がこれを参照する単一の情報源。
 func _ta_results_timeline() -> Dictionary:
-	const TITLE_SHOW_DUR: float = 0.6
-	const TITLE_SCROLL_DUR: float = 0.5
-	const ROW_INTERVAL: float = 0.15
-	const ROW_H: float = 75.0
-	const THANK_YOU_DELAY: float = 1.0
-	const BUTTONS_DELAY: float = 3.0
+	const ROW_INTERVAL: float = 0.15   # 行ペア（左右1組）の出現間隔
+	const ROW_H: float = 62.0          # 1行の高さ（スクロール速度計算に使用。実際の描画高さと合わせること）
+	const LISTING_START: float = 0.2   # タイトルは静的表示のため、わずかな間を置いてすぐ流れ出す
+	const BUTTONS_DELAY: float = 0.6   # 全行出現後、右パネル・ボタン表示までの間
 	var stage_count: int = stage_session.stage_times.size()
-	var listing_start: float = TITLE_SHOW_DUR + TITLE_SCROLL_DUR
-	var listing_end: float = listing_start + float(stage_count) * ROW_INTERVAL
-	var thank_you_time: float = listing_end + THANK_YOU_DELAY
-	var buttons_time: float = thank_you_time + BUTTONS_DELAY
+	var pair_count: int = int(ceil(float(stage_count) / 2.0))
+	var listing_start: float = LISTING_START
+	var listing_end: float = listing_start + float(pair_count) * ROW_INTERVAL
+	var buttons_time: float = listing_end + BUTTONS_DELAY
 	return {
-		"title_show_dur": TITLE_SHOW_DUR,
-		"title_scroll_dur": TITLE_SCROLL_DUR,
 		"row_interval": ROW_INTERVAL,
 		"row_h": ROW_H,
+		"pair_count": pair_count,
 		"listing_start": listing_start,
 		"listing_end": listing_end,
-		"thank_you_time": thank_you_time,
 		"buttons_time": buttons_time,
 		"elapsed": Time.get_ticks_msec() / 1000.0 - _ta_results_start_time,
 	}
@@ -189,7 +185,7 @@ func _process_ta_results_scroll(delta: float) -> void:
 		_ta_results_scroll_time = tl.elapsed - tl.listing_start
 		_ta_results_scroll_display_time = _ta_results_scroll_time
 		return
-	var listing_duration: float = float(stage_session.stage_times.size()) * tl.row_interval
+	var listing_duration: float = float(tl.pair_count) * tl.row_interval
 	const STICK_DEADZONE: float = 0.25
 	const STICK_SPEED: float = 5.0
 	const SCROLL_SMOOTH_SPEED: float = 10.0
@@ -2101,7 +2097,7 @@ func _input(event: InputEvent) -> void:
 		var _ta_tl: Dictionary = _ta_results_timeline()
 		if _ta_tl.elapsed >= _ta_tl.listing_end and event is InputEventMouseButton and event.pressed:
 			const WHEEL_STEP: float = 0.3
-			var _listing_dur: float = float(stage_session.stage_times.size()) * _ta_tl.row_interval
+			var _listing_dur: float = float(_ta_tl.pair_count) * _ta_tl.row_interval
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 				_ta_results_scroll_time = clampf(_ta_results_scroll_time - WHEEL_STEP, 0.0, _listing_dur)
 				queue_redraw()
@@ -3811,7 +3807,11 @@ func _ta_advance_after_clear() -> void:
 		BGMManager.unlock_bgm(zone_ids[zone])
 
 	if finished_idx >= GameConfig.STAGE_COUNT_FOR_TA - 1:
-		# 全50ステージクリア → タイムアタック専用のリザルト画面へ
+		# 全50ステージクリア → 自己ベスト更新判定 → タイムアタック専用のリザルト画面へ
+		var _ta_total_time: float = 0.0
+		for _t in stage_session.stage_times:
+			_ta_total_time += _t
+		StageSelectManager.update_ta_best_total_time(_ta_total_time)
 		TransitionManager.play_polygon(func():
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"

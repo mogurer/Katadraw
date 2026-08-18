@@ -30,6 +30,9 @@ var last_unlocked_ids: Array[int] = []
 # チュートリアル済みフラグ（保存あり）
 var tutorial_shown: bool = false
 
+# タイムアタック合計クリアタイムの自己ベスト（保存あり）。-1.0 = 未記録
+var ta_best_total_time: float = -1.0
+
 # 全ステージクリア済みフラグ（保存あり）
 var all_cleared: bool = false
 
@@ -278,6 +281,7 @@ func _save_states() -> void:
 	data["best_moves"] = best_m
 	data["unlocked_bgms"] = _unlocked_bgms
 	data["last_played_stage_id"] = last_played_stage_id
+	data["ta_best_total_time"] = ta_best_total_time
 	var f: FileAccess = FileAccess.open(_save_path(), FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
@@ -314,3 +318,14 @@ func _load_states() -> void:
 		for bgm in d["unlocked_bgms"]:
 			_unlocked_bgms.append(str(bgm))
 	last_played_stage_id = int(d.get("last_played_stage_id", -1))
+	ta_best_total_time = float(d.get("ta_best_total_time", -1.0))
+
+
+## タイムアタックの合計クリアタイムを自己ベストと比較し、更新されていれば保存する。
+## 更新された場合は true を返す（将来の「NEW RECORD」演出などに備えて返す）。
+func update_ta_best_total_time(total_time: float) -> bool:
+	if ta_best_total_time < 0.0 or total_time < ta_best_total_time:
+		ta_best_total_time = total_time
+		_save_states()
+		return true
+	return false
