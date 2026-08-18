@@ -11,7 +11,7 @@ const INK_COLOR := Color("#433647")
 
 # --- 体験版 ---
 # true: 体験版（manifest_ex.json の10ステージをループなしで固定順プレイ）
-const IS_TRIAL := true
+const IS_TRIAL := false
 
 ## 体験版の実績API名（体験版内のプレイ順=何番目にクリアしたかに対応。要Steamworks側に事前登録）
 ## 添字は game.gd の _trial_idx（0始まり）にそのまま対応する。
