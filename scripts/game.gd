@@ -146,8 +146,10 @@ var _ta_hud_side: String = "left"
 var ta_run_new_record_flags: Array[bool] = []
 var _ta_results_start_time: float = 0.0
 ## タイムアタック・リザルト画面の手動スクロール位置（_ta_results_timeline() の list_elapsed と同じ時間軸）。
-## 全行出現完了までは list_elapsed と同期し、完了後は右スティック／マウスホイールでのみ更新される。
+## 全行出現完了までは list_elapsed と同期し、完了後は右スティック／マウスホイールでのみ更新される「目標値」。
 var _ta_results_scroll_time: float = 0.0
+## 実際に描画に使う、_ta_results_scroll_time へなめらかに追従する表示用の値。
+var _ta_results_scroll_display_time: float = 0.0
 
 
 ## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
@@ -185,14 +187,18 @@ func _process_ta_results_scroll(delta: float) -> void:
 	var tl: Dictionary = _ta_results_timeline()
 	if tl.elapsed < tl.listing_end:
 		_ta_results_scroll_time = tl.elapsed - tl.listing_start
+		_ta_results_scroll_display_time = _ta_results_scroll_time
 		return
 	var listing_duration: float = float(stage_session.stage_times.size()) * tl.row_interval
 	const STICK_DEADZONE: float = 0.25
 	const STICK_SPEED: float = 5.0
+	const SCROLL_SMOOTH_SPEED: float = 10.0
 	var stick_y: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
 	if absf(stick_y) > STICK_DEADZONE:
 		_ta_results_scroll_time += stick_y * STICK_SPEED * delta
 	_ta_results_scroll_time = clampf(_ta_results_scroll_time, 0.0, listing_duration)
+	var smooth_t: float = clampf(delta * SCROLL_SMOOTH_SPEED, 0.0, 1.0)
+	_ta_results_scroll_display_time = lerp(_ta_results_scroll_display_time, _ta_results_scroll_time, smooth_t)
 
 
 ## THANK YOU 表示から3秒後（ボタンが出るタイミング）以降かどうか。
@@ -3793,6 +3799,7 @@ func _ta_advance_after_clear() -> void:
 			game_state = "ta_results"
 			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
 			_ta_results_scroll_time = 0.0
+			_ta_results_scroll_display_time = 0.0
 			queue_redraw()
 		, false)
 		return
@@ -3810,6 +3817,7 @@ func _ta_advance_after_clear() -> void:
 			game_state = "ta_results"
 			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
 			_ta_results_scroll_time = 0.0
+			_ta_results_scroll_display_time = 0.0
 			queue_redraw()
 		, false)
 		return

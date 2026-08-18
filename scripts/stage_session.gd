@@ -35,6 +35,21 @@ func fill_check_mode_ta_times(stage_count: int) -> void:
 	clear_results()
 	for _i in range(stage_count):
 		stage_times.append(randf_range(0.01, 999.00))
+		stage_move_counts.append(0)
+		stage_result_shapes.append({"ideal": [_make_dummy_ideal_loop()], "player": []})
+
+
+## チェックモード専用: 目標図形アイコンの表示確認用に、ランダムな正多角形（3〜8角形、半径50・
+## ランダム回転）の頂点配列を1ループ分生成する。実際のステージ形状とは無関係のダミーデータ。
+func _make_dummy_ideal_loop() -> Array:
+	var sides: int = randi_range(3, 8)
+	var r: float = 50.0
+	var rot: float = randf() * TAU
+	var pts: Array = []
+	for k in range(sides):
+		var a: float = rot + TAU * float(k) / float(sides)
+		pts.append(Vector2(cos(a), sin(a)) * r)
+	return pts
 
 
 func start_debug_test(cfg: Dictionary, meta_stage_name: String = "") -> int:

@@ -964,11 +964,12 @@ func _draw_ta_results(vp: Vector2) -> void:
 		var list_elapsed: float = elapsed - tl.listing_start
 		var scroll_speed: float = tl.row_h / tl.row_interval
 		var revealed: int = mini(stage_count, int(list_elapsed / tl.row_interval) + 1)
-		var scroll_list_elapsed: float = _game._ta_results_scroll_time
+		var scroll_list_elapsed: float = _game._ta_results_scroll_display_time
 		const ROW_SLIDE_OFFSET: float = 300.0
 		const ROW_SLIDE_DUR: float = 0.45
 		const ICON_R: float = 18.0
 		const ICON_GAP: float = 10.0
+		const TEXT_RESERVED_W: float = 180.0
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]
@@ -979,14 +980,16 @@ func _draw_ta_results(vp: Vector2) -> void:
 			var row_own_elapsed: float = list_elapsed - row_appear_time
 			var slide_t: float = clampf(row_own_elapsed / ROW_SLIDE_DUR, 0.0, 1.0)
 			var row_x: float = lerp(col2_x - ROW_SLIDE_OFFSET, col2_x, slide_t)
-			var icon_cx: float = row_x + ICON_R
+			var text_x: float = row_x + ICON_R * 2.0 + ICON_GAP
+			var left_icon_cx: float = row_x + ICON_R
+			var right_icon_cx: float = text_x + TEXT_RESERVED_W + ICON_R
+			var icon_cx: float = right_icon_cx if (i % 2 == 1) else left_icon_cx
 			var icon_cy: float = row_y - 6.0
 			var ideal_loops: Array = []
 			if i < _game.stage_session.stage_result_shapes.size():
 				var shape_dict: Dictionary = _game.stage_session.stage_result_shapes[i]
 				ideal_loops = shape_dict.get("ideal", [])
 			_draw_ta_results_shape_icon(ideal_loops, Vector2(icon_cx, icon_cy), ICON_R)
-			var text_x: float = row_x + ICON_R * 2.0 + ICON_GAP
 			var stage_no: String = "#%03d" % (i + 1)
 			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
 			_draw_ta_hud_text(Vector2(text_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
