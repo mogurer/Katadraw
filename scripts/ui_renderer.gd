@@ -964,6 +964,8 @@ func _draw_ta_results(vp: Vector2) -> void:
 		var list_elapsed: float = elapsed - tl.listing_start
 		var scroll_speed: float = tl.row_h / tl.row_interval
 		var revealed: int = mini(stage_count, int(list_elapsed / tl.row_interval) + 1)
+		const ROW_SLIDE_OFFSET: float = 300.0
+		const ROW_SLIDE_DUR: float = 0.15
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]
@@ -971,9 +973,12 @@ func _draw_ta_results(vp: Vector2) -> void:
 			var row_y: float = band_bottom - tl.row_h - (list_elapsed - row_appear_time) * scroll_speed
 			if row_y < band_top - tl.row_h or row_y > band_bottom + tl.row_h:
 				continue
+			var row_own_elapsed: float = list_elapsed - row_appear_time
+			var slide_t: float = clampf(row_own_elapsed / ROW_SLIDE_DUR, 0.0, 1.0)
+			var row_x: float = lerp(col2_x - ROW_SLIDE_OFFSET, col2_x, slide_t)
 			var stage_no: String = "%02d" % (i + 1)
 			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
-			_draw_ta_hud_text(Vector2(col2_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
+			_draw_ta_hud_text(Vector2(row_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
 		var total_text: String = "%.2f" % total_shown
 		_draw_ta_hud_text(Vector2(col3_x, (band_top + band_bottom) * 0.5), total_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 32, Color(1.0, 1.0, 1.0))
 
