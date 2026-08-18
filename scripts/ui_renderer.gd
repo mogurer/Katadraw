@@ -964,21 +964,32 @@ func _draw_ta_results(vp: Vector2) -> void:
 		var list_elapsed: float = elapsed - tl.listing_start
 		var scroll_speed: float = tl.row_h / tl.row_interval
 		var revealed: int = mini(stage_count, int(list_elapsed / tl.row_interval) + 1)
+		var scroll_list_elapsed: float = _game._ta_results_scroll_time
 		const ROW_SLIDE_OFFSET: float = 300.0
-		const ROW_SLIDE_DUR: float = 0.10
+		const ROW_SLIDE_DUR: float = 0.45
+		const ICON_R: float = 18.0
+		const ICON_GAP: float = 10.0
 		var total_shown: float = 0.0
 		for i in range(revealed):
 			total_shown += times[i]
 			var row_appear_time: float = float(i) * tl.row_interval
-			var row_y: float = band_bottom - tl.row_h - (list_elapsed - row_appear_time) * scroll_speed
+			var row_y: float = band_bottom - tl.row_h - (scroll_list_elapsed - row_appear_time) * scroll_speed
 			if row_y < band_top - tl.row_h or row_y > band_bottom + tl.row_h:
 				continue
 			var row_own_elapsed: float = list_elapsed - row_appear_time
 			var slide_t: float = clampf(row_own_elapsed / ROW_SLIDE_DUR, 0.0, 1.0)
 			var row_x: float = lerp(col2_x - ROW_SLIDE_OFFSET, col2_x, slide_t)
-			var stage_no: String = "%02d" % (i + 1)
+			var icon_cx: float = row_x + ICON_R
+			var icon_cy: float = row_y - 6.0
+			var ideal_loops: Array = []
+			if i < _game.stage_session.stage_result_shapes.size():
+				var shape_dict: Dictionary = _game.stage_session.stage_result_shapes[i]
+				ideal_loops = shape_dict.get("ideal", [])
+			_draw_ta_results_shape_icon(ideal_loops, Vector2(icon_cx, icon_cy), ICON_R)
+			var text_x: float = row_x + ICON_R * 2.0 + ICON_GAP
+			var stage_no: String = "#%03d" % (i + 1)
 			var row_text: String = "%s: %.2f" % [stage_no, times[i]]
-			_draw_ta_hud_text(Vector2(row_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
+			_draw_ta_hud_text(Vector2(text_x, row_y), row_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 24, Color(1.0, 1.0, 1.0))
 		var total_text: String = "%.2f" % total_shown
 		_draw_ta_hud_text(Vector2(col3_x, (band_top + band_bottom) * 0.5), total_text, HORIZONTAL_ALIGNMENT_LEFT, col_w, 32, Color(1.0, 1.0, 1.0))
 
@@ -2159,6 +2170,42 @@ func _draw_ta_target_shape_icon(center: Vector2, r: float) -> void:
 		return
 	_game.draw_colored_polygon(pts, Color(0.95, 0.19, 0.32, 0.28))
 	_game.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(1.0, 1.0, 1.0), 2.5)
+
+
+## タイムアタック・リザルト画面用: 保存済みの「お手本の図形データ」（stage_result_shapesのideal、
+## world座標・複数loop対応）を bbox 正規化して center を中心に半径 r で縮小描画する。
+## 配色は draw_result_thumbnail() のガイド線と同じ Color(0.35, 0.28, 0.35) の線のみ（塗りつぶしなし）。
+func _draw_ta_results_shape_icon(ideal_loops: Array, center: Vector2, r: float) -> void:
+	if ideal_loops.is_empty():
+		return
+	var all: Array[Vector2] = []
+	for loop in ideal_loops:
+		all.append_array(loop)
+	if all.size() < 2:
+		return
+	var min_p: Vector2 = all[0]
+	var max_p: Vector2 = all[0]
+	for p in all:
+		min_p.x = minf(min_p.x, p.x)
+		min_p.y = minf(min_p.y, p.y)
+		max_p.x = maxf(max_p.x, p.x)
+		max_p.y = maxf(max_p.y, p.y)
+	var size: Vector2 = max_p - min_p
+	if size.x < 1.0:
+		size.x = 1.0
+	if size.y < 1.0:
+		size.y = 1.0
+	var center_src: Vector2 = (min_p + max_p) * 0.5
+	var scale: float = minf((r * 2.0) / size.x, (r * 2.0) / size.y)
+	var guide_color := Color(0.35, 0.28, 0.35)
+	for loop in ideal_loops:
+		var verts: Array = loop
+		if verts.size() < 2:
+			continue
+		for i in range(verts.size()):
+			var a: Vector2 = (verts[i] - center_src) * scale + center
+			var b: Vector2 = (verts[(i + 1) % verts.size()] - center_src) * scale + center
+			_game.draw_line(a, b, guide_color, 1.0, true)
 
 
 ## タイムアタックHUD＝「ラップタイムパネル」。

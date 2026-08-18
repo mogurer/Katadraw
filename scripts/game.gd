@@ -145,6 +145,9 @@ var stage_move_count: int = 0
 var _ta_hud_side: String = "left"
 var ta_run_new_record_flags: Array[bool] = []
 var _ta_results_start_time: float = 0.0
+## タイムアタック・リザルト画面の手動スクロール位置（_ta_results_timeline() の list_elapsed と同じ時間軸）。
+## 全行出現完了までは list_elapsed と同期し、完了後は右スティック／マウスホイールでのみ更新される。
+var _ta_results_scroll_time: float = 0.0
 
 
 ## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
@@ -172,6 +175,24 @@ func _ta_results_timeline() -> Dictionary:
 		"buttons_time": buttons_time,
 		"elapsed": Time.get_ticks_msec() / 1000.0 - _ta_results_start_time,
 	}
+
+
+## タイムアタック・リザルト画面: 全行の出現アニメーションが完了するまでは _ta_results_scroll_time を
+## list_elapsed と同期させ、完了後は右スティックの入力のみで手動スクロールできるようにする。
+func _process_ta_results_scroll(delta: float) -> void:
+	if game_state != "ta_results":
+		return
+	var tl: Dictionary = _ta_results_timeline()
+	if tl.elapsed < tl.listing_end:
+		_ta_results_scroll_time = tl.elapsed - tl.listing_start
+		return
+	var listing_duration: float = float(stage_session.stage_times.size()) * tl.row_interval
+	const STICK_DEADZONE: float = 0.25
+	const STICK_SPEED: float = 5.0
+	var stick_y: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	if absf(stick_y) > STICK_DEADZONE:
+		_ta_results_scroll_time += stick_y * STICK_SPEED * delta
+	_ta_results_scroll_time = clampf(_ta_results_scroll_time, 0.0, listing_duration)
 
 
 ## THANK YOU 表示から3秒後（ボタンが出るタイミング）以降かどうか。
@@ -2071,6 +2092,18 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "ta_results":
+		var _ta_tl: Dictionary = _ta_results_timeline()
+		if _ta_tl.elapsed >= _ta_tl.listing_end and event is InputEventMouseButton and event.pressed:
+			const WHEEL_STEP: float = 0.3
+			var _listing_dur: float = float(stage_session.stage_times.size()) * _ta_tl.row_interval
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_ta_results_scroll_time = clampf(_ta_results_scroll_time - WHEEL_STEP, 0.0, _listing_dur)
+				queue_redraw()
+				return
+			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_ta_results_scroll_time = clampf(_ta_results_scroll_time + WHEEL_STEP, 0.0, _listing_dur)
+				queue_redraw()
+				return
 		# スクロールが終わり THANK YOU 表示から3秒経つ（ボタンが出る）までは一切操作を受け付けない
 		if not _ta_results_buttons_active():
 			return
@@ -3759,6 +3792,7 @@ func _ta_advance_after_clear() -> void:
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"
 			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
+			_ta_results_scroll_time = 0.0
 			queue_redraw()
 		, false)
 		return
@@ -3775,6 +3809,7 @@ func _ta_advance_after_clear() -> void:
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"
 			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
+			_ta_results_scroll_time = 0.0
 			queue_redraw()
 		, false)
 		return
@@ -5930,6 +5965,7 @@ func _process(delta: float) -> void:
 	if DEBUG_UI_STICK_NAV and game_state == "config":
 		_debug_ui_stick_nav_poll_config(delta)
 	_process_ui_menu_stick_navigation(delta)
+	_process_ta_results_scroll(delta)
 	if game_state != "rules":
 		input_handler.process_mouse_lerp(delta)
 	_update_player_hover()
