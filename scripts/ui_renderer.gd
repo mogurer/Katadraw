@@ -962,7 +962,7 @@ func _draw_ta_results(vp: Vector2) -> void:
 	var margin_x: float = vp.x * 0.05
 	var top_y: float = vp.y * 0.03
 	var logo_tex: Texture2D = _game.result_logo_texture
-	var logo_draw_h: float = vp.y * 0.13
+	var logo_draw_h: float = vp.y * 0.16   # (項目4: 0.13 → 0.16 に拡大。項目3のリスト領域縮小分をここに充てる)
 	var logo_draw_w: float = 0.0
 	if logo_tex:
 		var tex_size: Vector2 = logo_tex.get_size()
@@ -995,7 +995,7 @@ func _draw_ta_results(vp: Vector2) -> void:
 	const SLIDE_OFFSET: float = 22.0     # 枠内に収まる範囲でのスライド距離(px)。枠外にはみ出させないため小さめ
 	const SLIDE_DUR: float = 0.28
 	const BADGE_W_FRAC: float = 0.24     # バッジ幅（列幅に対する比率）
-	const ICON_R: float = 16.0
+	const ICON_R: float = 32.0           # (項目5: 16.0 → 32.0 に倍増)
 	const SCROLLBAR_W: float = 10.0
 
 	var inner_pad: float = vp.x * 0.012
@@ -1011,10 +1011,17 @@ func _draw_ta_results(vp: Vector2) -> void:
 		var revealed: int = mini(pair_count, int(list_elapsed / tl.row_interval) + 1)
 		var scroll_list_elapsed: float = _game._ta_results_scroll_display_time
 
+		# (項目1の修正) スクロール可能な下限値を計算し、game.gd 側へ書き出す。
+		# 「#001/#002 が最上段(list_top)に来た位置」を下限とすることで、それ以上は戻れなくする。
+		var listing_visible_h: float = list_bottom - list_top
+		var scroll_min: float = clampf((listing_visible_h - ROW_H) / scroll_speed, 0.0, float(pair_count) * tl.row_interval)
+		_game._ta_results_scroll_min = scroll_min
+
 		for p in range(revealed):
 			var row_appear_time: float = float(p) * tl.row_interval
 			var row_y: float = list_bottom - ROW_H - (scroll_list_elapsed - row_appear_time) * scroll_speed
-			if row_y < list_top - ROW_H or row_y > list_bottom:
+			# (項目2の修正) 行全体が枠内([list_top, list_bottom])に収まっている場合のみ描画する。
+			if row_y < list_top or row_y > list_bottom - ROW_H:
 				continue
 			var row_own_elapsed: float = list_elapsed - row_appear_time
 			var reveal_t: float = clampf(row_own_elapsed / SLIDE_DUR, 0.0, 1.0)
@@ -1031,23 +1038,13 @@ func _draw_ta_results(vp: Vector2) -> void:
 	# ═══ ③ 右パネル: TOTAL CLEAR TIME / BEST TIME ═══
 	var p3_a: float = clampf((elapsed - tl.listing_end) / 0.4, 0.0, 1.0)
 	if p3_a > 0.0:
-		_draw_ta_results_summary_panel(right_panel_rect, times, p3_a)
+		var button_zone: Rect2 = _draw_ta_results_summary_panel(right_panel_rect, times, p3_a)
 
-	# ═══ ④ 操作ボタン（カメラ／Twitter／NEXT。体験版のResult画面と同一の関数・遷移を再利用） ═══
-	if elapsed >= tl.buttons_time:
-		var btn_alpha: float = clampf((elapsed - tl.buttons_time) / 0.3, 0.0, 1.0)
-		const NEXT_BTN_S: float = 128.0
-		const IG_GAP: float = 120.0
-		var ig_size: float = 88.0
-		var next_cx: float = vp.x - 100.0 - NEXT_BTN_S * 0.5
-		var ig_cy: float = vp.y - 100.0 - NEXT_BTN_S * 0.5
-		var tw_cx: float = next_cx - ig_size - IG_GAP
-		var cam_cx: float = tw_cx - ig_size - IG_GAP
-		var icon_draw_size: float = ig_size * 1.50 * 0.90 * 1.50
-		var res_act: int = get_results_active_focus(vp)
-		_draw_result_camera_btn(Vector2(cam_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, btn_alpha, res_act == 0)
-		_draw_result_twitter_btn(Vector2(tw_cx - icon_draw_size * 0.5, ig_cy - icon_draw_size * 0.5), icon_draw_size, btn_alpha, res_act == 1)
-		_draw_results_next_button(Vector2(next_cx, ig_cy), tr("TA_RESULT_BTN_TITLE"), 35, btn_alpha, NEXT_BTN_S, res_act == 2)
+		# ═══ ④ 操作ボタン（カメラ／Twitter／NEXT。右パネル下部ゾーン内に均等割り付け） ═══
+		if elapsed >= tl.buttons_time:
+			var btn_alpha: float = clampf((elapsed - tl.buttons_time) / 0.3, 0.0, 1.0)
+			var res_act: int = get_ta_results_active_focus(vp)
+			_draw_ta_results_action_buttons(button_zone, btn_alpha, res_act)
 
 
 ## タイムアタック・リザルト画面（新レイアウト）: 1行分（濃色バッジ#0XX + 目標図形アイコン + 右寄せタイム）を描画する。
@@ -1081,7 +1078,7 @@ func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: i
 
 
 ## タイムアタック・リザルト画面（新レイアウト）: 右パネル（TOTAL CLEAR TIME / BEST TIME）を描画する。
-func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: float) -> void:
+func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: float) -> Rect2:
 	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 4.0)
 	var total_time: float = 0.0
 	for t in times:
@@ -1096,7 +1093,7 @@ func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: flo
 
 	var total_fs: int = int(rect.size.y * 0.16)
 	var total_str: String = "%.2f" % total_time
-	var total_cy: float = rect.position.y + header_h + rect.size.y * 0.225
+	var total_cy: float = rect.position.y + header_h + rect.size.y * 0.40   # (B-2: 0.225 → 0.40)
 	var total_baseline_y: float = total_cy + _game.font_din.get_ascent(total_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(rect.position.x, total_baseline_y), total_str, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, total_fs, Color(LINE_COLOR, alpha))
 
@@ -1110,6 +1107,76 @@ func _draw_ta_results_summary_panel(rect: Rect2, times: Array[float], alpha: flo
 	var best_val: float = StageSelectManager.ta_best_total_time
 	var best_str: String = ("%.2f" % best_val) if best_val >= 0.0 else "----.--"
 	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x, best_label_baseline_y), best_str, HORIZONTAL_ALIGNMENT_RIGHT, rect.size.x - rect.size.x * 0.04, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
+
+	# ボタンゾーン: BEST TIMEバー下端 〜 パネル下端
+	var btn_zone_y: float = best_bar_y + best_bar_h
+	return Rect2(rect.position.x, btn_zone_y, rect.size.x, rect.end.y - btn_zone_y)
+
+
+## TA リザルト右パネル内ボタンゾーン Rect2 を vp から再計算する（ヒット判定・フォーカス判定で使用）。
+func _ta_results_button_zone_rect(vp: Vector2) -> Rect2:
+	var margin_x: float = vp.x * 0.05
+	var top_y: float = vp.y * 0.03
+	var logo_draw_h: float = vp.y * 0.16
+	var panels_top: float = top_y + logo_draw_h + vp.y * 0.03
+	var panels_bottom: float = vp.y * 0.93
+	var panel_h: float = panels_bottom - panels_top
+	var left_panel_w: float = vp.x * 0.515
+	var panel_gap: float = vp.x * 0.015
+	var right_panel_x: float = margin_x + left_panel_w + panel_gap
+	var right_panel_w: float = vp.x - margin_x - right_panel_x
+	var header_h: float = panel_h * 0.12
+	var best_bar_y: float = panels_top + header_h + panel_h * 0.55
+	var best_bar_h: float = panel_h * 0.13
+	var btn_zone_y: float = best_bar_y + best_bar_h
+	return Rect2(right_panel_x, btn_zone_y, right_panel_w, panels_bottom - btn_zone_y)
+
+
+func _ta_results_btn_icon_layout(zone: Rect2) -> Dictionary:
+	var icon_s: float = minf(zone.size.y * 0.70, zone.size.x / 4.0)
+	var pad: float = (zone.size.x - icon_s * 3.0) / 4.0
+	var y: float = zone.position.y + (zone.size.y - icon_s) * 0.5
+	return {"icon_s": icon_s, "pad": pad, "y": y}
+
+
+func _draw_ta_results_action_buttons(zone: Rect2, alpha: float, active_focus: int) -> void:
+	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
+	var icon_s: float = lo.icon_s
+	var pad: float = lo.pad
+	var y: float = lo.y
+	_draw_result_camera_btn(Vector2(zone.position.x + pad, y), icon_s, alpha, active_focus == 0)
+	_draw_result_twitter_btn(Vector2(zone.position.x + pad * 2.0 + icon_s, y), icon_s, alpha, active_focus == 1)
+	var next_cx: float = zone.position.x + pad * 3.0 + icon_s * 2.5
+	var next_cy: float = y + icon_s * 0.5
+	_draw_results_next_button(Vector2(next_cx, next_cy), tr("TA_RESULT_BTN_TITLE"), 35, alpha, icon_s, active_focus == 2)
+
+
+func get_ta_results_camera_button_rect(vp: Vector2) -> Rect2:
+	var zone: Rect2 = _ta_results_button_zone_rect(vp)
+	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
+	return Rect2(zone.position.x + lo.pad, lo.y, lo.icon_s, lo.icon_s)
+
+
+func get_ta_results_twitter_button_rect(vp: Vector2) -> Rect2:
+	var zone: Rect2 = _ta_results_button_zone_rect(vp)
+	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
+	return Rect2(zone.position.x + lo.pad * 2.0 + lo.icon_s, lo.y, lo.icon_s, lo.icon_s)
+
+
+func get_ta_results_next_button_rect(vp: Vector2) -> Rect2:
+	var zone: Rect2 = _ta_results_button_zone_rect(vp)
+	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
+	return Rect2(zone.position.x + lo.pad * 3.0 + lo.icon_s * 2.0, lo.y, lo.icon_s, lo.icon_s)
+
+
+func get_ta_results_active_focus(vp: Vector2) -> int:
+	if get_ta_results_camera_button_rect(vp).has_point(_result_mouse_pos):
+		return 0
+	if get_ta_results_twitter_button_rect(vp).has_point(_result_mouse_pos):
+		return 1
+	if get_ta_results_next_button_rect(vp).has_point(_result_mouse_pos):
+		return 2
+	return results_action_focus_index
 
 
 func _get_perimeter_pos_topleft_ui(d: float, bx: float, by: float, bw: float, bh: float) -> Vector2:
@@ -2288,20 +2355,17 @@ func _draw_ta_results_shape_icon(stage_master_idx: int, center: Vector2, r: floa
 		var cp := PackedVector2Array()
 		for i in range(32):
 			cp.append(center + Vector2(cos(float(i) * TAU / 32.0), sin(float(i) * TAU / 32.0)) * r)
-		_game.draw_polyline(cp + PackedVector2Array([cp[0]]), line_c, 1.75)
+		_game.draw_polyline(cp + PackedVector2Array([cp[0]]), line_c, 0.875)   # (B-4: 1.75 → 0.875)
 		return
 
 	var pts: PackedVector2Array = shape.pts
-	var corner_pts: PackedVector2Array = shape.corner_pts
 	if pts.size() < 3:
 		return
 	var pts_world := PackedVector2Array()
 	for p in pts:
 		pts_world.append(center + p)
 	_game.draw_colored_polygon(pts_world, fill_c)
-	_game.draw_polyline(pts_world + PackedVector2Array([pts_world[0]]), line_c, 1.75)
-	for p in corner_pts:
-		_game.draw_circle(center + p, 2.0, line_c)
+	_game.draw_polyline(pts_world + PackedVector2Array([pts_world[0]]), line_c, 0.875)   # (B-4: 1.75 → 0.875, corner_pts ループ削除)
 
 
 ## タイムアタックHUD＝「ラップタイムパネル」。

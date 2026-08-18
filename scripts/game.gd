@@ -150,6 +150,9 @@ var _ta_results_start_time: float = 0.0
 var _ta_results_scroll_time: float = 0.0
 ## 実際に描画に使う、_ta_results_scroll_time へなめらかに追従する表示用の値。
 var _ta_results_scroll_display_time: float = 0.0
+## 手動スクロールの下限値。ui_renderer.gd の _draw_ta_results() が毎フレーム書き込む
+## （#001/#002が最上段に来た時点でそれ以上戻れないようにするための下限。詳細はコメント参照）。
+var _ta_results_scroll_min: float = 0.0
 
 
 ## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
@@ -192,7 +195,7 @@ func _process_ta_results_scroll(delta: float) -> void:
 	var stick_y: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
 	if absf(stick_y) > STICK_DEADZONE:
 		_ta_results_scroll_time += stick_y * STICK_SPEED * delta
-	_ta_results_scroll_time = clampf(_ta_results_scroll_time, 0.0, listing_duration)
+	_ta_results_scroll_time = clampf(_ta_results_scroll_time, _ta_results_scroll_min, listing_duration)
 	var smooth_t: float = clampf(delta * SCROLL_SMOOTH_SPEED, 0.0, 1.0)
 	_ta_results_scroll_display_time = lerp(_ta_results_scroll_display_time, _ta_results_scroll_time, smooth_t)
 
@@ -2099,11 +2102,11 @@ func _input(event: InputEvent) -> void:
 			const WHEEL_STEP: float = 0.3
 			var _listing_dur: float = float(_ta_tl.pair_count) * _ta_tl.row_interval
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_ta_results_scroll_time = clampf(_ta_results_scroll_time - WHEEL_STEP, 0.0, _listing_dur)
+				_ta_results_scroll_time = clampf(_ta_results_scroll_time - WHEEL_STEP, _ta_results_scroll_min, _listing_dur)
 				queue_redraw()
 				return
 			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_ta_results_scroll_time = clampf(_ta_results_scroll_time + WHEEL_STEP, 0.0, _listing_dur)
+				_ta_results_scroll_time = clampf(_ta_results_scroll_time + WHEEL_STEP, _ta_results_scroll_min, _listing_dur)
 				queue_redraw()
 				return
 		# スクロールが終わり THANK YOU 表示から3秒経つ（ボタンが出る）までは一切操作を受け付けない
@@ -2124,15 +2127,15 @@ func _input(event: InputEvent) -> void:
 		)
 		if is_confirm_click:
 			var pp: Vector2 = input_handler.player_position
-			if _hit_results_camera_button(pp):
+			if _hit_ta_results_camera_button(pp):
 				_take_screenshot()
 				queue_redraw()
 				return
-			if _hit_results_twitter_button(pp):
+			if _hit_ta_results_twitter_button(pp):
 				_open_twitter_post()
 				queue_redraw()
 				return
-			if _hit_results_button(pp):
+			if _hit_ta_results_button(pp):
 				ui_renderer.set_btn_press_with_callback(tr("TA_RESULT_BTN_TITLE"), func():
 					BGMManager.stop()
 					TransitionManager.play_diagonal(func():
@@ -2145,7 +2148,7 @@ func _input(event: InputEvent) -> void:
 				queue_redraw()
 				return
 		if is_confirm_key or is_confirm_pad or is_start_pad:
-			var act: int = ui_renderer.get_results_active_focus(vp_res)
+			var act: int = ui_renderer.get_ta_results_active_focus(vp_res)
 			if act == 0:
 				_take_screenshot()
 			elif act == 1:
@@ -3368,6 +3371,21 @@ func _hit_results_camera_button(pos: Vector2) -> bool:
 func _hit_results_twitter_button(pos: Vector2) -> bool:
 	var vp: Vector2 = get_viewport_rect().size
 	return ui_renderer.get_results_twitter_button_rect(vp).has_point(pos)
+
+
+func _hit_ta_results_button(pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	return ui_renderer.get_ta_results_next_button_rect(vp).has_point(pos)
+
+
+func _hit_ta_results_camera_button(pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	return ui_renderer.get_ta_results_camera_button_rect(vp).has_point(pos)
+
+
+func _hit_ta_results_twitter_button(pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	return ui_renderer.get_ta_results_twitter_button_rect(vp).has_point(pos)
 
 
 func _open_twitter_post() -> void:
