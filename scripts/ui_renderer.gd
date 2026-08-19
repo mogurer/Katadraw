@@ -1086,10 +1086,27 @@ func _draw_ta_results(vp: Vector2) -> void:
 			if right_idx < stage_count:
 				_draw_ta_results_row(Vector2(col_r_x + slide_x, row_y), col_w, ROW_H, right_idx, times[right_idx], row_a, BADGE_W_FRAC, ICON_R)
 
-	# ═══ ③ 右パネル: TOTAL CLEAR TIME / BEST TIME ═══
-	var p3_a: float = clampf((elapsed - tl.listing_end) / 0.4, 0.0, 1.0)
+		# (要件1) 上下スクロール可能インジケーター（▲/▼）。手動スクロールが有効になってから表示する。
+		if elapsed >= tl.listing_end:
+			const ARROW_SIZE: float = 14.0
+			const ARROW_BOUNCE_AMP: float = 6.0
+			const ARROW_BOUNCE_SPEED: float = 3.0
+			const ARROW_EPS: float = 0.005
+			var listing_duration: float = float(pair_count) * tl.row_interval
+			var cur_scroll: float = _game._ta_results_scroll_time
+			var can_scroll_up: bool = cur_scroll > scroll_min + ARROW_EPS
+			var can_scroll_down: bool = cur_scroll < listing_duration - ARROW_EPS
+			var arrow_cx: float = lo.left_panel_rect.position.x + lo.left_panel_rect.size.x * 0.5
+			var bounce_wave: float = absf(sin(elapsed * ARROW_BOUNCE_SPEED))
+			if can_scroll_up:
+				_draw_ta_results_scroll_arrow(Vector2(arrow_cx, list_top - bounce_wave * ARROW_BOUNCE_AMP), ARROW_SIZE, true, lerp(0.4, 1.0, bounce_wave))
+			if can_scroll_down:
+				_draw_ta_results_scroll_arrow(Vector2(arrow_cx, list_bottom + bounce_wave * ARROW_BOUNCE_AMP), ARROW_SIZE, false, lerp(0.4, 1.0, bounce_wave))
+
+	# ═══ ③ 右パネル: TOTAL CLEAR TIME / BEST TIME（画面遷移直後から表示） ═══
+	var p3_a: float = chrome_a
 	if p3_a > 0.0:
-		_draw_ta_results_summary_panel(lo, times, p3_a)
+		_draw_ta_results_summary_panel(lo, times, p3_a, tl, elapsed)
 
 		# ═══ ④ 操作ボタン（カメラ／Twitter／NEXT） ═══
 		if elapsed >= tl.buttons_time:
@@ -1106,7 +1123,7 @@ func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: i
 	var badge_w: float = col_w * badge_w_frac
 	var badge_rect := Rect2(pos, Vector2(badge_w, row_h))
 	_game.draw_style_box(_ta_results_badge_style, badge_rect)
-	var badge_fs: int = int(row_h * 0.85)
+	var badge_fs: int = int(row_h * 0.60)
 	var badge_str: String = "#%03d" % (stage_idx + 1)
 	var badge_baseline_y: float = pos.y + row_h * 0.5 + _game.font_din.get_ascent(badge_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(badge_rect.position.x, badge_baseline_y), badge_str, HORIZONTAL_ALIGNMENT_CENTER, badge_w, badge_fs, Color(1.0, 1.0, 1.0, alpha))
@@ -1122,17 +1139,30 @@ func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: i
 	var icon_cy: float = pos.y + row_h * 0.5
 	_draw_ta_results_shape_icon(stage_master_idx, Vector2(icon_cx, icon_cy), icon_r)
 
-	var time_fs: int = int(row_h * 0.70)
+	var time_fs: int = int(row_h * 0.85)
 	var time_str: String = "%.2f" % clear_time
 	var time_pad: float = pill_w * 0.06
 	var time_baseline_y: float = pos.y + row_h * 0.5 + _game.font_din.get_ascent(time_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(pill_x, time_baseline_y), time_str, HORIZONTAL_ALIGNMENT_RIGHT, pill_w - time_pad, time_fs, Color(LINE_COLOR, alpha))
 
 
+## タイムアタック・リザルト画面: 上下スクロール可能を示す三角矢印を描画する。
+## pointing_up=true で上向き（▲）、false で下向き（▼）。
+func _draw_ta_results_scroll_arrow(center: Vector2, size: float, pointing_up: bool, alpha: float) -> void:
+	var pts: PackedVector2Array
+	if pointing_up:
+		pts = PackedVector2Array([center + Vector2(-size, size * 0.6), center + Vector2(size, size * 0.6), center + Vector2(0.0, -size * 0.6)])
+	else:
+		pts = PackedVector2Array([center + Vector2(-size, -size * 0.6), center + Vector2(size, -size * 0.6), center + Vector2(0.0, size * 0.6)])
+	_game.draw_colored_polygon(pts, Color(LINE_COLOR, alpha))
+
+
 ## タイムアタック・リザルト画面（新レイアウト）: 右パネル（TOTAL CLEAR TIME / BEST TIME）を描画する。
-## 黒枠は最後に描画することで、色帯（header/best_bar）より上のレイヤーに乗せ、
-## 枠線が色帯に隠れて途切れて見えないようにしている。
-func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: float) -> void:
+## 合計タイムは、ドラムロール（0→実値へのカウントアップ）→ パンチ演出（拡大+白 → 縮小+元色）
+## の順で表示される。カウントアップ完了後、自己ベスト更新時（またはチェックモード時）は
+## 「NEW RECORD !」をシャイン演出付きで表示する。
+## 黒枠は最後に描画することで、色帯（header/best_bar）より上のレイヤーに乗せている。
+func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: float, tl: Dictionary, elapsed: float) -> void:
 	var rect: Rect2 = lo.right_panel_rect
 	var total_time: float = 0.0
 	for t in times:
@@ -1144,11 +1174,42 @@ func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: 
 	var header_baseline_y: float = header_rect.position.y + header_rect.size.y * 0.5 + _game.font_din.get_ascent(header_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(header_rect.position.x + rect.size.x * 0.04, header_baseline_y), "TOTAL CLEAR TIME", HORIZONTAL_ALIGNMENT_LEFT, rect.size.x * 0.9, header_fs, Color(1.0, 1.0, 1.0, alpha))
 
+	# ── 合計タイム: ドラムロール(カウントアップ) → パンチ演出(拡大+白 → 縮小+元色) ──
 	var total_rect: Rect2 = lo.total_rect
-	var total_fs: int = int(rect.size.y * 0.14)
-	var total_str: String = "%.2f" % total_time
+	var total_fs: int = int(rect.size.y * 0.20)
+	var display_total: float = total_time
+	var total_scale: float = 1.0
+	var total_color: Color = Color(LINE_COLOR, alpha)
+	if elapsed < tl.drum_end:
+		var dt: float = clampf((elapsed - tl.right_panel_start) / tl.drum_dur, 0.0, 1.0)
+		display_total = total_time * _ease_out_cubic(dt)
+	elif elapsed < tl.punch_end:
+		var pt: float = clampf((elapsed - tl.drum_end) / tl.punch_dur, 0.0, 1.0)
+		if pt < 0.5:
+			var pt2: float = _ease_out_cubic(pt / 0.5)
+			total_scale = lerp(1.0, 1.35, pt2)
+			total_color = Color(LINE_COLOR, alpha).lerp(Color(1.0, 1.0, 1.0, alpha), pt2)
+		else:
+			var pt3: float = (pt - 0.5) / 0.5
+			total_scale = lerp(1.35, 1.0, pt3)
+			total_color = Color(1.0, 1.0, 1.0, alpha).lerp(Color(LINE_COLOR, alpha), pt3)
+	var total_str: String = "%.2f" % display_total
+	var total_cx: float = rect.position.x + rect.size.x * 0.5
 	var total_baseline_y: float = total_rect.position.y + total_rect.size.y * 0.5 + _game.font_din.get_ascent(total_fs) * 0.35
-	_game.draw_string(_game.font_din, Vector2(rect.position.x, total_baseline_y), total_str, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, total_fs, Color(LINE_COLOR, alpha))
+	var scaling: bool = not is_equal_approx(total_scale, 1.0)
+	if scaling:
+		var pop_xf := Transform2D(Vector2(total_scale, 0.0), Vector2(0.0, total_scale), Vector2(total_cx * (1.0 - total_scale), total_baseline_y * (1.0 - total_scale)))
+		_game.draw_set_transform_matrix(pop_xf)
+	_game.draw_string(_game.font_din, Vector2(rect.position.x, total_baseline_y), total_str, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, total_fs, total_color)
+	if scaling:
+		_game.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+	# ── NEW RECORD !（自己ベスト更新時のみ。カウントアップ・パンチ演出が終わってから表示） ──
+	if elapsed >= tl.punch_end and (_game._ta_results_is_new_record or GameConfig.DEBUG_TA_RESULTS_CHECK_MODE):
+		var total_w: float = _game.font_din.get_string_size(total_str, HORIZONTAL_ALIGNMENT_LEFT, -1, total_fs).x
+		var nr_x: float = total_cx + total_w * 0.5 - 40.0
+		var nr_y: float = total_baseline_y + total_fs * 0.55
+		_draw_ta_results_new_record_text(Vector2(nr_x, nr_y), alpha)
 
 	var best_bar_rect: Rect2 = lo.best_bar_rect
 	_game.draw_rect(best_bar_rect, Color(0.55, 0.50, 0.58, alpha))
@@ -1159,8 +1220,37 @@ func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: 
 	var best_str: String = ("%.2f" % best_val) if best_val >= 0.0 else "----.--"
 	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x, best_label_baseline_y), best_str, HORIZONTAL_ALIGNMENT_RIGHT, rect.size.x - rect.size.x * 0.04, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
 
-	# (項目7) 黒枠は最後に描画 → header/best_barの色帯より上のレイヤーに乗る
 	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 4.0)
+
+
+## "NEW RECORD !" を赤文字(#ee3e5c)で描画し、1秒周期で左→右へ白色のシャインが走る演出を加える。
+## 本プロジェクトはクリップ機構を使っていないため、文字を1文字ずつ描画し、シャイン位置からの
+## 距離に応じて白色の重ね塗りアルファを変化させる方式で「光っているような」見た目を近似する
+## （文字の描かれていない余白部分には白は乗らないため、擬似的な演出として要件を満たす）。
+func _draw_ta_results_new_record_text(pos: Vector2, alpha: float) -> void:
+	const NR_TEXT: String = "NEW RECORD !"
+	const NR_FS: int = 24
+	const SHINE_PERIOD: float = 1.0    # シャインが1周する周期（秒）
+	const SHINE_WIDTH: float = 26.0    # シャインの帯の幅（px）
+	var font: Font = _game.font_din
+	var base_c := Color("#ee3e5c")
+	_game.draw_string(font, pos, NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, Color(base_c, alpha))
+
+	var text_w: float = font.get_string_size(NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS).x
+	var t: float = fmod(Time.get_ticks_msec() / 1000.0, SHINE_PERIOD) / SHINE_PERIOD
+	var sweep_x: float = pos.x - SHINE_WIDTH + t * (text_w + SHINE_WIDTH * 2.0)
+
+	var cursor_x: float = pos.x
+	for i in range(NR_TEXT.length()):
+		var ch: String = NR_TEXT[i]
+		var ch_w: float = font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS).x
+		if ch != " ":
+			var ch_center: float = cursor_x + ch_w * 0.5
+			var dist: float = absf(ch_center - sweep_x)
+			var shine_a: float = clampf(1.0 - dist / SHINE_WIDTH, 0.0, 1.0)
+			if shine_a > 0.0:
+				_game.draw_string(font, Vector2(cursor_x, pos.y), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, Color(1.0, 1.0, 1.0, shine_a * alpha))
+		cursor_x += ch_w
 
 
 ## TA リザルト右パネル内ボタンゾーン Rect2 を vp から再計算する（ヒット判定・フォーカス判定で使用）。
@@ -2391,7 +2481,7 @@ func _draw_ta_results_shape_icon(stage_master_idx: int, center: Vector2, r: floa
 	if stage_master_idx < 0 or stage_master_idx >= stages.size():
 		return
 	var cfg: Dictionary = stages[stage_master_idx] as Dictionary
-	var fill_c := Color(0.95, 0.19, 0.32, 0.22)
+	var fill_c := Color("#ee3e5c", 0.99)
 
 	var shape: Dictionary = StageManager.compute_mini_shape_points(cfg, r)
 	if shape.is_circle:

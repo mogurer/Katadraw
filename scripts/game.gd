@@ -153,6 +153,10 @@ var _ta_results_scroll_display_time: float = 0.0
 ## 手動スクロールの下限値。ui_renderer.gd の _draw_ta_results() が毎フレーム書き込む
 ## （#001/#002が最上段に来た時点でそれ以上戻れないようにするための下限。詳細はコメント参照）。
 var _ta_results_scroll_min: float = 0.0
+## 直近のタイムアタック結果が自己ベストを更新したかどうか。
+## _ta_advance_after_clear() で確定させ、_draw_ta_results_summary_panel() の
+## 「NEW RECORD !」表示可否判定に使う。
+var _ta_results_is_new_record: bool = false
 
 
 ## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
@@ -161,12 +165,18 @@ func _ta_results_timeline() -> Dictionary:
 	const ROW_INTERVAL: float = 0.10   # 行ペア（左右1組）の出現間隔
 	const ROW_H: float = 48.0          # 1行の高さ（スクロール速度計算に使用。実際の描画高さと合わせること）
 	const LISTING_START: float = 0.2   # タイトルは静的表示のため、わずかな間を置いてすぐ流れ出す
-	const BUTTONS_DELAY: float = 0.6   # 全行出現後、右パネル・ボタン表示までの間
+	const BUTTONS_DELAY: float = 0.6   # 全行出現後、ボタン表示までの間
+	const RIGHT_PANEL_START: float = 0.0   # 右パネルは画面遷移直後から表示する
+	const DRUM_DUR: float = 1.2            # 合計タイムのドラムロール（カウントアップ）所要時間
+	const PUNCH_DUR: float = 0.5           # カウントアップ完了後のパンチ演出（拡大→白、縮小→元色）の所要時間
 	var stage_count: int = stage_session.stage_times.size()
 	var pair_count: int = int(ceil(float(stage_count) / 2.0))
 	var listing_start: float = LISTING_START
 	var listing_end: float = listing_start + float(pair_count) * ROW_INTERVAL
 	var buttons_time: float = listing_end + BUTTONS_DELAY
+	var right_panel_start: float = RIGHT_PANEL_START
+	var drum_end: float = right_panel_start + DRUM_DUR
+	var punch_end: float = drum_end + PUNCH_DUR
 	return {
 		"row_interval": ROW_INTERVAL,
 		"row_h": ROW_H,
@@ -174,6 +184,11 @@ func _ta_results_timeline() -> Dictionary:
 		"listing_start": listing_start,
 		"listing_end": listing_end,
 		"buttons_time": buttons_time,
+		"right_panel_start": right_panel_start,
+		"drum_dur": DRUM_DUR,
+		"drum_end": drum_end,
+		"punch_dur": PUNCH_DUR,
+		"punch_end": punch_end,
 		"elapsed": Time.get_ticks_msec() / 1000.0 - _ta_results_start_time,
 	}
 
@@ -3813,6 +3828,7 @@ func _ta_advance_after_clear() -> void:
 	# チェックモード: 1ステージクリアした時点で即座にta_resultsへ遷移（演出確認用）
 	if GameConfig.DEBUG_TA_RESULTS_CHECK_MODE:
 		stage_session.fill_check_mode_ta_times(GameConfig.STAGE_COUNT_FOR_TA)
+		_ta_results_is_new_record = true
 		TransitionManager.play_polygon(func():
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"
@@ -3834,7 +3850,7 @@ func _ta_advance_after_clear() -> void:
 		var _ta_total_time: float = 0.0
 		for _t in stage_session.stage_times:
 			_ta_total_time += _t
-		StageSelectManager.update_ta_best_total_time(_ta_total_time)
+		_ta_results_is_new_record = StageSelectManager.update_ta_best_total_time(_ta_total_time)
 		TransitionManager.play_polygon(func():
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"
