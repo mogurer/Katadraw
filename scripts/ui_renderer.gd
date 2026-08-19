@@ -164,6 +164,12 @@ var _ig_start_pad_texture: Texture2D = null
 var _ig_hint_style: StyleBoxFlat = null
 var _ta_results_badge_style: StyleBoxFlat = null
 var _ta_results_pill_style: StyleBoxFlat = null
+## "NEW RECORD !" のシャイン演出の状態管理（"sweeping"=流れている最中／"waiting"=次回まで待機中）
+var _ta_shine_state: String = "sweeping"
+## 現在のフェーズ（sweeping/waiting）が始まった時刻（_draw_ta_results() の elapsed 基準）
+var _ta_shine_phase_start: float = -1.0
+## 現在の待機フェーズの長さ（sweeping終了時にランダムで1〜2秒を都度決定する）
+var _ta_shine_wait_dur: float = 0.0
 
 # --- Animation state ---
 var _prev_state: String = ""          # 前フレームのゲームステート
@@ -1206,10 +1212,12 @@ func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: 
 
 	# ── NEW RECORD !（自己ベスト更新時のみ。カウントアップ・パンチ演出が終わってから表示） ──
 	if elapsed >= tl.punch_end and (_game._ta_results_is_new_record or GameConfig.DEBUG_TA_RESULTS_CHECK_MODE):
-		var total_w: float = _game.font_din.get_string_size(total_str, HORIZONTAL_ALIGNMENT_LEFT, -1, total_fs).x
-		var nr_x: float = total_cx + total_w * 0.5 - 40.0
+		const NR_FS: int = 24   # _draw_ta_results_new_record_text() 内の NR_FS と必ず一致させること
+		var nr_text_w: float = _game.font_din.get_string_size("NEW RECORD !", HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS).x
+		var nr_right_margin: float = rect.size.x * 0.04
+		var nr_x: float = rect.end.x - nr_right_margin - nr_text_w
 		var nr_y: float = total_baseline_y + total_fs * 0.55
-		_draw_ta_results_new_record_text(Vector2(nr_x, nr_y), alpha)
+		_draw_ta_results_new_record_text(Vector2(nr_x, nr_y), alpha, elapsed)
 
 	var best_bar_rect: Rect2 = lo.best_bar_rect
 	_game.draw_rect(best_bar_rect, Color(0.55, 0.50, 0.58, alpha))
@@ -1223,21 +1231,42 @@ func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: 
 	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 4.0)
 
 
-## "NEW RECORD !" を赤文字(#ee3e5c)で描画し、1秒周期で左→右へ白色のシャインが走る演出を加える。
+## "NEW RECORD !" を赤文字(#ee3e5c)で描画し、1〜2秒間隔でランダムに、左→右へ白色のシャインが
+## 走る演出を加える（1回のシャインは0.25秒で通過＝旧実装比4倍速）。
 ## 本プロジェクトはクリップ機構を使っていないため、文字を1文字ずつ描画し、シャイン位置からの
 ## 距離に応じて白色の重ね塗りアルファを変化させる方式で「光っているような」見た目を近似する
 ## （文字の描かれていない余白部分には白は乗らないため、擬似的な演出として要件を満たす）。
-func _draw_ta_results_new_record_text(pos: Vector2, alpha: float) -> void:
+func _draw_ta_results_new_record_text(pos: Vector2, alpha: float, elapsed: float) -> void:
 	const NR_TEXT: String = "NEW RECORD !"
 	const NR_FS: int = 24
-	const SHINE_PERIOD: float = 1.0    # シャインが1周する周期（秒）
+	const SWEEP_DUR: float = 0.25      # シャイン1回が流れきるのにかかる時間（旧: 1.0秒 → 4倍速の0.25秒）
 	const SHINE_WIDTH: float = 26.0    # シャインの帯の幅（px）
+	const WAIT_MIN: float = 1.0        # 次のシャインまでの待機時間（最小・秒）
+	const WAIT_MAX: float = 2.0        # 次のシャインまでの待機時間（最大・秒）
 	var font: Font = _game.font_din
 	var base_c := Color("#ee3e5c")
 	_game.draw_string(font, pos, NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS, Color(base_c, alpha))
 
+	# ── シャインの状態機械: sweeping(流れている) ⇄ waiting(次回までランダム待機) ──
+	if _ta_shine_phase_start < 0.0:
+		_ta_shine_state = "sweeping"
+		_ta_shine_phase_start = elapsed
+	var phase_elapsed: float = elapsed - _ta_shine_phase_start
+	if _ta_shine_state == "sweeping" and phase_elapsed >= SWEEP_DUR:
+		_ta_shine_state = "waiting"
+		_ta_shine_phase_start = elapsed
+		_ta_shine_wait_dur = randf_range(WAIT_MIN, WAIT_MAX)
+		phase_elapsed = 0.0
+	elif _ta_shine_state == "waiting" and phase_elapsed >= _ta_shine_wait_dur:
+		_ta_shine_state = "sweeping"
+		_ta_shine_phase_start = elapsed
+		phase_elapsed = 0.0
+
+	if _ta_shine_state != "sweeping":
+		return   # 待機中はシャインを描かない（赤文字のみ表示された状態）
+
 	var text_w: float = font.get_string_size(NR_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, NR_FS).x
-	var t: float = fmod(Time.get_ticks_msec() / 1000.0, SHINE_PERIOD) / SHINE_PERIOD
+	var t: float = clampf(phase_elapsed / SWEEP_DUR, 0.0, 1.0)
 	var sweep_x: float = pos.x - SHINE_WIDTH + t * (text_w + SHINE_WIDTH * 2.0)
 
 	var cursor_x: float = pos.x

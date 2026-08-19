@@ -167,7 +167,6 @@ func _ta_results_timeline() -> Dictionary:
 	const LISTING_START: float = 0.2   # タイトルは静的表示のため、わずかな間を置いてすぐ流れ出す
 	const BUTTONS_DELAY: float = 0.6   # 全行出現後、ボタン表示までの間
 	const RIGHT_PANEL_START: float = 0.0   # 右パネルは画面遷移直後から表示する
-	const DRUM_DUR: float = 1.2            # 合計タイムのドラムロール（カウントアップ）所要時間
 	const PUNCH_DUR: float = 0.5           # カウントアップ完了後のパンチ演出（拡大→白、縮小→元色）の所要時間
 	var stage_count: int = stage_session.stage_times.size()
 	var pair_count: int = int(ceil(float(stage_count) / 2.0))
@@ -175,7 +174,9 @@ func _ta_results_timeline() -> Dictionary:
 	var listing_end: float = listing_start + float(pair_count) * ROW_INTERVAL
 	var buttons_time: float = listing_end + BUTTONS_DELAY
 	var right_panel_start: float = RIGHT_PANEL_START
-	var drum_end: float = right_panel_start + DRUM_DUR
+	# ドラムロール（合計タイムのカウントアップ）は、#050 の出現完了（listing_end）と同時に
+	# 終わるように同期させる。DRUM_DUR という固定値は廃止し、listing_end を直接使う。
+	var drum_end: float = listing_end
 	var punch_end: float = drum_end + PUNCH_DUR
 	return {
 		"row_interval": ROW_INTERVAL,
@@ -185,7 +186,7 @@ func _ta_results_timeline() -> Dictionary:
 		"listing_end": listing_end,
 		"buttons_time": buttons_time,
 		"right_panel_start": right_panel_start,
-		"drum_dur": DRUM_DUR,
+		"drum_dur": drum_end - right_panel_start,
 		"drum_end": drum_end,
 		"punch_dur": PUNCH_DUR,
 		"punch_end": punch_end,
@@ -3835,6 +3836,7 @@ func _ta_advance_after_clear() -> void:
 			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
 			_ta_results_scroll_time = 0.0
 			_ta_results_scroll_display_time = 0.0
+			ui_renderer._ta_shine_phase_start = -1.0
 			queue_redraw()
 		, false)
 		return
@@ -3857,6 +3859,7 @@ func _ta_advance_after_clear() -> void:
 			_ta_results_start_time = Time.get_ticks_msec() / 1000.0
 			_ta_results_scroll_time = 0.0
 			_ta_results_scroll_display_time = 0.0
+			ui_renderer._ta_shine_phase_start = -1.0
 			queue_redraw()
 		, false)
 		return
