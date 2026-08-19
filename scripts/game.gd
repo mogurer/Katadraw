@@ -159,7 +159,7 @@ var _ta_results_scroll_min: float = 0.0
 ## _draw_ta_results()（描画）と ta_results の入力判定の両方がこれを参照する単一の情報源。
 func _ta_results_timeline() -> Dictionary:
 	const ROW_INTERVAL: float = 0.15   # 行ペア（左右1組）の出現間隔
-	const ROW_H: float = 62.0          # 1行の高さ（スクロール速度計算に使用。実際の描画高さと合わせること）
+	const ROW_H: float = 31.0          # 1行の高さ（スクロール速度計算に使用。実際の描画高さと合わせること）
 	const LISTING_START: float = 0.2   # タイトルは静的表示のため、わずかな間を置いてすぐ流れ出す
 	const BUTTONS_DELAY: float = 0.6   # 全行出現後、右パネル・ボタン表示までの間
 	var stage_count: int = stage_session.stage_times.size()
