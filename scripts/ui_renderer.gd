@@ -954,7 +954,7 @@ func _ta_results_layout(vp: Vector2) -> Dictionary:
 	const MARGIN_X_FRAC: float = 0.05
 	const TOP_Y_FRAC: float = 0.03
 	const LOGO_H_FRAC: float = 0.16
-	const HEADING_FS_FRAC: float = 0.07
+	const HEADING_FS_FRAC: float = 0.11
 	const HEADING_GAP_FRAC: float = 0.02   # ロゴ右端〜見出しテキストの間隔
 
 	var margin_x: float = vp.x * MARGIN_X_FRAC
@@ -970,7 +970,7 @@ func _ta_results_layout(vp: Vector2) -> Dictionary:
 	var heading_x: float = margin_x + logo_draw_w + vp.x * HEADING_GAP_FRAC
 
 	# ── 左右パネル（黒枠・スクロール領域） ──
-	const PANEL_TOP_GAP_FRAC: float = 0.03    # ロゴ下端〜パネル上端の間隔
+	const PANEL_TOP_GAP_FRAC: float = 0.00    # ロゴ下端〜パネル上端の間隔
 	const PANEL_BOTTOM_FRAC: float = 0.93
 	const LEFT_PANEL_W_FRAC: float = 0.515
 	const PANEL_GAP_FRAC: float = 0.015       # 左右パネル間の隙間
@@ -997,7 +997,7 @@ func _ta_results_layout(vp: Vector2) -> Dictionary:
 
 	# ── 右パネル内部区画（TOTAL CLEAR TIME / BEST TIME / ボタンゾーン） ──
 	const HEADER_FRAC: float = 0.12
-	const TOTAL_FRAC: float = 0.28
+	const TOTAL_FRAC: float = 0.46
 	const BEST_BAR_FRAC: float = 0.13
 
 	var header_h: float = right_panel_rect.size.y * HEADER_FRAC
@@ -1039,13 +1039,13 @@ func _draw_ta_results(vp: Vector2) -> void:
 	if logo_tex:
 		_game.draw_texture_rect(logo_tex, lo.logo_rect, false, Color(1.0, 1.0, 1.0, chrome_a))
 	var heading_baseline_y: float = lo.logo_rect.position.y + lo.logo_rect.size.y * 0.5 + _game.font_din.get_ascent(lo.heading_fs) * 0.35
-	_game.draw_string(_game.font_din, Vector2(lo.heading_x, heading_baseline_y), "TIME TRIAL SCORE", HORIZONTAL_ALIGNMENT_LEFT, vp.x - lo.heading_x - lo.margin_x, lo.heading_fs, Color(LINE_COLOR, chrome_a))
+	_game.draw_string(_game.font_din, Vector2(lo.heading_x, heading_baseline_y), "TIME TRIAL SCORE", HORIZONTAL_ALIGNMENT_RIGHT, lo.right_panel_rect.end.x - lo.heading_x, lo.heading_fs, Color(LINE_COLOR, chrome_a))
 
 	# ═══ ② 左パネル: 枠線 + 2列カードリスト ═══
 	if chrome_a > 0.0:
 		_draw_rect_border_with_corners(lo.left_panel_rect, Color(LINE_COLOR, chrome_a), 4.0)
 
-	const ROW_H: float = 31.0            # (項目3: 62.0 → 31.0 に半減) game.gd _ta_results_timeline() の ROW_H と必ず一致させること
+	const ROW_H: float = 48.0            # (項目3: 62.0 → 31.0 に半減) game.gd _ta_results_timeline() の ROW_H と必ず一致させること
 	const ROW_PAD_V: float = 6.0
 	const SLIDE_OFFSET: float = 22.0
 	const SLIDE_DUR: float = 0.28
@@ -1106,7 +1106,7 @@ func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: i
 	var badge_w: float = col_w * badge_w_frac
 	var badge_rect := Rect2(pos, Vector2(badge_w, row_h))
 	_game.draw_style_box(_ta_results_badge_style, badge_rect)
-	var badge_fs: int = int(row_h * 0.34)
+	var badge_fs: int = int(row_h * 0.85)
 	var badge_str: String = "#%03d" % (stage_idx + 1)
 	var badge_baseline_y: float = pos.y + row_h * 0.5 + _game.font_din.get_ascent(badge_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(badge_rect.position.x, badge_baseline_y), badge_str, HORIZONTAL_ALIGNMENT_CENTER, badge_w, badge_fs, Color(1.0, 1.0, 1.0, alpha))
@@ -1122,7 +1122,7 @@ func _draw_ta_results_row(pos: Vector2, col_w: float, row_h: float, stage_idx: i
 	var icon_cy: float = pos.y + row_h * 0.5
 	_draw_ta_results_shape_icon(stage_master_idx, Vector2(icon_cx, icon_cy), icon_r)
 
-	var time_fs: int = int(row_h * 0.34)
+	var time_fs: int = int(row_h * 0.70)
 	var time_str: String = "%.2f" % clear_time
 	var time_pad: float = pill_w * 0.06
 	var time_baseline_y: float = pos.y + row_h * 0.5 + _game.font_din.get_ascent(time_fs) * 0.35
@@ -1182,7 +1182,7 @@ func _ta_results_btn_icon_layout(zone: Rect2) -> Dictionary:
 
 ## カメラ／Twitterアイコンは画像ファイル自体の透過余白を補正するため、スロットサイズより
 ## 大きく（VISUAL_SCALE倍）描画する。NEXTボタンは塗りつぶし矩形のためこの補正は不要。
-const _TA_RESULTS_ICON_VISUAL_SCALE: float = 2.025
+const _TA_RESULTS_ICON_VISUAL_SCALE: float = 1.000
 
 func _draw_ta_results_action_buttons(zone: Rect2, alpha: float, active_focus: int) -> void:
 	var lo: Dictionary = _ta_results_btn_icon_layout(zone)
@@ -1191,7 +1191,7 @@ func _draw_ta_results_action_buttons(zone: Rect2, alpha: float, active_focus: in
 	var icon_draw_size: float = slot_h * _TA_RESULTS_ICON_VISUAL_SCALE
 	_draw_result_camera_btn(Vector2(lo.cam_cx - icon_draw_size * 0.5, cy - icon_draw_size * 0.5), icon_draw_size, alpha, active_focus == 0)
 	_draw_result_twitter_btn(Vector2(lo.tw_cx - icon_draw_size * 0.5, cy - icon_draw_size * 0.5), icon_draw_size, alpha, active_focus == 1)
-	_draw_results_next_button(Vector2(lo.next_cx, cy), tr("TA_RESULT_BTN_TITLE"), 35, alpha, slot_h, active_focus == 2)
+	_draw_results_next_button(Vector2(lo.next_cx, cy), tr("TA_RESULT_BTN_TITLE"), 35, alpha, slot_h * 0.68 , active_focus == 2)
 
 
 func get_ta_results_camera_button_rect(vp: Vector2) -> Rect2:
