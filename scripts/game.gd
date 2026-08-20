@@ -47,7 +47,8 @@ var hovered_index: int = -1
 var game_state: String = "title"
 var start_time: float = 0.0
 var clear_time: float = 0.0
-var _cleared_screen_start_time: float = 0.0   # "cleared" 状態に入った時刻（Zouクリア画面の入力ガード用）
+var _cleared_screen_start_time: float = 0.0   # "cleared" 状態に入った時刻（入力ロック判定用）
+var _cleared_advance_started: bool = false    # クリア後の「次へ」入力を1回消費したら true。遷移完了まで再入力を無視する。
 var _new_record_time: bool = false
 var _new_record_moves: bool = false
 var min_radius: float = 0.0
@@ -71,6 +72,11 @@ var _zou_ta_unlock_elapsed: float = 0.0
 var _zou_ta_unlock_overlay_alpha: float = 0.0
 var _zou_ta_unlock_msg_visible: bool = false
 const ZOU_TA_UNLOCK_FADE_DUR: float = 1.0
+
+## クリア演出表示直後、連打がそのままステージセレクト遷移に乗らないよう入力を無視する秒数。
+const CLEARED_INPUT_LOCK_SEC: float = 0.5
+## Zou クリア画面は秒数・回数の読み取り時間を確保するため長め。
+const ZOU_CLEARED_INPUT_LOCK_SEC: float = 1.0
 
 # --- Circle Metrics (primary / group 1) ---
 var current_centroid: Vector2 = Vector2.ZERO
@@ -1714,6 +1720,7 @@ func _check_clear() -> void:
 		game_state = "cleared"
 		_reset_spot_combo()
 		_cleared_screen_start_time = Time.get_ticks_msec() / 1000.0
+		_cleared_advance_started = false
 		input_handler.release_mouse_grab()
 		_stop_sfx_move()
 		clear_time = Time.get_ticks_msec() / 1000.0 - start_time
@@ -1769,6 +1776,8 @@ func _force_clear_for_debug() -> void:
 	is_dragging = false
 	game_state = "cleared"
 	_reset_spot_combo()
+	_cleared_screen_start_time = Time.get_ticks_msec() / 1000.0
+	_cleared_advance_started = false
 	input_handler.release_mouse_grab()
 	_stop_sfx_move()
 	clear_time = Time.get_ticks_msec() / 1000.0 - start_time
@@ -2026,7 +2035,16 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 					menu_index = (menu_index + vy_m + menu_count) % menu_count
 					queue_redraw()
 		"config":
-			_process_config_stick_navigation(delta)
+			if config_reset_confirm:
+				var nav_c: Vector2i = _ui_menu_stick_nav_horizontal_first(delta)
+				if nav_c.x < 0 or nav_c.y < 0:
+					config_reset_confirm_index = (config_reset_confirm_index - 1 + 2) % 2
+					queue_redraw()
+				elif nav_c.x > 0 or nav_c.y > 0:
+					config_reset_confirm_index = (config_reset_confirm_index + 1) % 2
+					queue_redraw()
+			else:
+				_process_config_stick_navigation(delta)
 		"results":
 			var hx: int = _ui_menu_stick_horizontal_step(delta, _ui_stick_lx)
 			if hx != 0:
@@ -2360,9 +2378,15 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if game_state == "cleared":
-		# Zouステージのクリア画面（かかった秒数・回数表示）は表示直後1秒間、入力を無視する
-		if current_stage == StageSelectManager._zou_stage_idx \
-				and (Time.get_ticks_msec() / 1000.0 - _cleared_screen_start_time) < 1.0:
+		# 「次へ」入力を1回受け付けたあと、トランジション完了まで再入力を無視する。
+		if _cleared_advance_started:
+			return
+		# クリア演出表示直後は連打が遷移に乗らないよう入力を無視する。
+		# Zou は秒数・回数の読み取り時間を確保するため長め。
+		var lock_sec: float = ZOU_CLEARED_INPUT_LOCK_SEC \
+				if current_stage == StageSelectManager._zou_stage_idx \
+				else CLEARED_INPUT_LOCK_SEC
+		if (Time.get_ticks_msec() / 1000.0 - _cleared_screen_start_time) < lock_sec:
 			return
 		# デバッグ用: [S] でバランス調整画面を開く
 		if (
@@ -2378,6 +2402,7 @@ func _input(event: InputEvent) -> void:
 		# 通常プレイ（debug_test_mode が true でもデバッグオーバーレイ目的の場合）はステージセレクトへ。
 		if _pbd_return_after_test:
 			if is_confirm_key or is_confirm_pad:
+				_cleared_advance_started = true
 				BGMManager.stop()
 				_return_to_title_or_stage_debug_from_test()
 				queue_redraw()
@@ -2404,6 +2429,7 @@ func _input(event: InputEvent) -> void:
 			event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
 		)
 		if is_cleared_advance_key or is_cleared_advance_pad or is_cleared_advance_click:
+			_cleared_advance_started = true
 			_advance_stage()
 			queue_redraw()
 		return
@@ -2637,6 +2663,15 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 			config_reset_confirm = false
 			queue_redraw()
 			return
+
+		# 左右で［はい］［いいえ］を切替（十字・スティックは _process_ui_menu_stick_navigation）
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_LEFT or event.keycode == KEY_UP:
+				config_reset_confirm_index = (config_reset_confirm_index - 1 + 2) % 2
+				queue_redraw()
+			elif event.keycode == KEY_RIGHT or event.keycode == KEY_DOWN:
+				config_reset_confirm_index = (config_reset_confirm_index + 1) % 2
+				queue_redraw()
 
 		var do_confirm2: bool = is_confirm_key or is_confirm_pad
 		if is_confirm_click:

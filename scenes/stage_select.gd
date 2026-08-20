@@ -2,7 +2,8 @@ extends Node2D
 
 # =============================================================================
 # Stage Select Screen
-# ・自キャラ: マウス追跡（lerp）＋ゲームパッドスティック移動
+# ・KBM: マップをドラッグ／WASDで移動。ステージ上クリックで選択
+# ・コントローラ: 自キャラを左スティック移動＋右スティックスナップ（従来どおり）
 # ・接近したステージの目標図形を吹き出しで表示
 # ・確認ポップアップ: 「このステージをプレイしますか？」[はい][いいえ]
 # =============================================================================
@@ -35,7 +36,7 @@ const _DBG_COL_GAP   := 16.0
 const _DBG_HEADER_H  := 26.0
 const _DBG_ITEM_H    := 22.0
 const _DBG_PAD       := 10.0
-const _DBG_BG        := Color(0.92, 0.97, 0.98, 0.93)
+const _DBG_BG        := Color("#ee3e5c")
 const _DBG_BD        := Color(0.45, 0.72, 0.80)
 const _DBG_SEL       := Color(0.18, 0.55, 0.70)
 const _DBG_TXT       := Color(0.25, 0.35, 0.40)
@@ -44,7 +45,18 @@ const _DBG_TXT       := Color(0.25, 0.35, 0.40)
 const _DOT_RADIUS      := 20.0
 const _LINE_WIDTH      := 4.0
 const _CHAR_RADIUS     := 14.0
+# 未クリア水紋: 画面外の解放ステージがビュー端に届く大きさ（グリッドピッチ 200px 超）
+const _UNLOCKED_RIPPLE_R_START := 1.6   # 放出開始半径（ドット半径比）
+const _UNLOCKED_RIPPLE_R_END   := 18.0  # 最大半径（ドット半径比）。20px × 18 = 360px
 const _PROX_DIST       := 140.0   # 吹き出し表示する距離（px）
+# クリア済み数カウンター（画面右上）
+const _CLEARED_COUNT_FS: int = 40
+const _CLEARED_COUNT_OUTLINE: float = 3.0
+const _CLEARED_COUNT_FILL := Color("#433647")
+const _CLEARED_COUNT_OUTLINE_COLOR := Color("#f4efe8")
+# 画面端UIの余白。右下BGMパネルと右上クリア数で共用。
+const _CORNER_UI_MARGIN_H: float = 20.0  # 左右端からの距離 (a)
+const _CORNER_UI_MARGIN_V: float = 14.0  # 上下端からの距離 (b)
 const _BUBBLE_W        := 225.0   # バブル固定幅 (150 × 1.5)
 const _BUBBLE_H        := 300.0   # バブル固定高さ (200 × 1.5)
 const _BUBBLE_HDR_H    := 78.0    # ヘッダエリア高さ (52 × 1.5)
@@ -68,6 +80,13 @@ const _POPUP_H         := 250.0
 # --- 自キャラ ---
 const _CHAR_LERP       := 10.0    # マウス追跡の平滑化係数
 const _PAD_SPEED       := 600.0   # ゲームパッド移動速度（px/sec）
+const _MAP_WASD_SPEED  := 600.0   # WASD マップ移動速度（px/sec）
+const _MAP_DRAG_THRESHOLD := 8.0  # クリックとドラッグを区別する移動量（px）
+const _MAP_INERTIA_DECAY := 3.2   # フリック後の指数減衰（1/s）。大きいほど早く止まる
+const _MAP_INERTIA_STOP := 48.0   # この速度(px/s)未満で慣性を打ち切る
+const _MAP_INERTIA_MAX_SPEED := 5200.0  # フリック初速の上限（px/s）
+const _MAP_INERTIA_STALE_MSEC := 50  # この時間マウスが止まっていたら離しても慣性なし
+const _STAGE_CLICK_RADIUS := _DOT_RADIUS * 2.5  # KBM: ステージ本体のクリック判定半径
 const _SNAP_THRESHOLD: float = 0.80      # 右スティックのスナップ入力閾値（80%）
 const _SNAP_ANGLE_MAX: float = 45.0      # スナップ候補の最大角度差（度）
 
@@ -106,6 +125,15 @@ var _char_target: Vector2 = Vector2(960, 540)
 var _char_moved_by_user: bool = false
 var _char_vel: Vector2 = Vector2.ZERO  # アバターの移動速度（前フレーム差分）
 var _snap_ready: bool = true  # 右スティックがニュートラルに戻ったかどうか
+var _map_dragging: bool = false
+var _map_drag_moved: bool = false
+var _map_press_stage_id: int = -1
+var _map_drag_last_screen: Vector2 = Vector2.ZERO
+var _map_drag_start_screen: Vector2 = Vector2.ZERO
+var _map_pan_vel: Vector2 = Vector2.ZERO       # ドラッグ中のカメラ速度（離す瞬間の初速）
+var _map_inertia_vel: Vector2 = Vector2.ZERO   # フリック後の慣性速度
+var _map_drag_last_msec: int = 0
+var _map_drag_last_usec: int = 0
 
 # --- ステージ解放フォーカス演出 ---
 var _focus_queue: Array = []      # フォーカス対象ステージID配列
@@ -445,12 +473,14 @@ func _process(delta: float) -> void:
 
 	# フォーカス演出中は通常の入力・描画更新をスキップ
 	if _is_focusing:
+		_stop_map_inertia()
 		_process_focus(delta)
 		queue_redraw()
 		return
 
 	# BGM 解禁演出
 	if _bgm_unlock_directing:
+		_stop_map_inertia()
 		_bgm_unlock_elapsed += delta
 		match _bgm_unlock_phase:
 			1:  # カメラスライド（0.5s EASE_OUT QUAD）
@@ -495,6 +525,7 @@ func _process(delta: float) -> void:
 
 	# 最終ステージ演出中は通常処理をスキップ（コルーチンが制御する）
 	if _final_directing:
+		_stop_map_inertia()
 		queue_redraw()
 		return
 
@@ -523,30 +554,46 @@ func _process(delta: float) -> void:
 
 	# アバター移動速度を算出（前フレーム差分）
 	var prev_char_pos: Vector2 = _char_pos
+	var popup_blocking: bool = _popup_stage >= 0 or _esc_popup
 
-	# ゲームパッドスティック
-	var sx: float = Input.get_axis("ui_left", "ui_right")
-	var sy: float = Input.get_axis("ui_up", "ui_down")
-	var pad_active: bool = absf(sx) > 0.1 or absf(sy) > 0.1
+	# コントローラ: 左スティック＋Dパッドのみ（WASD/矢印は ui_* に含まれるため使わない）
+	var pad_axis: Vector2 = _get_pad_move_axis()
+	var pad_active: bool = pad_axis.length() > 0.1
 	if pad_active:
-		_char_pos += Vector2(sx, sy).normalized() * _PAD_SPEED * delta
-		# アバターはビューポート内に収める
+		_stop_map_inertia()
+		_set_input_mode(1)
+		_char_pos += pad_axis.normalized() * _PAD_SPEED * delta
 		var half_view: Vector2 = get_viewport_rect().size / 2.0 / _camera.zoom
-		var view_min: Vector2 = _camera.position - half_view
-		var view_max: Vector2 = _camera.position + half_view
-		_char_pos = _char_pos.clamp(view_min, view_max)
+		_char_pos = _char_pos.clamp(_camera.position - half_view, _camera.position + half_view)
 		_char_target = _char_pos
 		_char_moved_by_user = true
+		_update_camera(delta)
 	else:
-		# マウス追跡（アバターはビューポート内に収める）
-		var half_view: Vector2 = get_viewport_rect().size / 2.0 / _camera.zoom
-		var view_min: Vector2 = _camera.position - half_view
-		var view_max: Vector2 = _camera.position + half_view
-		var clamped_target: Vector2 = _char_target.clamp(view_min, view_max)
-		var new_pos: Vector2 = _char_pos.lerp(clamped_target, _CHAR_LERP * delta)
-		if new_pos.distance_to(_char_pos) > 0.5:
-			_char_moved_by_user = true
-		_char_pos = new_pos
+		if popup_blocking:
+			_stop_map_inertia()
+		else:
+			var wasd: Vector2 = _get_wasd_axis()
+			if wasd != Vector2.ZERO:
+				_stop_map_inertia()
+				_set_input_mode(0)
+				_camera.position += wasd.normalized() * _MAP_WASD_SPEED * delta
+				_clamp_camera()
+		if _input_mode == 1:
+			_update_camera(delta)
+		else:
+			# KBM: カメラはキャラ追従せず、カーソル位置をホバー判定に使う
+			if not popup_blocking:
+				var mouse_world: Vector2 = _screen_to_world(get_viewport().get_mouse_position())
+				if mouse_world.distance_to(_char_pos) > 0.5:
+					_char_moved_by_user = true
+				_char_pos = mouse_world
+				_char_target = mouse_world
+		if _map_dragging:
+			# 掴み中にマウスが止まったら速度も捨てる（離したときに滑らない）
+			if Time.get_ticks_msec() - _map_drag_last_msec >= _MAP_INERTIA_STALE_MSEC:
+				_map_pan_vel = Vector2.ZERO
+		elif not popup_blocking:
+			_apply_map_inertia(delta)
 
 	# アバター移動速度を更新
 	_char_vel = (_char_pos - prev_char_pos) / delta
@@ -572,7 +619,6 @@ func _process(delta: float) -> void:
 		_btn_prev.disabled = popup_open
 		_btn_next.disabled = popup_open
 
-	_update_camera(delta)
 	queue_redraw()
 
 
@@ -639,14 +685,29 @@ func _input(event: InputEvent) -> void:
 			_ctrl_held = event.pressed
 			queue_redraw()
 
-	# マウス位置 → 自キャラターゲット更新
+	# マウス移動: ポップアップホバー / マップドラッグ / KBMカーソル追従
 	if event is InputEventMouseMotion:
-		_char_target = get_canvas_transform().affine_inverse() * event.position
-		_char_moved_by_user = true
 		if _esc_popup:
 			_update_esc_popup_hover(event.position)
 		elif _popup_stage >= 0:
 			_update_popup_hover(event.position)
+		elif _map_dragging and not _is_focusing:
+			if not _map_drag_moved:
+				if event.position.distance_to(_map_drag_start_screen) >= _MAP_DRAG_THRESHOLD:
+					_map_drag_moved = true
+					_apply_map_drag_delta(event.position - _map_drag_start_screen)
+			elif event.position != _map_drag_last_screen:
+				_apply_map_drag_delta(event.position - _map_drag_last_screen)
+			_map_drag_last_screen = event.position
+			get_viewport().set_input_as_handled()
+		elif _map_press_stage_id >= 0 and not _map_drag_moved:
+			# ステージ上で押して閾値以上動いたらクリック扱いをキャンセル（パンはしない）
+			if event.position.distance_to(_map_drag_start_screen) >= _MAP_DRAG_THRESHOLD:
+				_map_drag_moved = true
+		if _input_mode == 0 and _popup_stage < 0 and not _esc_popup:
+			_char_target = _screen_to_world(event.position)
+			_char_pos = _char_target
+			_char_moved_by_user = true
 
 	# [DEBUG] BGM演出プレビュー（B キー: ゾーンを順番にプレビュー）
 	# 2026-07-18 無効化: Bキーでのプレビュー機能は使用しないため停止
@@ -664,6 +725,8 @@ func _input(event: InputEvent) -> void:
 
 	# タイトル戻り確認ポップアップ
 	if _esc_popup:
+		_map_dragging = false
+		_map_press_stage_id = -1
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			_handle_esc_popup_click(event.position)
 			return
@@ -710,6 +773,8 @@ func _input(event: InputEvent) -> void:
 
 	# ステージ選択確認ポップアップ
 	if _popup_stage >= 0:
+		_map_dragging = false
+		_map_press_stage_id = -1
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			_handle_popup_click(event.position)
 			return
@@ -789,31 +854,49 @@ func _input(event: InputEvent) -> void:
 					return
 			return
 
-	# 決定: マウス左クリック or ゲームパッドA or Enter
+	# KBM: ステージ上クリックで決定 / 空白ドラッグでマップパン
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not _is_focusing:
+		if event.pressed:
+			if _is_pointer_over_bgm_ui(event.position):
+				_map_dragging = false
+				_map_press_stage_id = -1
+			else:
+				var sid: int = _find_stage_at_screen(event.position)
+				_map_press_stage_id = sid
+				_map_drag_moved = false
+				_map_drag_start_screen = event.position
+				_map_drag_last_screen = event.position
+				_map_dragging = sid < 0
+				_map_pan_vel = Vector2.ZERO
+				_stop_map_inertia()
+				_map_drag_last_msec = Time.get_ticks_msec()
+				_map_drag_last_usec = Time.get_ticks_usec()
+		else:
+			var clicked_stage: int = _map_press_stage_id
+			var click_cancelled: bool = _map_drag_moved
+			var flick: bool = _map_dragging and _map_drag_moved
+			if flick:
+				_begin_map_inertia()
+			_map_dragging = false
+			_map_drag_moved = false
+			_map_press_stage_id = -1
+			_map_pan_vel = Vector2.ZERO
+			if not click_cancelled and clicked_stage >= 0:
+				_open_stage_popup(clicked_stage)
+				return
+
+	# 決定: ゲームパッドA or Enter（最近傍。コントローラ仕様は変更しない）
 	var is_confirm: bool = (
-		(event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT)
-		or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A)
+		(event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A)
 		or (event is InputEventKey and event.pressed and not event.echo
 			and (event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER))
 	)
 	if is_confirm and _zou_near and StageSelectManager.zou_cleared:
-		_popup_stage = StageSelectManager._zou_stage_idx
-		_popup_yes_hovered = true
-		_popup_no_hovered = false
-		_popup_stick_ready = true
-		_sfx_click.play()
-		_snap_cursor_to_popup_yes()
-		queue_redraw()
+		_open_stage_popup(StageSelectManager._zou_stage_idx)
 		return
 
 	if is_confirm and _nearest >= 0:
-		_popup_stage = _nearest
-		_popup_yes_hovered = true
-		_popup_no_hovered = false
-		_popup_stick_ready = true
-		_sfx_click.play()
-		_snap_cursor_to_popup_yes()
-		queue_redraw()
+		_open_stage_popup(_nearest)
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
@@ -1059,12 +1142,13 @@ func _draw() -> void:
 					# sin(_bt*PI)=1 のピークは _cycle_t=0.5 → そこを _rp=0 にオフセット
 					var _cycle_t: float = fmod(_bt, 2.0)
 					var _rp: float = fmod(_cycle_t - 0.5 + 2.0, 2.0) / 2.0
-					var _rr: float = lerpf(draw_radius * 1.6, draw_radius * 3.5, _rp)
-					var _ra: float = (1.0 - _rp) * 0.5
-					var _spread: float = lerpf(0.0, draw_radius * 0.5, _rp)
-					draw_arc(pos, _rr - _spread, 0.0, TAU, 32, Color(_UNLOCKED_COLOR, _ra * 0.3), 6.0, true)
-					draw_arc(pos, _rr,           0.0, TAU, 32, Color(_UNLOCKED_COLOR, _ra * 0.8), 6.0, true)
-					draw_arc(pos, _rr + _spread, 0.0, TAU, 32, Color(_UNLOCKED_COLOR, _ra * 0.3), 6.0, true)
+					var _rr: float = lerpf(draw_radius * _UNLOCKED_RIPPLE_R_START, draw_radius * _UNLOCKED_RIPPLE_R_END, _rp)
+					# 大きい輪ほど画面外ステージの手掛かりになるので、終盤まで残す
+					var _ra: float = pow(1.0 - _rp, 0.65) * 0.5
+					var _spread: float = lerpf(0.0, _rr * 0.08, _rp)
+					draw_arc(pos, _rr - _spread, 0.0, TAU, 48, Color(_UNLOCKED_COLOR, _ra * 0.3), 6.0, true)
+					draw_arc(pos, _rr,           0.0, TAU, 48, Color(_UNLOCKED_COLOR, _ra * 0.8), 6.0, true)
+					draw_arc(pos, _rr + _spread, 0.0, TAU, 48, Color(_UNLOCKED_COLOR, _ra * 0.3), 6.0, true)
 					# メインドット（最前面）
 					draw_circle(pos, _dot_r, _dot_color)
 			StageSelectManager.StageState.CLEARED:
@@ -1085,6 +1169,10 @@ func _draw() -> void:
 
 	# ─── 再び画面固定レイヤーへ戻してUI要素を描画 ───
 	draw_set_transform_matrix(get_canvas_transform().affine_inverse())
+
+	# クリア済み数（画面右上）
+	if not _final_directing:
+		_draw_cleared_count(vp)
 
 	# 吹き出し（スケール＋フェードアニメーション）
 	if _bubble_phase > 0 and _bubble_stage_id >= 0:
@@ -1111,8 +1199,8 @@ func _draw() -> void:
 		var txt_w: float = _font.get_string_size(hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, hint_fs).x
 		var panel_w: float = pad_x * 2.0 + icon_w + gap + txt_w
 		var panel_h: float = pad_y * 2.0 + icon_h
-		var panel_x: float = 20.0
-		var panel_y: float = vp.y - 14.0 - panel_h
+		var panel_x: float = _CORNER_UI_MARGIN_H
+		var panel_y: float = vp.y - _CORNER_UI_MARGIN_V - panel_h
 		draw_style_box(_title_hint_style, Rect2(panel_x, panel_y, panel_w, panel_h))
 		if icon_tex != null:
 			draw_texture_rect(icon_tex, Rect2(panel_x + pad_x, panel_y + pad_y, icon_w, icon_h), false)
@@ -1130,7 +1218,7 @@ func _draw() -> void:
 			var se_panel_w: float = se_content_w + se_pad_x * 2.0
 			var se_panel_h: float = se_icon_size + se_pad_y * 2.0
 			var se_panel_x: float = panel_x + panel_w + 80.0
-			var se_panel_y: float = vp.y - 14.0 - se_panel_h
+			var se_panel_y: float = vp.y - _CORNER_UI_MARGIN_V - se_panel_h
 			# ヒント幅を先算出してパネルを拡張（ヒントはパネル内右端に収める）
 			var se_hint_h: float = se_icon_size * 0.85
 			var in_hint_tex: Texture2D = _lt_tex if _input_mode == 1 else _z_key_tex
@@ -1161,7 +1249,7 @@ func _draw() -> void:
 			if out_hint_tex != null:
 				out_hint_w = se_hint_h * float(out_hint_tex.get_width()) / float(out_hint_tex.get_height())
 			var seki_panel_x: float = _sfx_in_panel_rect.end.x + 40.0
-			var seki_panel_y: float = vp.y - 14.0 - se_panel_h
+			var seki_panel_y: float = vp.y - _CORNER_UI_MARGIN_V - se_panel_h
 			_sfx_out_panel_rect = Rect2(seki_panel_x, seki_panel_y, se_panel_w + 30.0 + out_hint_w + 15.0, se_panel_h)
 			draw_style_box(_title_hint_style, _sfx_out_panel_rect)
 			var seki_iy: float = seki_panel_y + se_pad_y
@@ -1232,6 +1320,62 @@ func _draw() -> void:
 	# 最終ステージ演出 Phase3: THANK YOU FOR PLAYING!（ZOU線より上のレイヤー）
 	if _final_directing and _final_phase3 >= 1:
 		_draw_final_phase3(vp)
+
+
+## クリア数の描画。draw_string の Y はインク上端ではなく「ベースライン」である。
+##
+## 画面上端  y = 0
+##   └─ (余白 b) ── 数字のインク上端  = baseline_y - ink_ascent
+##                     │ 実グリフ高（フォントの ascent より小さい）
+##                   ベースライン = pos.y
+func _draw_cleared_count(vp: Vector2) -> void:
+	var font: Font = _font_din if _font_din != null else _font
+	if font == null:
+		return
+	var text: String = "%d" % StageSelectManager.get_cleared_count()
+	var fs: int = _CLEARED_COUNT_FS
+	var text_w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var ink_ascent: float = _string_ink_ascent(font, fs, text)
+	var o: float = _CLEARED_COUNT_OUTLINE
+
+	# 横: 文字列右端が「画面右端 - a」。pos.x は左端なので幅を引く
+	var pos_x: float = vp.x - _CORNER_UI_MARGIN_H - text_w
+
+	# 縦: 数字のてっぺんが画面上端から b になるよう、実インク高を足す
+	var baseline_y: float = _CORNER_UI_MARGIN_V + ink_ascent
+
+	var pos := Vector2(pos_x, baseline_y)
+	var outline_c := _CLEARED_COUNT_OUTLINE_COLOR
+	var fill_c := _CLEARED_COUNT_FILL
+	var offsets: Array[Vector2] = [
+		Vector2(-o, -o), Vector2(o, -o), Vector2(-o, o), Vector2(o, o),
+		Vector2(0.0, -o), Vector2(0.0, o), Vector2(-o, 0.0), Vector2(o, 0.0),
+	]
+	for off in offsets:
+		draw_string(font, pos + off, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, outline_c)
+	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fill_c)
+
+
+## 文字列グリフの、ベースラインからインク上端までの距離。フォントの ascent（空き込み）より小さい。
+func _string_ink_ascent(font: Font, font_size: int, text: String) -> float:
+	var tl := TextLine.new()
+	tl.add_string(text, font, font_size)
+	var ts := TextServerManager.get_primary_interface()
+	var glyphs: Array = ts.shaped_text_get_glyphs(tl.get_rid())
+	var ink_up: float = 0.0
+	for g in glyphs:
+		var font_rid: RID = g.get("font_rid", RID())
+		if not font_rid.is_valid():
+			continue
+		var gsize := Vector2i(int(g.get("font_size", font_size)), 0)
+		var index: int = int(g.get("index", 0))
+		var off: Vector2 = ts.font_get_glyph_offset(font_rid, gsize, index)
+		var sz: Vector2 = ts.font_get_glyph_size(font_rid, gsize, index)
+		var top: float = minf(off.y, off.y + sz.y)
+		ink_up = maxf(ink_up, -top)
+	if ink_up < 1.0:
+		return font.get_ascent(font_size)
+	return ink_up
 
 
 # ---------- 吹き出し ----------
@@ -1644,11 +1788,65 @@ func _update_camera(delta: float) -> void:
 		scroll_speed = scroll_from_offset + scroll_from_vel
 
 	_camera.position += scroll_speed * delta
+	_clamp_camera()
 
-	# カメラ位置をUNLOCKED/CLEAREDノードの範囲内にクランプ
+
+func _clamp_camera() -> void:
+	if _camera == null:
+		return
 	var cam_bounds: Rect2 = _calc_world_bounds()
 	_camera.position = _camera.position.clamp(
 		cam_bounds.position, cam_bounds.position + cam_bounds.size)
+
+
+func _stop_map_inertia() -> void:
+	_map_inertia_vel = Vector2.ZERO
+
+
+func _apply_map_drag_delta(screen_delta: Vector2) -> void:
+	var world_delta: Vector2 = get_canvas_transform().affine_inverse().basis_xform(screen_delta)
+	_camera.position -= world_delta
+	_clamp_camera()
+	var now_usec: int = Time.get_ticks_usec()
+	var dt: float = float(now_usec - _map_drag_last_usec) / 1000000.0
+	_map_drag_last_usec = now_usec
+	_map_drag_last_msec = Time.get_ticks_msec()
+	if dt <= 0.00001:
+		dt = 0.004
+	elif dt > 0.12:
+		return
+	var instant: Vector2 = -world_delta / dt
+	_map_pan_vel = _map_pan_vel.lerp(instant, 0.55)
+
+
+func _begin_map_inertia() -> void:
+	if Time.get_ticks_msec() - _map_drag_last_msec >= _MAP_INERTIA_STALE_MSEC:
+		_map_inertia_vel = Vector2.ZERO
+		return
+	var v: Vector2 = _map_pan_vel
+	var spd: float = v.length()
+	if spd < _MAP_INERTIA_STOP:
+		_map_inertia_vel = Vector2.ZERO
+		return
+	if spd > _MAP_INERTIA_MAX_SPEED:
+		v = v * (_MAP_INERTIA_MAX_SPEED / spd)
+	_map_inertia_vel = v
+
+
+func _apply_map_inertia(delta: float) -> void:
+	if _map_inertia_vel == Vector2.ZERO:
+		return
+	var unclamped: Vector2 = _camera.position + _map_inertia_vel * delta
+	_camera.position = unclamped
+	_clamp_camera()
+	var after: Vector2 = _camera.position
+	if absf(after.x - unclamped.x) > 0.01:
+		_map_inertia_vel.x = 0.0
+	if absf(after.y - unclamped.y) > 0.01:
+		_map_inertia_vel.y = 0.0
+	_map_inertia_vel *= exp(-_MAP_INERTIA_DECAY * delta)
+	if _map_inertia_vel.length() < _MAP_INERTIA_STOP:
+		_map_inertia_vel = Vector2.ZERO
 
 
 func start_unlock_focus(unlocked_ids: Array, return_stage_id: int = -1) -> void:
@@ -1978,6 +2176,93 @@ func _find_nearest_accessible() -> int:
 			best_d = d
 			best = i
 	return best
+
+
+func _screen_to_world(screen_pos: Vector2) -> Vector2:
+	return get_canvas_transform().affine_inverse() * screen_pos
+
+
+func _get_pad_move_axis() -> Vector2:
+	var stick: Vector2 = Vector2(
+		Input.get_joy_axis(0, JOY_AXIS_LEFT_X),
+		Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
+	)
+	if stick.length() < 0.1:
+		stick = Vector2.ZERO
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_LEFT):
+		stick.x -= 1.0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_RIGHT):
+		stick.x += 1.0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_UP):
+		stick.y -= 1.0
+	if Input.is_joy_button_pressed(0, JOY_BUTTON_DPAD_DOWN):
+		stick.y += 1.0
+	if stick.length() > 1.0:
+		stick = stick.normalized()
+	return stick
+
+
+func _get_wasd_axis() -> Vector2:
+	var v: Vector2 = Vector2.ZERO
+	if Input.is_key_pressed(KEY_W):
+		v.y -= 1.0
+	if Input.is_key_pressed(KEY_S):
+		v.y += 1.0
+	if Input.is_key_pressed(KEY_A):
+		v.x -= 1.0
+	if Input.is_key_pressed(KEY_D):
+		v.x += 1.0
+	return v
+
+
+func _find_stage_at_screen(screen_pos: Vector2) -> int:
+	var world: Vector2 = _screen_to_world(screen_pos)
+	var best: int = -1
+	var best_d: float = _STAGE_CLICK_RADIUS
+	if StageSelectManager.zou_cleared and not _final_directing:
+		var zou_r: float = _DOT_RADIUS * 2.0 * 1.25
+		var zd: float = world.distance_to(_zou_world_pos)
+		if zd < zou_r:
+			best = StageSelectManager._zou_stage_idx
+			best_d = zd
+	for i in range(StageSelectManager.STAGE_COUNT):
+		if StageSelectManager.get_state(i) == StageSelectManager.StageState.LOCKED:
+			continue
+		if i == StageSelectManager._zou_stage_idx:
+			continue
+		var d: float = world.distance_to(_dot_pos(i))
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+
+func _is_pointer_over_bgm_ui(screen_pos: Vector2) -> bool:
+	if _bgm_expanded and _bgm_expanded_panel != null and _bgm_expanded_panel.visible:
+		if _bgm_expanded_panel.get_global_rect().has_point(screen_pos):
+			return true
+	if _bgm_container != null:
+		var parent_ctrl: Control = _bgm_container.get_parent() as Control
+		if parent_ctrl != null:
+			if parent_ctrl.get_global_rect().has_point(screen_pos):
+				return true
+		elif _bgm_container.get_global_rect().has_point(screen_pos):
+			return true
+	return false
+
+
+func _open_stage_popup(stage_id: int) -> void:
+	_popup_stage = stage_id
+	_popup_yes_hovered = true
+	_popup_no_hovered = false
+	_popup_stick_ready = true
+	_map_dragging = false
+	_map_drag_moved = false
+	_map_press_stage_id = -1
+	_stop_map_inertia()
+	_sfx_click.play()
+	_snap_cursor_to_popup_yes()
+	queue_redraw()
 
 
 # ---------- タイトル戻りポップアップ ----------
@@ -2567,8 +2852,8 @@ func _setup_bgm_ui() -> void:
 	small_panel.anchor_bottom = 1.0
 	small_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	small_panel.grow_vertical   = Control.GROW_DIRECTION_BEGIN
-	small_panel.offset_right  = -20.0
-	small_panel.offset_bottom = -14.0
+	small_panel.offset_right  = -_CORNER_UI_MARGIN_H
+	small_panel.offset_bottom = -_CORNER_UI_MARGIN_V
 	var small_style := StyleBoxFlat.new()
 	small_style.bg_color = Color(0.263, 0.212, 0.278, 0.9)
 	small_style.set_corner_radius_all(10)

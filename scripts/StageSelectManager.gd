@@ -153,6 +153,17 @@ func is_all_cleared() -> bool:
 	return _states.all(func(s: int) -> bool: return s == StageState.CLEARED)
 
 
+## 通常ステージ（ZOUを除く）のクリア済み数。上限 STAGE_COUNT（50）。再クリアでは増えない。
+func get_cleared_count() -> int:
+	var n: int = 0
+	for i in range(STAGE_COUNT):
+		if i == _zou_stage_idx:
+			continue
+		if _states[i] == StageState.CLEARED:
+			n += 1
+	return mini(n, STAGE_COUNT)
+
+
 func get_state(stage_id: int) -> int:
 	if stage_id < 0 or stage_id >= STAGE_COUNT:
 		return StageState.LOCKED
