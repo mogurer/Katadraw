@@ -440,6 +440,28 @@ func _ready() -> void:
 	_start_bgm_label_anim.call_deferred()
 
 
+func _notification(what: int) -> void:
+	if (
+		what == NOTIFICATION_APPLICATION_FOCUS_OUT
+		or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT
+	):
+		_release_unfocused_map_input()
+
+
+func _is_app_focused() -> bool:
+	var w: Window = get_window()
+	return w != null and w.has_focus()
+
+
+func _release_unfocused_map_input() -> void:
+	_map_dragging = false
+	_map_drag_moved = false
+	_map_press_stage_id = -1
+	_map_pan_vel = Vector2.ZERO
+	_bgm_right_click_held = false
+	_bgm_x_btn_held = false
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	_process_bubble(delta)
@@ -529,74 +551,78 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
-	# 右スティックによるスナップ移動
-	var rx: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
-	var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
-	var r_magnitude: float = Vector2(rx, ry).length()
+	if not _is_app_focused():
+		_release_unfocused_map_input()
+		_char_vel = Vector2.ZERO
+	else:
+		# 右スティックによるスナップ移動
+		var rx: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
+		var ry: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+		var r_magnitude: float = Vector2(rx, ry).length()
 
-	if r_magnitude < 0.2:
-		# ニュートラル状態に戻ったらスナップ再入力を許可
-		_snap_ready = true
-	elif r_magnitude >= _SNAP_THRESHOLD and _snap_ready and _popup_stage < 0 and not _esc_popup:
-		# 80%以上倒された かつ スナップ可能状態
-		_snap_ready = false
-		var stick_dir: Vector2 = Vector2(rx, ry).normalized()
-		var snap_target: int = _find_snap_target(stick_dir)
-		if snap_target >= 0:
-			_char_pos = StageSelectManager.get_world_pos(snap_target)
+		if r_magnitude < 0.2:
+			# ニュートラル状態に戻ったらスナップ再入力を許可
+			_snap_ready = true
+		elif r_magnitude >= _SNAP_THRESHOLD and _snap_ready and _popup_stage < 0 and not _esc_popup:
+			# 80%以上倒された かつ スナップ可能状態
+			_snap_ready = false
+			var stick_dir: Vector2 = Vector2(rx, ry).normalized()
+			var snap_target: int = _find_snap_target(stick_dir)
+			if snap_target >= 0:
+				_char_pos = StageSelectManager.get_world_pos(snap_target)
+				_char_target = _char_pos
+				_char_moved_by_user = true
+				var prev_nearest: int = _nearest
+				_nearest = snap_target
+				if _nearest != prev_nearest:
+					_sfx_hover.play()
+				queue_redraw()
+
+		# アバター移動速度を算出（前フレーム差分）
+		var prev_char_pos: Vector2 = _char_pos
+		var popup_blocking: bool = _popup_stage >= 0 or _esc_popup
+
+		# コントローラ: 左スティック＋Dパッドのみ（WASD/矢印は ui_* に含まれるため使わない）
+		var pad_axis: Vector2 = _get_pad_move_axis()
+		var pad_active: bool = pad_axis.length() > 0.1
+		if pad_active:
+			_stop_map_inertia()
+			_set_input_mode(1)
+			_char_pos += pad_axis.normalized() * _PAD_SPEED * delta
+			var half_view: Vector2 = get_viewport_rect().size / 2.0 / _camera.zoom
+			_char_pos = _char_pos.clamp(_camera.position - half_view, _camera.position + half_view)
 			_char_target = _char_pos
 			_char_moved_by_user = true
-			var prev_nearest: int = _nearest
-			_nearest = snap_target
-			if _nearest != prev_nearest:
-				_sfx_hover.play()
-			queue_redraw()
-
-	# アバター移動速度を算出（前フレーム差分）
-	var prev_char_pos: Vector2 = _char_pos
-	var popup_blocking: bool = _popup_stage >= 0 or _esc_popup
-
-	# コントローラ: 左スティック＋Dパッドのみ（WASD/矢印は ui_* に含まれるため使わない）
-	var pad_axis: Vector2 = _get_pad_move_axis()
-	var pad_active: bool = pad_axis.length() > 0.1
-	if pad_active:
-		_stop_map_inertia()
-		_set_input_mode(1)
-		_char_pos += pad_axis.normalized() * _PAD_SPEED * delta
-		var half_view: Vector2 = get_viewport_rect().size / 2.0 / _camera.zoom
-		_char_pos = _char_pos.clamp(_camera.position - half_view, _camera.position + half_view)
-		_char_target = _char_pos
-		_char_moved_by_user = true
-		_update_camera(delta)
-	else:
-		if popup_blocking:
-			_stop_map_inertia()
-		else:
-			var wasd: Vector2 = _get_wasd_axis()
-			if wasd != Vector2.ZERO:
-				_stop_map_inertia()
-				_set_input_mode(0)
-				_camera.position += wasd.normalized() * _MAP_WASD_SPEED * delta
-				_clamp_camera()
-		if _input_mode == 1:
 			_update_camera(delta)
 		else:
-			# KBM: カメラはキャラ追従せず、カーソル位置をホバー判定に使う
-			if not popup_blocking:
-				var mouse_world: Vector2 = _screen_to_world(get_viewport().get_mouse_position())
-				if mouse_world.distance_to(_char_pos) > 0.5:
-					_char_moved_by_user = true
-				_char_pos = mouse_world
-				_char_target = mouse_world
-		if _map_dragging:
-			# 掴み中にマウスが止まったら速度も捨てる（離したときに滑らない）
-			if Time.get_ticks_msec() - _map_drag_last_msec >= _MAP_INERTIA_STALE_MSEC:
-				_map_pan_vel = Vector2.ZERO
-		elif not popup_blocking:
-			_apply_map_inertia(delta)
+			if popup_blocking:
+				_stop_map_inertia()
+			else:
+				var wasd: Vector2 = _get_wasd_axis()
+				if wasd != Vector2.ZERO:
+					_stop_map_inertia()
+					_set_input_mode(0)
+					_camera.position += wasd.normalized() * _MAP_WASD_SPEED * delta
+					_clamp_camera()
+			if _input_mode == 1:
+				_update_camera(delta)
+			else:
+				# KBM: カメラはキャラ追従せず、カーソル位置をホバー判定に使う
+				if not popup_blocking:
+					var mouse_world: Vector2 = _screen_to_world(get_viewport().get_mouse_position())
+					if mouse_world.distance_to(_char_pos) > 0.5:
+						_char_moved_by_user = true
+					_char_pos = mouse_world
+					_char_target = mouse_world
+			if _map_dragging:
+				# 掴み中にマウスが止まったら速度も捨てる（離したときに滑らない）
+				if Time.get_ticks_msec() - _map_drag_last_msec >= _MAP_INERTIA_STALE_MSEC:
+					_map_pan_vel = Vector2.ZERO
+			elif not popup_blocking:
+				_apply_map_inertia(delta)
 
-	# アバター移動速度を更新
-	_char_vel = (_char_pos - prev_char_pos) / delta
+		# アバター移動速度を更新
+		_char_vel = (_char_pos - prev_char_pos) / delta
 
 	# 最近傍ステージ更新（ユーザー操作で動いたとき・ポップアップ非表示時のみ）
 	if _char_moved_by_user and _popup_stage < 0 and not _esc_popup:
@@ -624,6 +650,8 @@ func _process(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	if _scene_transition_started:
+		return
+	if not _is_app_focused():
 		return
 	# 入力モード自動切替
 	if event is InputEventMouseButton and event.pressed:
@@ -1142,7 +1170,12 @@ func _draw() -> void:
 					# sin(_bt*PI)=1 のピークは _cycle_t=0.5 → そこを _rp=0 にオフセット
 					var _cycle_t: float = fmod(_bt, 2.0)
 					var _rp: float = fmod(_cycle_t - 0.5 + 2.0, 2.0) / 2.0
-					var _rr: float = lerpf(draw_radius * _UNLOCKED_RIPPLE_R_START, draw_radius * _UNLOCKED_RIPPLE_R_END, _rp)
+					var _ripple_scale: float = StageSelectManager.get_unlocked_ripple_scale(i)
+					var _rr: float = lerpf(
+						draw_radius * _UNLOCKED_RIPPLE_R_START * _ripple_scale,
+						draw_radius * _UNLOCKED_RIPPLE_R_END * _ripple_scale,
+						_rp
+					)
 					# 大きい輪ほど画面外ステージの手掛かりになるので、終盤まで残す
 					var _ra: float = pow(1.0 - _rp, 0.65) * 0.5
 					var _spread: float = lerpf(0.0, _rr * 0.08, _rp)

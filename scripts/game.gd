@@ -214,7 +214,9 @@ func _process_ta_results_scroll(delta: float) -> void:
 	const STICK_DEADZONE: float = 0.25
 	const STICK_SPEED: float = 5.0
 	const SCROLL_SMOOTH_SPEED: float = 10.0
-	var stick_y: float = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	var stick_y: float = 0.0
+	if _is_app_focused():
+		stick_y = Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
 	if absf(stick_y) > STICK_DEADZONE:
 		_ta_results_scroll_time += stick_y * STICK_SPEED * delta
 	_ta_results_scroll_time = clampf(_ta_results_scroll_time, _ta_results_scroll_min, listing_duration)
@@ -1125,6 +1127,7 @@ func _notification(what: int) -> void:
 		_cursor_os_focused_for_confine = false
 		_cursor_wm_focus_policy_holdoff_frames = 0
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		_release_unfocused_game_input()
 	elif (
 		what == NOTIFICATION_APPLICATION_FOCUS_IN
 		or what == NOTIFICATION_WM_WINDOW_FOCUS_IN
@@ -1133,6 +1136,20 @@ func _notification(what: int) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_cursor_os_focused_for_confine = true
 		_cursor_wm_focus_policy_holdoff_frames = CURSOR_WM_FOCUS_POLICY_HOLDOFF_FRAMES
+
+
+func _is_app_focused() -> bool:
+	var w: Window = get_window()
+	return w != null and w.has_focus()
+
+
+func _release_unfocused_game_input() -> void:
+	if input_handler == null:
+		return
+	if input_handler.mouse_force_pressed or input_handler.player_force_repelling or input_handler.player_force_attracting:
+		input_handler.handle_mouse_release(input_handler.player_position, MOUSE_BUTTON_LEFT)
+		input_handler.handle_mouse_release(input_handler.player_position, MOUSE_BUTTON_RIGHT)
+	_stop_sfx_move()
 
 
 # =============================================================================
@@ -2054,6 +2071,11 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if not _is_app_focused():
+		# カーソル拘束解除などフォーカス処理は通す。ゲーム入力は無視する。
+		if event is InputEventMouseMotion:
+			_cursor_mouse_motion_accum = Vector2.ZERO
+		return
 	# Helper: 決定操作（Enter/Space/A のみ。Any key は無効）
 	var is_confirm_key: bool = (
 		event is InputEventKey and event.pressed and not event.echo
@@ -3295,6 +3317,8 @@ func _process_rules_demo_script(_delta: float) -> void:
 
 ## rules 画面での実カーソル位置を毎フレーム更新する。マウス時は viewport 座標、パッド時はスティック入力で移動。
 func _update_rules_real_cursor(delta: float) -> void:
+	if not _is_app_focused():
+		return
 	var vp: Vector2 = get_viewport_rect().size
 	if input_handler.get_last_input_method() == "mouse":
 		_rules_real_cursor_pos = get_viewport().get_mouse_position()
@@ -6049,15 +6073,18 @@ func _process(delta: float) -> void:
 	# ボタン押下アニメ待ちで _process_ui_menu_stick_navigation が return してもログが出るように先に実行
 	if DEBUG_UI_STICK_NAV and game_state == "config":
 		_debug_ui_stick_nav_poll_config(delta)
-	_process_ui_menu_stick_navigation(delta)
+	var app_focused: bool = _is_app_focused()
+	if app_focused:
+		_process_ui_menu_stick_navigation(delta)
 	_process_ta_results_scroll(delta)
-	if game_state != "rules":
+	if app_focused and game_state != "rules":
 		input_handler.process_mouse_lerp(delta)
-	_update_player_hover()
+	if app_focused:
+		_update_player_hover()
 	if pause_active:
 		queue_redraw()
 		return
-	if game_state != "rules":
+	if app_focused and game_state != "rules":
 		_process_pad(delta)
 	_update_frozen_avatar_reject_state()
 	input_handler.update_drag_physics(delta)
@@ -6070,7 +6097,7 @@ func _process(delta: float) -> void:
 	_update_ripple_effects()
 	# つかみ終了時: 動いていた場合のみ1回としてカウント
 	if game_state == "playing":
-		var lr_held: bool = (
+		var lr_held: bool = app_focused and (
 			Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER)
 			and Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER)
 		)

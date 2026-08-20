@@ -56,6 +56,7 @@ var time_attack_active: bool = false
 
 # manifest から読み込むデータ
 var _connections: Dictionary = {}   # { id: [隣接id, ...] }
+var _neighbors: Dictionary = {}     # { id: [双方向の隣接id, ...] }
 var _grid_pos: Dictionary = {}      # { id: Vector2i(col, row) }
 var _y_offset: Dictionary = {}      # { id: float }
 var _bgm_zones: Array = []          # BGM解禁ゾーン定義
@@ -96,6 +97,7 @@ func _load_manifest() -> void:
 		var gp: Array = entry.get("grid_pos", [0, 0])
 		_grid_pos[id] = Vector2i(int(gp[0]), int(gp[1]))
 		_y_offset[id] = float(entry.get("y_offset", 0))
+	_rebuild_undirected_neighbors()
 	_bgm_zones = d.get("bgm_unlock_zones", [])
 	_bgm_zone_centers.clear()
 	for zone in _bgm_zones:
@@ -168,6 +170,38 @@ func get_state(stage_id: int) -> int:
 	if stage_id < 0 or stage_id >= STAGE_COUNT:
 		return StageState.LOCKED
 	return _states[stage_id]
+
+
+func _rebuild_undirected_neighbors() -> void:
+	_neighbors.clear()
+	for id in _connections:
+		var oid: int = int(id)
+		for nb in _connections[id]:
+			var nid: int = int(nb)
+			if oid == nid:
+				continue
+			if not _neighbors.has(oid):
+				_neighbors[oid] = []
+			if not _neighbors.has(nid):
+				_neighbors[nid] = []
+			if not (_neighbors[oid] as Array).has(nid):
+				(_neighbors[oid] as Array).append(nid)
+			if not (_neighbors[nid] as Array).has(oid):
+				(_neighbors[nid] as Array).append(oid)
+
+
+## 未クリア波紋の半径倍率。隣のクリア数 / 接続数。接続なし・クリア0は 1.0（100%）。
+func get_unlocked_ripple_scale(stage_id: int) -> float:
+	var nbs: Array = _neighbors.get(stage_id, [])
+	if nbs.is_empty():
+		return 1.0
+	var cleared: int = 0
+	for nb in nbs:
+		if get_state(int(nb)) == StageState.CLEARED:
+			cleared += 1
+	if cleared <= 0:
+		return 1.0
+	return float(cleared) / float(nbs.size())
 
 
 func mark_zou_cleared() -> void:
