@@ -38,6 +38,16 @@
 - 決定: 作業ブランチは `main` に統一(旧 `pin` ブランチをリネーム)。`old_main` のような放置ブランチを作らない。
 - 理由: 過去に何度も「意図しないブランチで作業してしまう」事故があったため。`.claude/CLAUDE.md` にも明記し、Claude Codeが作業開始時に必ずブランチを確認するルールとした。
 
+## 2026-08-22 本編Steam実績・統計の追加
+
+- 決定: 体験版とは別に、本編（製品版）向けにSteam実績12件・統計5項目を実装した。
+  - 実績: ステージ#011/#025/#040/#043/#049クリア、BGM全解放、象ステージクリア、TA完走、#004を5秒以内クリア、TA自己ベスト初更新、TAでスタッフ記録超え、ネコ発見（本編版）。API名・条件の詳細は `Docs/steam_achievements_stats_registration.md` を参照。
+  - 統計（プレイヤー動向データ収集用）: `main_max_stage_reached` / `main_ta_clear_count` / `main_bgm_unlock_count` / `main_zou_cleared` / `main_cat_found`。
+  - 関連ファイル: `Resources/game_config.gd`（API名定数）、`steam_manager.gd`（`store_stats()` 追加）、`scripts/StageSelectManager.gd`（`max_stage_reached` / `ta_clear_count` 追加）、`scripts/game.gd`（`_check_clear()` / `_advance_stage()` / `_ta_advance_after_clear()` / ネコ演出箇所）、`scenes/stage_select.gd`（BGM全解放判定）。
+- 決定: `set_stat_int()` は `StoreStats()` を呼ばない既存設計のため、実績を伴わない統計単独更新のために `steam_manager.gd` に `store_stats()`（明示的に `StoreStats()` を呼ぶ公開関数）を新設した。
+- 未確定事項: TAスタッフ記録タイム（`GameConfig.TA_STAFF_RECORD_TIME`）は仮値999.0秒。記録確定後に差し替えが必要。
+- 既知の注意点: `GameConfig.DEBUG_TA_RESULTS_CHECK_MODE` が `true` の間はTA関連の実績・統計（`ACVT_TA_CLEAR` 等）が発火しない（チェックモード経路を意図的にスキップする実装のため）。TA実績の実機確認時は `false` に戻すこと。
+
 ---
 
 <!-- 新しい決定はこの下に追記していく -->

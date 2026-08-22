@@ -22,6 +22,45 @@ const TRIAL_STAGE_ACHIEVEMENTS: Array[String] = [
 ## 体験版限定の隠し実績（A+X同時押し / マウス左右同時押しでのネコアニメーション発火）
 const TRIAL_SECRET_CAT_ACHIEVEMENT := "ACVT_MESEEDCAT"
 
+# --- 本編（製品版）実績 ---
+## 本編の実績API名。要Steamworks側に事前登録。
+const ACVT_STAGE_011 := "ACVT_STAGE_011"
+const ACVT_STAGE_025 := "ACVT_STAGE_025"
+const ACVT_STAGE_040 := "ACVT_STAGE_040"
+const ACVT_STAGE_043 := "ACVT_STAGE_043"
+const ACVT_STAGE_049 := "ACVT_STAGE_049"
+const ACVT_BGM_ALL := "ACVT_BGM_ALL"
+const ACVT_ZOU_CLEAR := "ACVT_ZOU_CLEAR"
+const ACVT_TA_CLEAR := "ACVT_TA_CLEAR"
+const ACVT_STAGE004_FAST5S := "ACVT_STAGE004_FAST5S"
+const ACVT_TA_FIRST_BEST := "ACVT_TA_FIRST_BEST"
+const ACVT_TA_BEAT_STAFF := "ACVT_TA_BEAT_STAFF"
+const ACVT_CAT_FOUND := "ACVT_CAT_FOUND"
+
+## ステージクリア実績: stage_id（0始まり）→ 実績API名
+const MAIN_STAGE_CLEAR_ACHIEVEMENTS: Dictionary = {
+	10: ACVT_STAGE_011,
+	24: ACVT_STAGE_025,
+	39: ACVT_STAGE_040,
+	42: ACVT_STAGE_043,
+	48: ACVT_STAGE_049,
+}
+
+## #004（円ステージ）を規定秒数以内にクリアしたら実績を出す
+const STAGE004_FAST_CLEAR_STAGE_ID := 3
+const STAGE004_FAST_CLEAR_SECONDS := 5.0
+
+## タイムアタックのスタッフ記録（秒）。仮値。記録確定後に差し替えること。
+const TA_STAFF_RECORD_TIME := 999.0
+
+# --- 本編プレイヤー動向データ収集用の統計 ---
+## 統計API名。要Steamworks側「データ設定」に事前登録（集計＝ON推奨）。
+const STAT_MAIN_MAX_STAGE := "main_max_stage_reached"
+const STAT_MAIN_TA_CLEAR_COUNT := "main_ta_clear_count"
+const STAT_MAIN_BGM_UNLOCK_COUNT := "main_bgm_unlock_count"
+const STAT_MAIN_ZOU_CLEARED := "main_zou_cleared"
+const STAT_MAIN_CAT_FOUND := "main_cat_found"
+
 ## 本編を「1 面だけ」繰り返しプレイするときのマスタ行インデックス（manifest / StageData.get_stages() の 0 始まり）。
 ## -1 で無効（通常は全ステージを順にプレイ）。例: 星 10 点のみ試すなら 3（star_10.json の並び）
 ## 有効時は get_play_stage_rows() が stage_index を 0 に固定するため、進行スロットだけでは HUD 基準点（Y オフセット）が本番と一致しない。

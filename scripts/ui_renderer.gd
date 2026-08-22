@@ -2039,13 +2039,13 @@ func _draw_config(vp: Vector2) -> void:
 		_game.draw_string(_game.font, Vector2(cx - dlg_w * 0.5, msg_y),
 			"プレイ履歴をすべて初期化しますか？",
 			HORIZONTAL_ALIGNMENT_CENTER, dlg_w, 28, LINE_COLOR)
-		var cbtn_gap: float = vp.x * 0.10
-		var cbtn_cy: float = cy + dlg_h * 0.22
-		var cbtn_w: float = vp.x * 0.16
+		var btns: Dictionary = _game.get_config_reset_confirm_btns(vp)
+		var yes_r: Rect2 = btns["yes"]
+		var no_r: Rect2 = btns["no"]
 		var yes_off: bool = _game.config_reset_confirm_index != 0
 		var no_off: bool  = _game.config_reset_confirm_index != 1
-		_draw_auto_button_with_shadow(Vector2(cx - cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, cbtn_w)
-		_draw_auto_button_with_shadow(Vector2(cx + cbtn_gap, cbtn_cy), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off,  cbtn_w)
+		_draw_auto_button_with_shadow(yes_r.get_center(), tr("PAUSE_CONFIRM_YES"), BTN_FONT_SIZE, 1.0, yes_off, yes_r.size.x)
+		_draw_auto_button_with_shadow(no_r.get_center(), tr("PAUSE_CONFIRM_NO"),  BTN_FONT_SIZE, 1.0, no_off,  no_r.size.x)
 
 
 

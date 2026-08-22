@@ -30,3 +30,11 @@ func set_stat_int(stat_name: String, value: int) -> void:
 	if not _initialized or stat_name == "":
 		return
 	Steam.setStatInt(stat_name, value)
+
+
+## 統計値をサーバへ明示的に送信する。実績を伴わない統計単独更新（進行状況トラッキング等）で
+## 呼び出し元が明示的に呼ぶ必要がある。Steamが未初期化の場合は何もしない。
+func store_stats() -> void:
+	if not _initialized:
+		return
+	Steam.storeStats()

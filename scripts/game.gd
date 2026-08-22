@@ -970,6 +970,8 @@ func _cursor_register_pad_activity() -> void:
 ## マウス移動を input_handler へ渡すか（誤反応対策 B + C）。
 ## reveal_threshold_reached: 本イベントで累積 36px に達した（リセット前の判定結果）
 func _should_forward_mouse_motion_to_handler(reveal_threshold_reached: bool = false) -> bool:
+	if _is_yes_no_confirm_open():
+		return true
 	var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
 	var accum_ok: bool = reveal_threshold_reached or _cursor_mouse_motion_accum.length_squared() >= thr_sq
 	var already_mouse: bool = input_handler.get_last_input_method() == "mouse"
@@ -1030,14 +1032,9 @@ func _update_player_hover() -> void:
 		var play_cx: float = ui_w + play_w / 2.0
 		if pause_confirm_title:
 			# TA中断確認ダイアログ（はい/いいえ）
-			var cbtn_w: float = 220.0
-			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-			var cbtn_cy: float = vp.y / 2.0 + 50.0
-			if pos.y >= cbtn_cy - 35.0 and pos.y <= cbtn_cy + 35.0:
-				if pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
-					pause_confirm_index = 0
-				elif pos.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
-					pause_confirm_index = 1
+			var hit_p: int = _yes_no_hit(get_pause_confirm_btns(vp), pos)
+			if hit_p >= 0:
+				pause_confirm_index = hit_p
 		else:
 			# 通常のポーズメニュー（とじる／やりなおす／タイトルへ）
 			var ps: float = 0.9
@@ -1066,15 +1063,9 @@ func _update_player_hover() -> void:
 			if _cursor_pad_override_hidden:
 				pass  # パッド操作中はマウスホバーによる選択行の上書きをスキップ
 			elif menu_confirm_quit:
-				var cx: float = vp.x / 2.0
-				var cbtn_w: float = 220.0
-				var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-				var cbtn_cy: float = vp.y / 2.0 + 50.0
-				if pos.y >= cbtn_cy - 32.0 and pos.y <= cbtn_cy + 32.0:
-					if pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
-						menu_confirm_index = 0
-					elif pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
-						menu_confirm_index = 1
+				var hit_m: int = _yes_no_hit(get_menu_quit_confirm_btns(vp), pos)
+				if hit_m >= 0:
+					menu_confirm_index = hit_m
 			else:
 				var menu_count: int = _title_menu_count()
 				for i in range(menu_count):
@@ -1089,10 +1080,9 @@ func _update_player_hover() -> void:
 				# パッド/キーボード操作中はマウスホバーによる選択行の上書きをスキップ
 				config_reset_hovered = false
 			elif config_reset_confirm:
-				if pos.x < vp.x / 2.0:
-					config_reset_confirm_index = 0
-				else:
-					config_reset_confirm_index = 1
+				var hit_c: int = _yes_no_hit(get_config_reset_confirm_btns(vp), pos)
+				if hit_c >= 0:
+					config_reset_confirm_index = hit_c
 			else:
 				var base_y: float = vp.y * CONFIG_MENU_BASE_Y_RATIO
 				for i in range(5):
@@ -1756,6 +1746,16 @@ func _check_clear() -> void:
 			var _rec: Dictionary = StageSelectManager.update_best(current_stage, clear_time, stage_move_count)
 			_new_record_time = _rec.time
 			_new_record_moves = _rec.moves
+			# 実績: 指定ステージのクリア
+			if GameConfig.MAIN_STAGE_CLEAR_ACHIEVEMENTS.has(current_stage):
+				SteamManager.unlock_achievement(GameConfig.MAIN_STAGE_CLEAR_ACHIEVEMENTS[current_stage])
+			# 実績: #004を規定秒数以内にクリア
+			if current_stage == GameConfig.STAGE004_FAST_CLEAR_STAGE_ID and clear_time <= GameConfig.STAGE004_FAST_CLEAR_SECONDS:
+				SteamManager.unlock_achievement(GameConfig.ACVT_STAGE004_FAST5S)
+			# 統計: 到達最大ステージ番号（プレイヤー動向データ収集用）
+			if StageSelectManager.update_max_stage_reached(current_stage + 1):
+				SteamManager.set_stat_int(GameConfig.STAT_MAIN_MAX_STAGE, StageSelectManager.max_stage_reached)
+				SteamManager.store_stats()
 		elif _trial_idx >= 0 and _trial_idx < GameConfig.TRIAL_STAGE_ACHIEVEMENTS.size():
 			SteamManager.set_stat_int("demo_max_stage", _trial_idx + 1)
 			SteamManager.unlock_achievement(GameConfig.TRIAL_STAGE_ACHIEVEMENTS[_trial_idx])
@@ -2096,13 +2096,18 @@ func _input(event: InputEvent) -> void:
 				playing_mouse_steers_player = true
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event as InputEventMouseMotion
-		_cursor_mouse_motion_accum += mm.relative
-		var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
-		var reveal_threshold_reached: bool = _cursor_mouse_motion_accum.length_squared() >= thr_sq
-		if reveal_threshold_reached:
+		if _is_yes_no_confirm_open():
 			_cursor_register_mouse_activity()
-		if _should_forward_mouse_motion_to_handler(reveal_threshold_reached):
 			input_handler.handle_mouse_motion(mm.position, mm.relative)
+			input_handler.player_position = mm.position
+		else:
+			_cursor_mouse_motion_accum += mm.relative
+			var thr_sq: float = CURSOR_MOUSE_REVEAL_MOVE_PX * CURSOR_MOUSE_REVEAL_MOVE_PX
+			var reveal_threshold_reached: bool = _cursor_mouse_motion_accum.length_squared() >= thr_sq
+			if reveal_threshold_reached:
+				_cursor_register_mouse_activity()
+			if _should_forward_mouse_motion_to_handler(reveal_threshold_reached):
+				input_handler.handle_mouse_motion(mm.position, mm.relative)
 	elif _cursor_event_should_hide_for_pad(event):
 		_cursor_register_pad_activity()
 
@@ -2640,19 +2645,10 @@ func _input_menu_quit_confirm(event: InputEvent, is_confirm: bool, is_confirm_cl
 		if is_confirm:
 			do_action = true
 		elif is_confirm_click:
-			var vp: Vector2 = get_viewport_rect().size
-			var cx: float = vp.x / 2.0
-			var cbtn_w: float = 220.0
-			var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-			var cbtn_cy: float = vp.y / 2.0 + 50.0
-			var mouse: Vector2 = input_handler.player_position
-			if mouse.y >= cbtn_cy - 35.0 and mouse.y <= cbtn_cy + 35.0:
-				if mouse.x >= cx - cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx - cbtn_gap + cbtn_w / 2.0:
-					menu_confirm_index = 0
-					do_action = true
-				elif mouse.x >= cx + cbtn_gap - cbtn_w / 2.0 and mouse.x <= cx + cbtn_gap + cbtn_w / 2.0:
-					menu_confirm_index = 1
-					do_action = true
+			var hit: int = _yes_no_hit(get_menu_quit_confirm_btns(get_viewport_rect().size), event.position)
+			if hit >= 0:
+				menu_confirm_index = hit
+				do_action = true
 		if do_action:
 			var confirm_label: String = tr("PAUSE_CONFIRM_YES") if menu_confirm_index == 0 else tr("PAUSE_CONFIRM_NO")
 			var cidx: int = menu_confirm_index
@@ -2672,11 +2668,6 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 
 	# ---------- RESET 確認ダイアログ ----------
 	if config_reset_confirm:
-		var vp2: Vector2 = get_viewport_rect().size
-		var cbtn_gap: float = vp2.x * 0.10
-		var cbtn_cy: float = vp2.y * 0.60
-		var cbtn_w: float = vp2.x * 0.16
-
 		var is_back2: bool = (
 			(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
 			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B)
@@ -2697,16 +2688,10 @@ func _input_config(event: InputEvent, is_confirm_key: bool, is_confirm_pad: bool
 
 		var do_confirm2: bool = is_confirm_key or is_confirm_pad
 		if is_confirm_click:
-			var cx: float = vp2.x / 2.0
-			var bh: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
-			var click_pos: Vector2 = input_handler.player_position
-			if click_pos.y >= cbtn_cy - bh / 2.0 and click_pos.y <= cbtn_cy + bh / 2.0:
-				if click_pos.x >= cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx - cbtn_gap + cbtn_w / 2.0:
-					config_reset_confirm_index = 0
-					do_confirm2 = true
-				elif click_pos.x >= cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= cx + cbtn_gap + cbtn_w / 2.0:
-					config_reset_confirm_index = 1
-					do_confirm2 = true
+			var hit: int = _yes_no_hit(get_config_reset_confirm_btns(get_viewport_rect().size), event.position)
+			if hit >= 0:
+				config_reset_confirm_index = hit
+				do_confirm2 = true
 		if do_confirm2:
 			if config_reset_confirm_index == 0:
 				StageSelectManager.reset_all()
@@ -3554,6 +3539,48 @@ func get_config_reset_button_rect(vp: Vector2) -> Rect2:
 	)
 
 
+func _is_yes_no_confirm_open() -> bool:
+	return menu_confirm_quit or config_reset_confirm or (pause_active and pause_confirm_title)
+
+
+func _yes_no_hit(btns: Dictionary, pos: Vector2) -> int:
+	if (btns["yes"] as Rect2).has_point(pos):
+		return 0
+	if (btns["no"] as Rect2).has_point(pos):
+		return 1
+	return -1
+
+
+func _yes_no_btn_pair(center: Vector2, btn_w: float, btn_h: float, gap: float) -> Dictionary:
+	var yes := Rect2(center.x - gap - btn_w * 0.5, center.y - btn_h * 0.5, btn_w, btn_h)
+	var no := Rect2(center.x + gap - btn_w * 0.5, center.y - btn_h * 0.5, btn_w, btn_h)
+	return { "yes": yes, "no": no }
+
+
+func get_menu_quit_confirm_btns(vp: Vector2) -> Dictionary:
+	var btn_w: float = 220.0
+	var btn_h: float = 64.0
+	var gap: float = btn_w * 0.5 + 30.0
+	return _yes_no_btn_pair(Vector2(vp.x * 0.5, vp.y * 0.5 + 50.0), btn_w, btn_h, gap)
+
+
+func get_pause_confirm_btns(vp: Vector2) -> Dictionary:
+	var play_cx: float = vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) * 0.5
+	var btn_w: float = 220.0
+	var btn_h: float = 64.0
+	var gap: float = btn_w * 0.5 + 30.0
+	return _yes_no_btn_pair(Vector2(play_cx, vp.y * 0.5 + 50.0), btn_w, btn_h, gap)
+
+
+## 描画・ホバー・クリックで共通。CONFIG RESET 確認の［はい］［いいえ］
+func get_config_reset_confirm_btns(vp: Vector2) -> Dictionary:
+	var cx: float = vp.x * 0.5
+	var cy: float = vp.y * 0.5
+	var dlg_h: float = 260.0
+	var btn_w: float = vp.x * 0.16
+	var gap: float = vp.x * 0.10
+	var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
+	return _yes_no_btn_pair(Vector2(cx, cy + dlg_h * 0.22), btn_w, btn_h, gap)
 
 
 ## 画面モード・カーソル制限・言語・BGM/SE の ◀▶ クリック。戻り値: ok, item(0〜4), delta(±1)
@@ -3748,22 +3775,19 @@ func _input_pause_confirm(event: InputEvent, is_confirm: bool, is_pause_key: boo
 			moved = true
 	# 十字は _process_ui_menu_stick_navigation のみ（メインのポーズメニューと同じく二重処理しない）
 
-	# click position（インゲーム領域の中央基準）
-	if is_confirm and event is InputEventMouseButton:
-		var vp: Vector2 = get_viewport_rect().size
-		var play_cx: float = vp.x * GameConfig.UI_WIDTH_RATIO + (vp.x - vp.x * GameConfig.UI_WIDTH_RATIO) / 2.0
-		var cbtn_cy: float = vp.y / 2.0 + 50.0
-		var cbtn_w: float = 220.0
-		var cbtn_gap: float = cbtn_w / 2.0 + 30.0
-		var btn_h: float = (font.get_ascent(40) + font.get_descent(40)) * 1.5
-		var click_pos: Vector2 = input_handler.player_position
-		if click_pos.y >= cbtn_cy - btn_h / 2.0 and click_pos.y <= cbtn_cy + btn_h / 2.0:
-			if click_pos.x >= play_cx - cbtn_gap - cbtn_w / 2.0 and click_pos.x <= play_cx - cbtn_gap + cbtn_w / 2.0:
-				pause_confirm_index = 0
-			elif click_pos.x >= play_cx + cbtn_gap - cbtn_w / 2.0 and click_pos.x <= play_cx + cbtn_gap + cbtn_w / 2.0:
-				pause_confirm_index = 1
+	var do_action: bool = false
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var hit: int = _yes_no_hit(get_pause_confirm_btns(get_viewport_rect().size), event.position)
+		if hit < 0:
+			if moved:
+				queue_redraw()
+			return
+		pause_confirm_index = hit
+		do_action = true
+	elif is_confirm and not (event is InputEventMouseButton):
+		do_action = true
 
-	if is_confirm:
+	if do_action:
 		var confirm_label: String = tr("PAUSE_CONFIRM_YES") if pause_confirm_index == 0 else tr("PAUSE_CONFIRM_NO")
 		var cidx: int = pause_confirm_index
 		ui_renderer.set_btn_press_with_callback(confirm_label, func():
@@ -3911,7 +3935,20 @@ func _ta_advance_after_clear() -> void:
 		var _ta_total_time: float = 0.0
 		for _t in stage_session.stage_times:
 			_ta_total_time += _t
+		var _ta_was_unrecorded: bool = StageSelectManager.ta_best_total_time < 0.0
 		_ta_results_is_new_record = StageSelectManager.update_ta_best_total_time(_ta_total_time)
+		# 実績: タイムトライアル（TA）をクリアした
+		SteamManager.unlock_achievement(GameConfig.ACVT_TA_CLEAR)
+		# 実績: 自己ベストを初めて記録した（それ以前は未記録だった場合のみ）
+		if _ta_was_unrecorded and _ta_results_is_new_record:
+			SteamManager.unlock_achievement(GameConfig.ACVT_TA_FIRST_BEST)
+		# 実績: スタッフ記録を超えた（TA_STAFF_RECORD_TIMEは仮値。確定後にGameConfigで差し替える）
+		if _ta_total_time < GameConfig.TA_STAFF_RECORD_TIME:
+			SteamManager.unlock_achievement(GameConfig.ACVT_TA_BEAT_STAFF)
+		# 統計: TA完走回数（プレイヤー動向データ収集用）
+		StageSelectManager.increment_ta_clear_count()
+		SteamManager.set_stat_int(GameConfig.STAT_MAIN_TA_CLEAR_COUNT, StageSelectManager.ta_clear_count)
+		SteamManager.store_stats()
 		TransitionManager.play_polygon(func():
 			StageSelectManager.time_attack_active = false
 			game_state = "ta_results"
@@ -4106,6 +4143,9 @@ func _advance_stage() -> void:
 		if not StageSelectManager.zou_cleared:
 			# 初回クリア: エンディング画面へ
 			StageSelectManager.mark_zou_cleared()
+			# 実績・統計: 象ステージクリア
+			SteamManager.unlock_achievement(GameConfig.ACVT_ZOU_CLEAR)
+			SteamManager.set_stat_int(GameConfig.STAT_MAIN_ZOU_CLEARED, 1)
 			_zou_ending_start = Time.get_ticks_msec() / 1000.0
 			game_state = "zou_ending"
 			queue_redraw()
@@ -6246,6 +6286,10 @@ func _process(delta: float) -> void:
 			if GameConfig.IS_TRIAL:
 				SteamManager.set_stat_int("demo_cat_found", 1)
 				SteamManager.unlock_achievement(GameConfig.TRIAL_SECRET_CAT_ACHIEVEMENT)
+			else:
+				# 実績・統計: ネコを初めて鳴らした（本編）
+				SteamManager.set_stat_int(GameConfig.STAT_MAIN_CAT_FOUND, 1)
+				SteamManager.unlock_achievement(GameConfig.ACVT_CAT_FOUND)
 		# ZOU スタッフロール: 初回クリア前（zou_cleared=false）のみ表示
 		if current_stage == StageSelectManager._zou_stage_idx and not StageSelectManager.zou_cleared:
 			var now_roll: float = Time.get_ticks_msec() / 1000.0

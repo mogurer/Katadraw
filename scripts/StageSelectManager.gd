@@ -33,6 +33,12 @@ var tutorial_shown: bool = false
 # タイムアタック合計クリアタイムの自己ベスト（保存あり）。-1.0 = 未記録
 var ta_best_total_time: float = -1.0
 
+# 到達した最大ステージ番号（1始まり・画面表示と同じ基準。保存あり）。Steam統計送信用。
+var max_stage_reached: int = 0
+
+# タイムアタック完走回数（保存あり）。Steam統計送信用。
+var ta_clear_count: int = 0
+
 # 全ステージクリア済みフラグ（保存あり）
 var all_cleared: bool = false
 
@@ -327,6 +333,8 @@ func _save_states() -> void:
 	data["unlocked_bgms"] = _unlocked_bgms
 	data["last_played_stage_id"] = last_played_stage_id
 	data["ta_best_total_time"] = ta_best_total_time
+	data["max_stage_reached"] = max_stage_reached
+	data["ta_clear_count"] = ta_clear_count
 	var f: FileAccess = FileAccess.open(_save_path(), FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
@@ -364,6 +372,8 @@ func _load_states() -> void:
 			_unlocked_bgms.append(str(bgm))
 	last_played_stage_id = int(d.get("last_played_stage_id", -1))
 	ta_best_total_time = float(d.get("ta_best_total_time", -1.0))
+	max_stage_reached = int(d.get("max_stage_reached", 0))
+	ta_clear_count = int(d.get("ta_clear_count", 0))
 
 
 ## タイムアタックの合計クリアタイムを自己ベストと比較し、更新されていれば保存する。
@@ -374,3 +384,18 @@ func update_ta_best_total_time(total_time: float) -> bool:
 		_save_states()
 		return true
 	return false
+
+
+## 到達最大ステージ番号を更新する（既存値より大きい場合のみ）。更新されれば true を返す。
+func update_max_stage_reached(stage_number: int) -> bool:
+	if stage_number > max_stage_reached:
+		max_stage_reached = stage_number
+		_save_states()
+		return true
+	return false
+
+
+## タイムアタック完走回数をインクリメントして保存する。
+func increment_ta_clear_count() -> void:
+	ta_clear_count += 1
+	_save_states()

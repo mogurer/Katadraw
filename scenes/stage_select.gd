@@ -435,6 +435,13 @@ func _ready() -> void:
 				_bgm_unlock_pending = true
 			else:
 				_start_bgm_unlock_sequence()
+		# 統計: BGM解放数（プレイヤー動向データ収集用）
+		var _unlocked_bgm_count: int = StageSelectManager.get_unlocked_bgm_ids().size()
+		SteamManager.set_stat_int(GameConfig.STAT_MAIN_BGM_UNLOCK_COUNT, _unlocked_bgm_count)
+		SteamManager.store_stats()
+		# 実績: BGMをすべて解放した
+		if _unlocked_bgm_count >= StageSelectManager._bgm_zones.size():
+			SteamManager.unlock_achievement(GameConfig.ACVT_BGM_ALL)
 	# 矢印ボタン表示（解放トラック1種のみなら非表示）
 	_update_bgm_button_labels()
 	_start_bgm_label_anim.call_deferred()
@@ -608,12 +615,12 @@ func _process(delta: float) -> void:
 				_update_camera(delta)
 			else:
 				# KBM: カメラはキャラ追従せず、カーソル位置をホバー判定に使う
-				if not popup_blocking:
-					var mouse_world: Vector2 = _screen_to_world(get_viewport().get_mouse_position())
-					if mouse_world.distance_to(_char_pos) > 0.5:
-						_char_moved_by_user = true
-					_char_pos = mouse_world
-					_char_target = mouse_world
+				# 確認ダイアログ中も自キャラをマウスへ追従させる（選択カーソルとして使う）
+				var mouse_world: Vector2 = _screen_to_world(get_viewport().get_mouse_position())
+				if mouse_world.distance_to(_char_pos) > 0.5:
+					_char_moved_by_user = true
+				_char_pos = mouse_world
+				_char_target = mouse_world
 			if _map_dragging:
 				# 掴み中にマウスが止まったら速度も捨てる（離したときに滑らない）
 				if Time.get_ticks_msec() - _map_drag_last_msec >= _MAP_INERTIA_STALE_MSEC:
@@ -732,7 +739,7 @@ func _input(event: InputEvent) -> void:
 			# ステージ上で押して閾値以上動いたらクリック扱いをキャンセル（パンはしない）
 			if event.position.distance_to(_map_drag_start_screen) >= _MAP_DRAG_THRESHOLD:
 				_map_drag_moved = true
-		if _input_mode == 0 and _popup_stage < 0 and not _esc_popup:
+		if _input_mode == 0:
 			_char_target = _screen_to_world(event.position)
 			_char_pos = _char_target
 			_char_moved_by_user = true
@@ -1711,7 +1718,8 @@ func _snap_cursor_to_popup_yes() -> void:
 	var r: Dictionary = _stage_popup_rects(vp)
 	var yes_center: Vector2 = (r["yes"] as Rect2).get_center()
 	get_viewport().warp_mouse(yes_center)
-	_char_target = get_canvas_transform().affine_inverse() * yes_center
+	_char_target = _screen_to_world(yes_center)
+	_char_pos = _char_target
 
 
 func _update_popup_hover(pos: Vector2) -> void:
