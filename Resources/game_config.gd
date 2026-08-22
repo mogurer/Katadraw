@@ -72,7 +72,7 @@ const DEBUG_PLAY_SINGLE_MASTER_INDEX := -1
 ## その際の各ステージのクリアタイムは実プレイ結果を使わず、StageSession.fill_check_mode_ta_times() により
 ## 0.01〜999.00秒の範囲でランダムに STAGE_COUNT_FOR_TA 件生成したダミー値で埋める。
 ## 本番ビルドでは必ず false に戻すこと。
-const DEBUG_TA_RESULTS_CHECK_MODE := true
+const DEBUG_TA_RESULTS_CHECK_MODE := false
 
 
 static func get_play_stage_rows() -> Array:
