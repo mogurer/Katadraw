@@ -163,6 +163,10 @@ var _ta_results_scroll_min: float = 0.0
 ## _ta_advance_after_clear() で確定させ、_draw_ta_results_summary_panel() の
 ## 「NEW RECORD !」表示可否判定に使う。
 var _ta_results_is_new_record: bool = false
+## タイムアタック・リザルト画面: 行ペア出現SE（se_spot01〜10）を何組目まで鳴らしたか。-1=未再生。
+var _ta_results_sfx_pair_played: int = -1
+## タイムアタック・リザルト画面: パンチSE（se_stageclear02）を鳴らしたか。
+var _ta_results_sfx_punch_played: bool = false
 
 
 ## タイムアタック リザルト画面の演出タイムラインをまとめて返す。
@@ -173,7 +177,7 @@ func _ta_results_timeline() -> Dictionary:
 	const LISTING_START: float = 0.2   # タイトルは静的表示のため、わずかな間を置いてすぐ流れ出す
 	const BUTTONS_DELAY: float = 0.6   # 全行出現後、ボタン表示までの間
 	const RIGHT_PANEL_START: float = 0.0   # 右パネルは画面遷移直後から表示する
-	const PUNCH_DUR: float = 0.5           # カウントアップ完了後のパンチ演出（拡大→白、縮小→元色）の所要時間
+	const PUNCH_DUR: float = 1.0           # カウントアップ完了後のパンチ演出（拡大→白、縮小→元色）の所要時間
 	var stage_count: int = stage_session.stage_times.size()
 	var pair_count: int = int(ceil(float(stage_count) / 2.0))
 	var listing_start: float = LISTING_START
@@ -227,6 +231,38 @@ func _process_ta_results_scroll(delta: float) -> void:
 	# 境界判定にわずかに引っかかり続けて #001/#002 が表示されないままになる。
 	if absf(_ta_results_scroll_display_time - _ta_results_scroll_time) < 0.01:
 		_ta_results_scroll_display_time = _ta_results_scroll_time
+
+
+func _reset_ta_results_sfx() -> void:
+	_ta_results_sfx_pair_played = -1
+	_ta_results_sfx_punch_played = false
+
+
+## タイムアタック・リザルト画面: 行ペア出現に合わせて se_spot01〜10 を鳴らし、
+## パンチ演出開始と同時に se_stageclear02 を鳴らす。
+func _process_ta_results_sfx() -> void:
+	if game_state != "ta_results":
+		return
+	var tl: Dictionary = _ta_results_timeline()
+	var pair_count: int = tl.pair_count
+	if pair_count > 0 and tl.elapsed >= tl.listing_start:
+		var list_elapsed: float = tl.elapsed - tl.listing_start
+		var revealed: int = mini(pair_count, int(list_elapsed / tl.row_interval) + 1)
+		while _ta_results_sfx_pair_played + 1 < revealed:
+			_ta_results_sfx_pair_played += 1
+			_play_ta_results_spot_pair(_ta_results_sfx_pair_played)
+	if not _ta_results_sfx_punch_played and tl.elapsed >= tl.drum_end:
+		_ta_results_sfx_punch_played = true
+		_play_sfx(sfx_stageclear02)
+
+
+## 行ペア p（0=#001/#002）に対応する se_spot を鳴らす。10組目以降は se_spot10 で固定。
+func _play_ta_results_spot_pair(pair_idx: int) -> void:
+	var stream_idx: int = mini(pair_idx, SPOT_COMBO_MAX_INDEX)
+	if stream_idx < 0 or stream_idx >= _sfx_spot_streams.size():
+		return
+	sfx_spot.stream = _sfx_spot_streams[stream_idx]
+	_play_sfx(sfx_spot)
 
 
 ## THANK YOU 表示から3秒後（ボタンが出るタイミング）以降かどうか。
@@ -3920,6 +3956,7 @@ func _ta_advance_after_clear() -> void:
 			_ta_results_scroll_time = 0.0
 			_ta_results_scroll_display_time = 0.0
 			ui_renderer._ta_shine_phase_start = -1.0
+			_reset_ta_results_sfx()
 			queue_redraw()
 		, false)
 		return
@@ -3956,6 +3993,7 @@ func _ta_advance_after_clear() -> void:
 			_ta_results_scroll_time = 0.0
 			_ta_results_scroll_display_time = 0.0
 			ui_renderer._ta_shine_phase_start = -1.0
+			_reset_ta_results_sfx()
 			queue_redraw()
 		, false)
 		return
@@ -6117,6 +6155,7 @@ func _process(delta: float) -> void:
 	if app_focused:
 		_process_ui_menu_stick_navigation(delta)
 	_process_ta_results_scroll(delta)
+	_process_ta_results_sfx()
 	if app_focused and game_state != "rules":
 		input_handler.process_mouse_lerp(delta)
 	if app_focused:
