@@ -51,7 +51,7 @@ const STAGE004_FAST_CLEAR_STAGE_ID := 3
 const STAGE004_FAST_CLEAR_SECONDS := 5.0
 
 ## タイムアタックのスタッフ記録（秒）。仮値。記録確定後に差し替えること。
-const TA_STAFF_RECORD_TIME := 999.0
+const TA_STAFF_RECORD_TIME := 2093.5
 
 # --- 本編プレイヤー動向データ収集用の統計 ---
 ## 統計API名。要Steamworks側「データ設定」に事前登録（集計＝ON推奨）。
@@ -178,6 +178,11 @@ const TWITTER_SHARE_TEXT_PATH := "res://Resources/Text/Twitter.txt"
 ## ファイル未同梱・読み取り失敗時に使う既定文（Twitter.txt と揃えること）
 const TWITTER_SHARE_TEXT_DEFAULT := "#KATADRAW"
 const TWITTER_INTENT_URL := "https://twitter.com/intent/tweet"
+## Twitter.txt 内のクリアタイム差し込み位置。無い場合は文末に追記する。
+const TWITTER_TIME_PLACEHOLDER := "{TIME}"
+## H:MM:SS.ss の上限表示。10時間以上はこれに打ち止め。
+const TIME_HMS_CAP_DISPLAY := "9:99:99.99"
+const TIME_HMS_CAP_SECONDS := 36000.0
 
 # --- SE音量 ---
 ## SE音量レベル（0〜10）から dB オフセットを返す共通ヘルパー。
@@ -187,3 +192,23 @@ static func se_volume_offset_db(level: int) -> float:
 	if level <= 0:
 		return -80.0
 	return (level - 5) * 3.0
+
+
+## 秒を H:MM:SS.ss に変換する。1時間未満は H: を省略して MM:SS.ss。
+## 分・秒は60進。10時間以上は 9:99:99.99。
+static func format_clear_time_hms(seconds: float) -> String:
+	var t: float = maxf(seconds, 0.0)
+	if t >= TIME_HMS_CAP_SECONDS:
+		return TIME_HMS_CAP_DISPLAY
+	var cs: int = roundi(t * 100.0)
+	if cs >= int(TIME_HMS_CAP_SECONDS * 100.0):
+		return TIME_HMS_CAP_DISPLAY
+	var hours: int = int(cs / 360000)
+	var rem: int = cs % 360000
+	var minutes: int = int(rem / 6000)
+	rem = rem % 6000
+	var secs: int = int(rem / 100)
+	var frac: int = rem % 100
+	if hours <= 0:
+		return "%d:%02d.%02d" % [minutes, secs, frac]
+	return "%d:%02d:%02d.%02d" % [hours, minutes, secs, frac]

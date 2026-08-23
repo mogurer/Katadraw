@@ -1140,7 +1140,7 @@ func _update_player_hover() -> void:
 					config_row6_reset_selected = get_config_reset_button_rect(vp).has_point(pos)
 		return
 
-	if game_state == "results":
+	if game_state == "results" or game_state == "ta_results":
 		ui_renderer.update_result_mouse_pos(pos)
 
 
@@ -2104,6 +2104,17 @@ func _process_ui_menu_stick_navigation(delta: float) -> void:
 				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + hx + 3) % 3
 				_cursor_register_pad_activity()
 				queue_redraw()
+		"ta_results":
+			if _ta_results_buttons_active():
+				var nav_ta: Vector2i = _ui_menu_stick_nav_horizontal_first(delta)
+				if nav_ta.x < 0 or nav_ta.y < 0:
+					ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index - 1 + 3) % 3
+					_cursor_register_pad_activity()
+					queue_redraw()
+				elif nav_ta.x > 0 or nav_ta.y > 0:
+					ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + 1) % 3
+					_cursor_register_pad_activity()
+					queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
@@ -2218,10 +2229,12 @@ func _input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and not event.echo:
 			if event.keycode == KEY_LEFT:
 				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index - 1 + 3) % 3
+				_cursor_register_pad_activity()
 				queue_redraw()
 				return
 			if event.keycode == KEY_RIGHT:
 				ui_renderer.results_action_focus_index = (ui_renderer.results_action_focus_index + 1) % 3
+				_cursor_register_pad_activity()
 				queue_redraw()
 				return
 		var is_start_pad: bool = (
@@ -3500,8 +3513,22 @@ func _open_twitter_post() -> void:
 			f.close()
 			if raw != "":
 				tweet_text = raw
+	var time_str: String = GameConfig.format_clear_time_hms(_twitter_share_time_seconds())
+	if tweet_text.contains(GameConfig.TWITTER_TIME_PLACEHOLDER):
+		tweet_text = tweet_text.replace(GameConfig.TWITTER_TIME_PLACEHOLDER, time_str)
+	else:
+		tweet_text = "%s\n%s" % [tweet_text, time_str]
 	var encoded: String = tweet_text.uri_encode()
 	OS.shell_open("%s?text=%s" % [GameConfig.TWITTER_INTENT_URL, encoded])
+
+
+func _twitter_share_time_seconds() -> float:
+	if stage_session.stage_times.is_empty():
+		return maxf(0.0, clear_time)
+	var total: float = 0.0
+	for t in stage_session.stage_times:
+		total += t
+	return total
 
 
 func _take_screenshot() -> void:

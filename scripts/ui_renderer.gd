@@ -497,6 +497,10 @@ func on_state_changed(new_state: String) -> void:
 		results_action_focus_index = 2
 		if _game.has_method("_reset_ui_menu_stick_navigation"):
 			_game._reset_ui_menu_stick_navigation()
+	if new_state == "ta_results":
+		results_action_focus_index = 2
+		if _game.has_method("_reset_ui_menu_stick_navigation"):
+			_game._reset_ui_menu_stick_navigation()
 	if new_state == "title_intro":
 		title_intro.reset()
 	# 一致度の「変化直後」表示: プレイ/ルール以外に出たらリセット
@@ -1199,7 +1203,7 @@ func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: 
 			var pt3: float = (pt - 0.5) / 0.5
 			total_scale = lerp(1.35, 1.0, pt3)
 			total_color = Color(1.0, 1.0, 1.0, alpha).lerp(Color(LINE_COLOR, alpha), pt3)
-	var total_str: String = "%.2f" % display_total
+	var total_str: String = GameConfig.format_clear_time_hms(display_total)
 	var total_cx: float = rect.position.x + rect.size.x * 0.5
 	var total_baseline_y: float = total_rect.position.y + total_rect.size.y * 0.5 + _game.font_din.get_ascent(total_fs) * 0.35
 	var scaling: bool = not is_equal_approx(total_scale, 1.0)
@@ -1225,7 +1229,7 @@ func _draw_ta_results_summary_panel(lo: Dictionary, times: Array[float], alpha: 
 	var best_label_baseline_y: float = best_bar_rect.position.y + best_bar_rect.size.y * 0.5 + _game.font_din.get_ascent(best_label_fs) * 0.35
 	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x + rect.size.x * 0.04, best_label_baseline_y), "BEST TIME", HORIZONTAL_ALIGNMENT_LEFT, rect.size.x * 0.5, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
 	var best_val: float = StageSelectManager.ta_best_total_time
-	var best_str: String = ("%.2f" % best_val) if best_val >= 0.0 else "----.--"
+	var best_str: String = GameConfig.format_clear_time_hms(best_val) if best_val >= 0.0 else "--:--.--"
 	_game.draw_string(_game.font_din, Vector2(best_bar_rect.position.x, best_label_baseline_y), best_str, HORIZONTAL_ALIGNMENT_RIGHT, rect.size.x - rect.size.x * 0.04, best_label_fs, Color(1.0, 1.0, 1.0, alpha))
 
 	_draw_rect_border_with_corners(rect, Color(LINE_COLOR, alpha), 4.0)
@@ -1334,12 +1338,13 @@ func get_ta_results_next_button_rect(vp: Vector2) -> Rect2:
 
 
 func get_ta_results_active_focus(vp: Vector2) -> int:
-	if get_ta_results_camera_button_rect(vp).has_point(_result_mouse_pos):
-		return 0
-	if get_ta_results_twitter_button_rect(vp).has_point(_result_mouse_pos):
-		return 1
-	if get_ta_results_next_button_rect(vp).has_point(_result_mouse_pos):
-		return 2
+	if not _game._cursor_pad_override_hidden:
+		if get_ta_results_camera_button_rect(vp).has_point(_result_mouse_pos):
+			return 0
+		if get_ta_results_twitter_button_rect(vp).has_point(_result_mouse_pos):
+			return 1
+		if get_ta_results_next_button_rect(vp).has_point(_result_mouse_pos):
+			return 2
 	return results_action_focus_index
 
 
@@ -5052,10 +5057,10 @@ func _draw_results_next_button(center: Vector2, text: String, fs: int, alpha: fl
 			Vector2(rect.position.x, rect.end.y),
 		])
 		var nr_grad := PackedColorArray([
-			Color(1.00, 0.990, 0.970, alpha),
-			Color(1.00, 0.990, 0.970, alpha),
-			Color(0.80, 0.792, 0.776, alpha),
-			Color(0.80, 0.792, 0.776, alpha),
+			Color(1.00, 0.937, 0.890, alpha),
+			Color(1.00, 0.937, 0.890, alpha),
+			Color(0.80, 0.750, 0.712, alpha),
+			Color(0.80, 0.750, 0.712, alpha),
 		])
 		_game.draw_polygon(nr_pts, nr_grad)
 		# ハイライトストライプ（上部 26%）

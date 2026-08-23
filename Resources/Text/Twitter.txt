@@ -1,7 +1,7 @@
- 点を動かし、かたどろう。
-【KATA-DRAW】
- 体験版クリアしました！
+点を動かし、#カタドロウ
 
-最小の操作で、深い没入へ。
+▛▞▞ タイムトライアル ▞▞▟
+CLEAR TIME {TIME}
+
 2Dミニマル象りパズル #KATADRAW
-https://store.steampowered.com/app/4682190/KATADRAW_Demo/
+https://store.steampowered.com/app/4579240
